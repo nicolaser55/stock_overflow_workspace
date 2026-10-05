@@ -1,0 +1,27 @@
+# PYTHON CACHES
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+# EDITABLE INSTALL METADATA (pip install -e .)
+*.egg-info/
+build/
+# VIRTUAL ENVIRONMENTS
+venv-main/
+venv*/
+.venv/
+# MODEL FILES
+models/
+# CREDENTIALS 
+GCS_key.json
+*.json.key
+.env
+# DATA FILES (THE DATA LIVES IN C:/Users/nico/Desktop/stock_overflow_data/, NEVER IN THE WORKSPACE)
+*.csv
+*.parquet
+# EXCEPTION: RESEARCH RECORDS (CORRECTION LOGS, TRIAL LOG SNAPSHOTS) ARE VERSIONED, INCLUDING SUB-FOLDERS
+!records/
+!records/**/
+!records/**/*.csv
+# OS FILES
+.DS_Store
+Thumbs.db

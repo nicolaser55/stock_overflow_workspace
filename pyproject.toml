@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stock-overflow"
+version = "2026.10.5"
+description = "Stock Overflow (SO): thesis-style research workspace on SPY timing strategies (shared library + experiments)"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["so*", "experiments*"]
