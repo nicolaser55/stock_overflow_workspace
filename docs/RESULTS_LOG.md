@@ -281,6 +281,15 @@ What this supports: on 2015-2026, unlevered volatility scaling with this σ̂ do
 adds no return over an uninformed exposure; it does lower the drawdown. What it does not support: anything about levered
 volatility management (excluded by the project), about implied volatility (VIX, new data, parked), or about other σ̂.
 
+## Shared code change for exp06 (2026-10-06, agent; no trial)
+
+*Implemented and tested.* `so/core/reentry_simulation.simulate_stop_reentry_dict` gained a backward-compatible
+cooling-off: a re-entry rule may set `episode_dict["exit_block_sessions"] = c`, and the exit signal is then ignored for
+the c decisions after that re-entry. Without the key (every rule of exp01-exp05) the behaviour is unchanged: the
+block ends at the re-entry session itself. Checks: all 7 test suites pass (the new `tests/test_exp06.py` verifies
+both cases), and exp04 step 01's numbers were recomputed with the changed simulator on the exploration data (not logged,
+not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 2 exits, identical to the saved outputs.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
