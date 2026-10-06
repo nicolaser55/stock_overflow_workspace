@@ -18,10 +18,14 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 
 | Experiment | Question | Steps | Protocol | Status |
 |---|---|---|---|---|
-| `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy) | 01 model dataset, 02 signal check, 03 walk-forward | 1.0 | To re-run (formerly v1, stopped 2026-10-04) |
-| `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 mechanism check, 02 signal check, 03 walk-forward | 1.0 | To re-run (formerly v2, stopped 2026-10-04) |
-| `exp03_ath_exit` | Sell when the close is near the all-time high; buy back after a delay or a dip (15 rules) | 01 exploration, 02 walk-forward | 1.0 | To run (exploration 2026-10-04) |
-| `exp04_...` (VIX) | Re-entry/exit timing with VIX and VIX3M | — | to write | Planned (audit §6: VIX closes at 16:15 ET; VIX3M starts 2007-12-04) |
+| `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy) | 01 model dataset, 02 signal check, 03 walk-forward | 1.0 | **STOP** 2026-10-06 (signal check p = 0.10; prior-only +146.94% vs +218.48%) |
+| `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 mechanism check, 02 signal check, 03 walk-forward | 1.0 | **STOP** 2026-10-05 (0 signals; prior-only +111.66% vs +237.21%) |
+| `exp03_ath_exit` | Sell when the close is near the all-time high; buy back after a delay or a dip (15 rules) | 01 exploration, 02 walk-forward | 1.0 | **STOP** 2026-10-05 (prior-only +143.05% vs +237.21%) |
+| `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | — | to write | Planned (`docs/RESEARCH_STATE_2026-10-06.md` §6, after Step 0) |
+| `exp05_vol_scaled_exposure` | Fractional exposure scaled down when realized volatility is high | — | to write | Planned |
+| `exp06_capped_regret_reentry` | Exits paired with a buy-stop at S × (1 + b) and a recovery trigger | — | to write | Planned (data-dependent follow-up of exp03) |
+| `exp07_warning_lights_exit` | Exit only when k of 5 fixed warning conditions agree | — | to write | Planned |
+| VIX experiment(s) | exp05/exp07 with VIX; meta-labeling of exits | — | to write | Planned after exp07 (VIX closes at 16:15 ET; VIX3M starts 2007-12-04); needs Nicolas for the data |
 
 ## Adding an experiment
 

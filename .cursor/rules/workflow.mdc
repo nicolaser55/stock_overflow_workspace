@@ -1,0 +1,72 @@
+---
+description: How to work in the Stock Overflow workspace on nicodesktop (Windows, PowerShell, venv-main, running notebooks, recording results, committing, ending a session)
+alwaysApply: true
+---
+
+# Workflow on nicodesktop
+
+## Environment
+
+- Windows, PowerShell, workspace `C:\Users\nico\Desktop\stock_overflow_workspace`, data
+  `C:\Users\nico\Desktop\stock_overflow_data\` (outside the workspace; read it with Python, never copy it into the repo).
+- Python: always the venv `venv-main` (`venv-main\Scripts\python.exe`). The workspace is installed in it in editable mode
+  (`pip install -e .`), so `so` and `experiments` import from anywhere. Do not install or upgrade packages without asking.
+- Tests: `venv-main\Scripts\python.exe tests\run_all_tests.py` (a few minutes). Run them after every code change and before
+  every commit. All suites must pass.
+
+## Running notebooks
+
+- Notebooks are run top to bottom on a fresh kernel, never cell by cell, so that the saved outputs are the evidence:
+
+  ```
+  venv-main\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 --ExecutePreprocessor.kernel_name=venv-main <notebook path>
+  ```
+
+  If `venv-main\Scripts\jupyter.exe` does not exist, ask Nicolas which Jupyter installation runs his notebooks.
+- Runs longer than a few minutes (exp01-style walk-forwards take ~1 h): start them in the background with a log and poll
+  the log instead of blocking the terminal:
+
+  ```
+  New-Item -ItemType Directory -Force logs | Out-Null
+  Start-Process -FilePath venv-main\Scripts\jupyter.exe -ArgumentList 'nbconvert','--to','notebook','--execute','--inplace','--ExecutePreprocessor.timeout=-1','--ExecutePreprocessor.kernel_name=venv-main','<notebook path>' -RedirectStandardOutput logs\<name>.out -RedirectStandardError logs\<name>.err -WindowStyle Hidden -PassThru
+  Get-Content logs\<name>.err -Tail 5
+  ```
+
+  The run is finished when the `.err` log ends with `Writing ... bytes to <notebook>`; a Python error appears there too.
+- Read results from the saved notebook outputs and from `store04_experiments\<experiment>\...` CSV files with Python.
+- Each notebook warns when the trial log already holds entries of its stage: a re-run ADDS trials. Do not re-run a
+  validation notebook unless the protocol requires it; if a run crashed half-way, say so in the results log (its trials
+  are already logged).
+
+## Recording (same session as the run)
+
+1. `docs/RESULTS_LOG.md`: date, experiment and step, protocol version, config hash (printed in the header cell), trials
+   added, headline numbers copied from the outputs, what they support and what they do not, status (CONTINUE / STOP).
+2. The experiment's `PROTOCOL.md` change log if anything changed; `experiments/README.md` registry status; root `README.md`
+   status table when an experiment starts or ends.
+3. Copy `C:\Users\nico\Desktop\stock_overflow_data\store04_experiments\trial_log.csv` to `records\trial_log_snapshot.csv`.
+4. Commit: executed notebooks **with their outputs**, code, docs and records, with a message that says what was run and
+   the outcome (e.g. `exp04 step02 validation: prior-only +X% vs +Y%, STOP`). Do not push; Nicolas pushes.
+
+## Building an experiment
+
+Follow `experiments/README.md` ("Adding an experiment") and copy the structure of `experiments/exp02_stop_reentry/` (the
+reference walk-forward) or `experiments/exp03_ath_exit/` (rules without a model). Reuse `so.core` (schedule,
+simulators, evaluation, trial log). Shared helpers go to `so/core` or `so/features` with tests in `tests/`, without
+changing existing behaviour (the reproduction checks of exp01-exp03 in `docs/RESULTS_LOG.md` must still hold). New test
+files are added to `tests\run_all_tests.py`.
+
+## Working style
+
+- Before writing code for a new step, post a short plan (files, functions, tests, expected trials) in the chat. Wait for
+  Nicolas's OK when the step is in the "stop and ask" list of `research-integrity.mdc`; otherwise proceed.
+- Prefer small, verifiable steps: write a function, test it on synthetic data, then use it.
+- When unsure about a methodological choice, write the options and their trade-offs and ask; do not pick the option
+  that gives the best-looking result.
+- Explain results to Nicolas both mathematically and in plain words (he asked for both).
+
+## Ending a session
+
+Append one line to §8 of the latest `docs/RESEARCH_STATE_*.md` (date, what was done, next step), update its open items,
+make sure everything is committed, and summarize in the chat: what was run, the outcome, the trials added, and the next
+step.

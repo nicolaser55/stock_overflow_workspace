@@ -39,15 +39,18 @@ stock_overflow_workspace/
 └── records/                     versioned CSV records (bad tick corrections; legacy trial log and audit trials)
 ```
 
-## 2. Current status (2026-10-05)
+## 2. Current status (2026-10-06)
 
 | Experiment | Status | Protocol |
 |---|---|---|
-| Pipeline steps 00-05 | Built and kept (5,436 sessions, 2005-01-03 -> 2026-08-13, bad ticks corrected) | `pipeline/README.md` |
-| exp01_minute_entry | **To re-run** (protocol 1.0: v1 rules + base-rate signal check + honest reporting) | `experiments/exp01_minute_entry/PROTOCOL.md` |
-| exp02_stop_reentry | **To re-run** (protocol 1.0: v2 rules + month minimum + honest reporting) | `experiments/exp02_stop_reentry/PROTOCOL.md` |
-| exp03_ath_exit | **To run** (protocol 1.0: the 15 exploration rules as a full walk-forward experiment) | `experiments/exp03_ath_exit/PROTOCOL.md` |
-| exp04 (VIX) | Planned; its protocol is written before any VIX data is explored | — |
+| Pipeline steps 00-06 | Built and kept (5,436 sessions, 2005-01-03 -> 2026-08-13, bad ticks corrected) | `pipeline/README.md` |
+| exp01_minute_entry | **STOP** (signal check p = 0.10; prior-only +146.94% vs buy-and-hold +218.48%) | `experiments/exp01_minute_entry/PROTOCOL.md` |
+| exp02_stop_reentry | **STOP** (prior-only +111.66% vs +237.21%) | `experiments/exp02_stop_reentry/PROTOCOL.md` |
+| exp03_ath_exit | **STOP** (prior-only +143.05% vs +237.21%) | `experiments/exp03_ath_exit/PROTOCOL.md` |
+| exp04-exp07, then VIX, then text | Planned: the "stay invested, exit rarely" family | `docs/RESEARCH_STATE_2026-10-06.md` |
+
+**Start here:** `docs/RESEARCH_STATE_2026-10-06.md` (state and roadmap), then `docs/RESULTS_LOG.md`. Agents also read
+`AGENTS.md` and `.cursor/rules/`.
 
 Earlier results (stopped v1 and v2, the step 13 exploration) are summarized in `docs/history/RESULTS_LOG_2026-10-05.md`.
 **No test window has ever been evaluated.** The 2015-2026 validation quarters have been looked at many times (they are
@@ -67,7 +70,8 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 
 ## 4. Machines and workflow
 
-- Code is edited in Cursor on **nicosls**, committed and pushed, then pulled on **nicodesktop**.
+- Code is edited in Cursor on **nicosls**, committed and pushed, then pulled on **nicodesktop**. From 2026-10-06 the
+  research is also continued by a Cursor agent working directly on **nicodesktop** (`AGENTS.md`, `.cursor/rules/`).
 - Notebooks run on the Jupyter server of **nicodesktop** (kernel `venv-main`); data lives there, in
   `C:/Users/nico/Desktop/stock_overflow_data/` (`so.paths.LOCAL_PATH_STR`).
 - **Restart the kernel before running a notebook** after any `.py` change ("Run All" keeps old imports in memory).

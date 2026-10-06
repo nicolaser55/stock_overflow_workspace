@@ -1,0 +1,71 @@
+---
+description: Research integrity rules of the Stock Overflow thesis project (pre-registration, trial log, data that may not be touched, when to stop and ask Nicolas)
+alwaysApply: true
+---
+
+# Research integrity
+
+The goal is a **true answer**, recorded so a thesis examiner can trace it. A strategy that "beats buy-and-hold" because
+it was tuned until it did is a failure of this project, not a success. Negative results are results.
+
+## Evidence and honesty
+
+- Distinguish in everything you write: **implemented / tested / observed / intended / inferred**. Quote numbers from saved
+  notebook outputs or files, never from memory; say where each number comes from.
+- Never present a result as stronger than the evidence. Always report: the best candidate after the fact (labelled
+  **optimistic**), the **prior-only path** (the honest estimate), the **uninformed baselines** (information test), time in
+  the market, and the minimum detectable effect or an interval.
+- Preserve failures, contradictions and limitations in `docs/RESULTS_LOG.md` and the protocols. Never delete or rewrite a
+  past result; add a dated correction instead.
+- Do not silently fix a mistake in past work: report it, then fix it in a new, documented version.
+
+## Pre-registration (before any validation run of a new experiment or version)
+
+1. Write `experiments/expNN_<name>/PROTOCOL.md` from `_template/`: question, hypothesis and why it could work, success
+   criteria (primary: beat buy-and-hold's total return; secondary reported), data and period, rules, the **complete
+   candidate grid**, selection rule, baselines (always include the uninformed version of each informed component:
+   random exits with the same frequency, random re-entry with the same exits, constant exposure, ...), statistics,
+   stopping rules, known limitations, and a trial budget.
+2. Fill `config.py` (every constant), write the code and the tests, run `python tests\run_all_tests.py`.
+3. **Commit the protocol, config, code and tests before the first validation run** (message starts with
+   `preregister expNN`). That commit is the pre-registration evidence.
+4. Exploration of new ideas is allowed only on 2005-01-03 → 2014-12-31 (`so.config.EXPLORATION_*`), and is logged with
+   stage `exploration`.
+
+## After the first validation run
+
+- Any change to a rule, grid, feature, threshold or selection rule is a **new version**: bump `PROTOCOL_VERSION`, give a
+  new `EXPERIMENT_NAME` (e.g. `exp04_trend_exit_v1_1`), record why in the change log, label it data-dependent if it was
+  motivated by results, and re-run. At most **one** new version per experiment without Nicolas's approval.
+- Never re-run a notebook to "see if it changes", never pick the best of several runs, never drop a candidate or a
+  quarter after seeing results, never change the success criteria or the baselines after seeing results.
+- Apply the protocol's stopping rules as written. If a stopping rule fires, stop that experiment, log it, and move to the
+  next item of the roadmap.
+
+## Data you must not touch
+
+- **The untouched window 2026-05-14 → 2026-08-13 and anything after it**: never read for evaluation, never plot, never
+  summarize. Walk-forward notebooks stay in `RUN_MODE_STR = "validation_only"`. Running `latest` or `history`, or any
+  evaluation on that window, requires Nicolas's explicit approval in the chat for that specific run.
+- `store01_rawzone/`, `store02_workzone/`, `store03_goldzone/`, `records/` and `store04_experiments/trial_log.csv`: never
+  modify, move or delete. You may add new experiment folders under `store04_experiments/`.
+
+## Stop and ask Nicolas before
+
+1. Any evaluation on the untouched window or future data (above).
+2. Adding a data source (VIX, dividends, T-bill rates, text, anything not already in the data folder).
+3. Starting an experiment that is not in the roadmap of the latest `docs/RESEARCH_STATE_*.md`, or a second new version
+   of the same experiment.
+4. A change to shared code (`so/`, `pipeline/`) that would change any number of exp01-exp03 (their reproduction checks in
+   `docs/RESULTS_LOG.md` must still hold) or any value in `so/config.py`.
+5. Deleting anything, rewriting git history, `git push`, or installing/upgrading packages.
+6. A run whose trial count would exceed the protocol's trial budget, or about 1,000 trials.
+7. Any claim that criterion (a) is met: first list the remaining biases (dividends ignored, cash at 0%, informal costs).
+
+When you stop, say exactly what you want to do, why, and what the alternatives are.
+
+## Multiple testing
+
+Every exploration, signal check, validation candidate, summary and test goes to the shared trial log through
+`so.core.trial_log`. Keep grids small (about 3-15 candidates). Report how many trials the conclusion rests on, including
+the 4,089 legacy trials and every earlier experiment, when you discuss significance.
