@@ -22,6 +22,10 @@ every working session (section 8) and write a new dated copy when the roadmap ch
 | exp01_minute_entry | LightGBM picks minute entries and an SL/TP distance | +146.94% vs +218.48% | The stop/target machinery plus costs loses ~50 points vs passive exposure; the model recovers ~22. Signal check STOP (p = 0.10) |
 | exp02_stop_reentry | Trailing stop; a model decides the buy-back | +111.66% vs +237.21% | The stop is nearly free (stop + next-day buy-back ≈ buy-and-hold); **waiting in cash** loses, and the model waits worse than random |
 | exp03_ath_exit | Sell near the all-time high, buy back later | +143.05% vs +237.21% | Selling near the high beats random sell timing (19/20, not significant); the buy-back rules waste it |
+| exp04_trend_exit (agent, 2026-10-06) | Exit below the 200-session average (buffer x, confirmation n) | +70.84% vs +229.74% | All 12 exits bought back higher (V-shaped declines); worse than random exits (0/20) |
+| exp05_vol_scaled_exposure (agent) | Hold w = min(1, max(floor, σ_target / σ̂)) | +165.69% vs +229.74% | Volatility is predictable (ρ 0.593) but high-volatility periods did not have lower returns; drawdown −23% vs −34%; below constant exposure (+198.52%) |
+| exp06_capped_regret_reentry (agent, data-dependent) | Exit + buy-stop at S(1 + b) + recovery trigger | +147.38% vs +229.74% | First timing better than random (19/20 exits, 15/20 re-entries), but 4 of 5 exits wrong: (1 − q)G = 0.0062 < q|L| = 0.0126 |
+| exp07_warning_lights_exit (agent) | Exit when k of 5 lagging warning lights agree | +49.09% vs +229.74% | Worked on 2008 (one exit) only; on 2015-2026 all 12 exits bought back higher; worse than random exits (0/20) |
 
 Facts that constrain every new design:
 1. **Rent of cash:** at ~12% a year, each session in cash costs ~0.045% of expected return (~2.7% per 3 months, ~11% per
@@ -87,7 +91,7 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
   a quarter boundary; scorecard S/R equals the share ratio; fractional w = 1 equals buy-and-hold, w = 0 equals cash.
 - Keep `simulate_stop_reentry_dict` and all exp01-exp03 numbers unchanged (reproduction checks must still pass).
 
-### exp04_trend_exit (benchmark of the family)
+### exp04_trend_exit (benchmark of the family) — **STOP 2026-10-06 (agent)**
 - Sell when the 15:58 close is more than *x* below the 200-session average for *n* consecutive decisions; buy back when
   it is above the average by *x* (symmetric). Grid *x* ∈ {0, 3%, 5%} × *n* ∈ {1, 5, 10} (9 candidates).
 - Baselines: buy-and-hold; random exit with the same exit frequency and the same re-entry; random re-entry with the same
@@ -95,7 +99,7 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 - Known: 2005-2014 +50.4% vs +69.0% (drawdown −23% vs −56%); 2015-2026 quarters +106% vs +237% (V-shaped crashes).
   Expected to fail criterion (a); it is the benchmark every later design must beat.
 
-### exp05_vol_scaled_exposure
+### exp05_vol_scaled_exposure — **STOP 2026-10-06 (agent)**
 - First a **volatility signal check** (predict next-20-session realized volatility from current volatility features):
   expected to pass easily; if it does not, check the pipeline.
 - Exposure w = min(1, max(floor, σ_target / σ̂)), σ̂ from existing volatility features; floors {30%, 50%} × targets
@@ -105,7 +109,7 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 - Can beat buy-and-hold only if high-volatility periods have below-average returns (the "leverage effect"); without
   leverage it cannot exceed w = 1.
 
-### exp06_capped_regret_reentry
+### exp06_capped_regret_reentry — **STOP 2026-10-06 (agent)**
 - Any exit signal (exp04's trend exit; exp03's near-ATH exit) paired with a **buy-stop**: if the close rises to
   S × (1 + b), buy back at once (the cost of a wrong exit is capped near b + costs). If the price falls, buy back on a
   recovery trigger (back above the 200-session average, or volatility back below its median). A cooling-off period of
@@ -116,7 +120,7 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 - **Disclosure required:** this design was suggested by exp03's results (exit timing looked better than random, the
   buy-back worse); it is a data-dependent follow-up and must be labelled so.
 
-### exp07_warning_lights_exit
+### exp07_warning_lights_exit — **STOP 2026-10-06 (agent; re-entry by the lights only, see its PROTOCOL §11)**
 - Exit only when at least *k* of these are true at the decision: close below the 200-session average; 250-session return
   < 0; `volatility_ratio_20_60` > 1.2; more than 10% below the all-time high; 60-session high more than 20 sessions old.
   Re-entry when fewer than k − 1 are true, or by exp06's buy-stop. k ∈ {3, 4, 5} (3 candidates; thresholds fixed in the
@@ -137,7 +141,9 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 | Date | Decision needed | Options | Recommendation | Done instead |
 |---|---|---|---|---|
 | 2026-10-06 | Data source for SPY dividends and the cash (T-bill) rate, to remove the two biases of §4 | (a) supply files in `stock_overflow_data\store01_rawzone\`; (b) allow a named public source; (c) keep the bias, stated | (a) or (b) before any success claim | Results reported with the bias stated |
-| 2026-10-06 | VIX / VIX3M data (after exp07) | as above | supply daily files before the VIX experiments | Roadmap stops after exp07 until answered |
+| 2026-10-06 | VIX / VIX3M data (after exp07) | as above | supply daily files before the VIX experiments | Roadmap stops after exp07 until answered. **2026-10-06: exp07 is done; every remaining roadmap item (VIX, text) is blocked by this row or the next one** |
+| 2026-10-06 (agent) | Text / qualitative data (roadmap item after VIX) | name the source, fields and period (e.g. FOMC statements, news headlines with timestamps known before 15:58) | decide only after VIX, and only for a design that filters exits (meta-labeling), since no exit rule of exp04-exp07 beat random exits by enough to pay for itself | Nothing (no text data added) |
+| 2026-10-06 (agent) | What next if no new data is allowed | (a) stop the "time the exit" line and write up the negative result (exp01-exp07, 7,381 trials); (b) a new roadmap item proposed by Nicolas | (a): seven designs, none beats buy-and-hold on the prior-only path, of exp02-exp07 only exp06 beats both of its uninformed baselines | Session ended |
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
 
 ### Open items
@@ -149,7 +155,9 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
    **Closed 2026-10-06:** `so.core.continuous_replay.get_log_excess_bootstrap_dict` (used from exp04 on; exp01-exp03
    outputs are not re-run).
 3. Dividends and cash yield (§4): ask Nicolas for the data sources before exp04's first validation run, or run with the
-   bias stated.
+   bias stated. **2026-10-06 (agent):** exp04-exp07 were run with the bias stated (parked decision in §7). The bias
+   cannot change any conclusion so far: every prior-only path is 64 to 181 points behind buy-and-hold, far more than
+   dividends net of cash yield over the time in cash.
 4. Commit executed notebooks of every run with their outputs; snapshot the trial log into `records/` after each session.
 
 ## 8. Session log (append one line per working session)
@@ -158,3 +166,4 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 |---|---|---|---|
 | 2026-10-06 | Nicolas + assistant | exp01-exp03 re-run and stopped; results logged; roadmap of the "stay invested" family; Cursor agent set up in autonomous mode (Nicolas, 2026-10-06: no permission requests; decisions only he can make are parked in §7; existing data files protected by Windows permissions; agent works on the git branch `agent/research`) | The agent starts with Step 0 |
 | 2026-10-06 | agent | Branch `agent/research` created; tests pass; first message saved (AGENT_SETUP §5); open item 1 closed (exp01 step 02 first-run counts reproduced); Step 0 implemented and tested (no trials) | exp04_trend_exit: protocol, code, tests, pre-registration |
+| 2026-10-06 | agent | exp04, exp05, exp06 and exp07 pre-registered, run once each and stopped by their own stopping rules (prior-only +70.84%, +165.69%, +147.38%, +49.09% vs +229.74%); 1,265 trials added (workspace 3,292 + 4,089 legacy); backward-compatible cooling-off added to the shared simulator (exp01-exp04 numbers unchanged); exp05 step 01 constant-baseline defect recorded; no candidate result pending review | Blocked: VIX, text and dividends/T-bill data are parked decisions for Nicolas (§7) |
