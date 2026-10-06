@@ -1,18 +1,30 @@
 ---
-description: How to work in the Stock Overflow workspace on nicodesktop (Windows, PowerShell, venv-main, running notebooks, recording results, committing, ending a session)
+description: How to work in the Stock Overflow workspace on nicodesktop in autonomous mode (Windows, PowerShell, venv-main, running notebooks, recording results, git branch, session loop)
 alwaysApply: true
 ---
 
-# Workflow on nicodesktop
+# Workflow on nicodesktop (autonomous mode)
 
 ## Environment
 
 - Windows, PowerShell, workspace `C:\Users\nico\Desktop\stock_overflow_workspace`, data
   `C:\Users\nico\Desktop\stock_overflow_data\` (outside the workspace; read it with Python, never copy it into the repo).
-- Python: always the venv `venv-main` (`venv-main\Scripts\python.exe`). The workspace is installed in it in editable mode
-  (`pip install -e .`), so `so` and `experiments` import from anywhere. Do not install or upgrade packages without asking.
-- Tests: `venv-main\Scripts\python.exe tests\run_all_tests.py` (a few minutes). Run them after every code change and before
-  every commit. All suites must pass.
+- Python: always `venv-main\Scripts\python.exe` (the workspace is installed in it in editable mode, so `so` and
+  `experiments` import from anywhere).
+- Packages: never upgrade or remove an installed package (it could change past results). If a new package is truly
+  needed, install a pinned version into `venv-main` only, add it to the requirements file, and record it in the results
+  log.
+- Tests: `venv-main\Scripts\python.exe tests\run_all_tests.py` (a few minutes). Run them after every code change and
+  before every commit. All suites must pass; never commit failing tests.
+- The existing files of the data folder are protected by Windows permissions (no delete). An "access denied" on one of
+  them means you tried something the rules forbid: stop that action, do not work around it, and record it.
+
+## Git
+
+- Work on the branch `agent/research` (create it from `main` the first time: `git switch -c agent/research`; later
+  `git switch agent/research`). Never commit to `main`; Nicolas merges after review.
+- Commit after every meaningful step (pre-registration, code + tests, each executed notebook with its outputs, each
+  results-log entry). At the end of a session: `git push -u origin agent/research` (never `--force`).
 
 ## Running notebooks
 
@@ -22,7 +34,8 @@ alwaysApply: true
   venv-main\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 --ExecutePreprocessor.kernel_name=venv-main <notebook path>
   ```
 
-  If `venv-main\Scripts\jupyter.exe` does not exist, ask Nicolas which Jupyter installation runs his notebooks.
+  If `venv-main\Scripts\jupyter.exe` does not exist, park it as a decision and use `venv-main\Scripts\python.exe -m
+  jupyter nbconvert ...` if that works.
 - Runs longer than a few minutes (exp01-style walk-forwards take ~1 h): start them in the background with a log and poll
   the log instead of blocking the terminal:
 
@@ -33,20 +46,22 @@ alwaysApply: true
   ```
 
   The run is finished when the `.err` log ends with `Writing ... bytes to <notebook>`; a Python error appears there too.
+  While it runs, work on something that does not depend on it (documentation, tests, the next protocol).
 - Read results from the saved notebook outputs and from `store04_experiments\<experiment>\...` CSV files with Python.
 - Each notebook warns when the trial log already holds entries of its stage: a re-run ADDS trials. Do not re-run a
-  validation notebook unless the protocol requires it; if a run crashed half-way, say so in the results log (its trials
-  are already logged).
+  validation notebook unless the protocol requires it; if a run crashed half-way, fix the cause, record the crash and the
+  trials it already logged in the results log, then re-run once.
 
 ## Recording (same session as the run)
 
 1. `docs/RESULTS_LOG.md`: date, experiment and step, protocol version, config hash (printed in the header cell), trials
    added, headline numbers copied from the outputs, what they support and what they do not, status (CONTINUE / STOP).
+   Explain the key result both mathematically and in plain words.
 2. The experiment's `PROTOCOL.md` change log if anything changed; `experiments/README.md` registry status; root `README.md`
    status table when an experiment starts or ends.
 3. Copy `C:\Users\nico\Desktop\stock_overflow_data\store04_experiments\trial_log.csv` to `records\trial_log_snapshot.csv`.
-4. Commit: executed notebooks **with their outputs**, code, docs and records, with a message that says what was run and
-   the outcome (e.g. `exp04 step02 validation: prior-only +X% vs +Y%, STOP`). Do not push; Nicolas pushes.
+4. Commit with a message that says what was run and the outcome (e.g. `exp04 step02 validation: prior-only +X% vs +Y%,
+   STOP`).
 
 ## Building an experiment
 
@@ -56,17 +71,19 @@ simulators, evaluation, trial log). Shared helpers go to `so/core` or `so/featur
 changing existing behaviour (the reproduction checks of exp01-exp03 in `docs/RESULTS_LOG.md` must still hold). New test
 files are added to `tests\run_all_tests.py`.
 
-## Working style
+## Working loop
 
-- Before writing code for a new step, post a short plan (files, functions, tests, expected trials) in the chat. Wait for
-  Nicolas's OK when the step is in the "stop and ask" list of `research-integrity.mdc`; otherwise proceed.
-- Prefer small, verifiable steps: write a function, test it on synthetic data, then use it.
-- When unsure about a methodological choice, write the options and their trade-offs and ask; do not pick the option
-  that gives the best-looking result.
-- Explain results to Nicolas both mathematically and in plain words (he asked for both).
+1. Start of a chat: read `AGENTS.md`, the latest `docs/RESEARCH_STATE_*.md` (roadmap, open items, parked decisions,
+   session log) and `docs/RESULTS_LOG.md`; check `git status` and the branch.
+2. Take the next roadmap item that is not blocked. Write a short plan in the chat (files, functions, tests, expected
+   trials), then do it: protocol → code and tests → pre-registration commit → runs → recording → commit.
+3. When a methodological choice is open, write the options and their trade-offs in the protocol, choose the most
+   conservative one (the one least likely to flatter the result), and say so. Never choose the option that gives the
+   best-looking result.
+4. Repeat until the roadmap is done or every remaining item is blocked by a parked decision.
 
 ## Ending a session
 
-Append one line to §8 of the latest `docs/RESEARCH_STATE_*.md` (date, what was done, next step), update its open items,
-make sure everything is committed, and summarize in the chat: what was run, the outcome, the trials added, and the next
-step.
+Append one line to §8 of the latest `docs/RESEARCH_STATE_*.md` (date, what was done, next step), update its open items
+and parked decisions, make sure everything is committed and pushed to `agent/research`, and summarize in the chat: what
+was run, the outcomes, the trials added, the parked decisions, and the next step.

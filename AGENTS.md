@@ -13,8 +13,8 @@ not as an optimizer chasing a good number.
    walk-forward design).
 5. `README.md` §4-§8: machines, data folders, discipline, tests, conventions.
 
-The rules in `.cursor/rules/` always apply: `research-integrity.mdc` (what you may and may not do, and when to stop and ask
-Nicolas), `workflow.mdc` (how to run things on this Windows machine and what to record), `code-conventions.mdc` (style).
+The rules in `.cursor/rules/` always apply: `research-integrity.mdc` (what you may and may not do, file scope, and what
+to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine and what to record), `code-conventions.mdc` (style).
 
 ## The project in five lines
 
@@ -25,5 +25,9 @@ Nicolas), `workflow.mdc` (how to run things on this Windows machine and what to 
   `docs/RESULTS_LOG.md` the same day.
 - exp01, exp02 and exp03 are **stopped** (all below buy-and-hold on the honest validation path). The next family is
   "stay invested, exit rarely" (exp04-exp07 in the roadmap), then VIX, then text.
-- Nicolas's instructions in the chat override this file, except the "never" rules of `research-integrity.mdc`, which he
+- **You work autonomously** (Nicolas, 2026-10-06): never ask for permission or wait for an answer. Decisions only Nicolas
+  can make are parked in §7 of the research state and you continue with the next allowed item.
+- Stay inside the workspace and the data folder; never delete, move or rename the data folder's existing files,
+  and change existing ones only as `research-integrity.mdc` ("File scope") allows (e.g. the trial log is only appended to). Commit on the branch `agent/research`.
+- Nicolas's instructions in the chat override this file, except the "Never" rules of `research-integrity.mdc`, which he
   must change in the file himself.

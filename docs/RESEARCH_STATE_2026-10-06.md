@@ -49,8 +49,8 @@ Facts that constrain every new design:
 1. **Dividends are ignored.** SPY paid roughly 1.3-2% a year. Buy-and-hold is understated, and a strategy that sits in
    cash is not charged for the dividends it misses. For strategies that exit for months, this **favours the strategy**.
 2. **Cash earns 0%.** T-bills paid up to ~5% in 2023-2025. This **penalizes** time in cash.
-3. Both need external data (SPY dividend history; a T-bill rate series): **Nicolas must supply or approve the source**.
-   Until then, report results with the bias stated, and do not claim criterion (a) as met.
+3. Both need external data (SPY dividend history; a T-bill rate series): a **parked decision** for Nicolas (§7). Until
+   then, report results with the bias stated, and do not claim criterion (a) as met.
 4. Costs are informal (slippage $0.01/share per side, IBKR fixed fees); overnight gaps can fill stops and buy-stops worse.
 
 ## 5. Shared infrastructure available (`so/`)
@@ -125,7 +125,17 @@ Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this 
 
 ### Then: text / qualitative data (new data, needs Nicolas)
 
-## 7. Open items
+## 7. Open items and parked decisions
+
+### Parked decisions for Nicolas (the agent adds rows; Nicolas answers in the chat or edits this table)
+
+| Date | Decision needed | Options | Recommendation | Done instead |
+|---|---|---|---|---|
+| 2026-10-06 | Data source for SPY dividends and the cash (T-bill) rate, to remove the two biases of §4 | (a) supply files in `stock_overflow_data\store01_rawzone\`; (b) allow a named public source; (c) keep the bias, stated | (a) or (b) before any success claim | Results reported with the bias stated |
+| 2026-10-06 | VIX / VIX3M data (after exp07) | as above | supply daily files before the VIX experiments | Roadmap stops after exp07 until answered |
+| 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
+
+### Open items
 
 1. Confirm that the first run of exp01 step 02 (notebook at git tag `first-run-20261006`) shows `test_count 5628`,
    `train_pass_count 174`, `signal_count 4` (the re-run's real-check numbers). Record the result in `docs/RESULTS_LOG.md`.
@@ -138,4 +148,4 @@ Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this 
 
 | Date | Who | What was done | Next step |
 |---|---|---|---|
-| 2026-10-06 | Nicolas + assistant | exp01-exp03 re-run and stopped; results logged; roadmap of the "stay invested" family; Cursor agent set up | Step 0 plan, for Nicolas's review |
+| 2026-10-06 | Nicolas + assistant | exp01-exp03 re-run and stopped; results logged; roadmap of the "stay invested" family; Cursor agent set up in autonomous mode (Nicolas, 2026-10-06: no permission requests; decisions only he can make are parked in §7; existing data files protected by Windows permissions; agent works on the git branch `agent/research`) | The agent starts with Step 0 |
