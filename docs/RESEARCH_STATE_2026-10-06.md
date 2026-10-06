@@ -27,6 +27,19 @@ every working session (section 8) and write a new dated copy when the roadmap ch
 | exp06_capped_regret_reentry (agent, data-dependent) | Exit + buy-stop at S(1 + b) + recovery trigger | +147.38% vs +229.74% | First timing better than random (19/20 exits, 15/20 re-entries), but 4 of 5 exits wrong: (1 − q)G = 0.0062 < q|L| = 0.0126 |
 | exp07_warning_lights_exit (agent) | Exit when k of 5 lagging warning lights agree | +49.09% vs +229.74% | Worked on 2008 (one exit) only; on 2015-2026 all 12 exits bought back higher; worse than random exits (0/20) |
 
+*Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
+- *exp05 (I3): "below constant exposure (+198.52%)": that baseline is "buy 86.3% and hold" (never rebalanced, mean
+  weight 90.9%), not a constant exposure; the verdict rests on buy-and-hold and the random shifts (the path beats 3/20).
+  (I4) "high-volatility periods did not have lower returns" simplifies the results log: in 2005-2014 the forward
+  return by volatility quintile showed no monotone pattern, and in 2015-2026 the volatility timing added nothing over
+  random shifts of the same weights.*
+- *exp06 (I2): "First timing better than random (19/20 exits, 15/20 re-entries)": empirical p ≈ (1 + 1) / 21 ≈ 0.10
+  and ≈ 0.29, for a data-dependent design with 12 candidates, after about 7,400 trials: "consistent with weak timing
+  information; not statistically supported". The protocol's information test (beat both medians) was met as defined.*
+- *exp07 (I4): "all 12 exits bought back higher" = 11 closed episodes, all bought back higher, plus 1 episode open at
+  the end (valued at the last close, also higher). (I1) Its re-entry rule dropped the roadmap's "or by exp06's
+  buy-stop" option; the choice is possibly informed by exp06's results (cannot be verified), see the exp07 protocol.*
+
 Facts that constrain every new design:
 1. **Rent of cash:** at ~12% a year, each session in cash costs ~0.045% of expected return (~2.7% per 3 months, ~11% per
    year). An exit pays only if the price **falls** by more than the rent plus costs while out (S/R identity: selling at S
@@ -56,6 +69,16 @@ Facts that constrain every new design:
 3. Both need external data (SPY dividend history; a T-bill rate series): a **parked decision** for Nicolas (§7). Until
    then, report results with the bias stated, and do not claim criterion (a) as met.
 4. Costs are informal (slippage $0.01/share per side, IBKR fixed fees); overnight gaps can fill stops and buy-stops worse.
+5. *Added 2026-10-06, after the independent audit (I6), limitations of the research process:*
+   - *exp04-exp07 were built, pre-registered, run and documented by the agent in 56 minutes (commits 14:02 → 14:58),
+     without human review before running; integrity rested on the roadmap fixed beforehand, which held (one recorded
+     deviation: exp07's re-entry, I1).*
+   - *2015-2026 has been used by seven experiments (exp01-exp07; about 7,400 trials including the 4,089 legacy trials)
+     and is development data (the §3 row "looked at many times by exp01-exp03" now applies to exp01-exp07).*
+   - *exp04-exp07 were designed with knowledge of famous episodes (2008, 2020).*
+   - *In 2005-2014 the designs that looked good (exp04, exp05, exp07) did so through 2008 alone, and all lost on
+     2015-2026.*
+   - *Any future positive result needs the untouched window (2026-05-14 → 2026-08-13) or new data.*
 
 ## 5. Shared infrastructure available (`so/`)
 
@@ -144,6 +167,7 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 | 2026-10-06 | VIX / VIX3M data (after exp07) | as above | supply daily files before the VIX experiments | Roadmap stops after exp07 until answered. **2026-10-06: exp07 is done; every remaining roadmap item (VIX, text) is blocked by this row or the next one** |
 | 2026-10-06 (agent) | Text / qualitative data (roadmap item after VIX) | name the source, fields and period (e.g. FOMC statements, news headlines with timestamps known before 15:58) | decide only after VIX, and only for a design that filters exits (meta-labeling), since no exit rule of exp04-exp07 beat random exits by enough to pay for itself | Nothing (no text data added) |
 | 2026-10-06 (agent) | What next if no new data is allowed | (a) stop the "time the exit" line and write up the negative result (exp01-exp07, 7,381 trials); (b) a new roadmap item proposed by Nicolas | (a): seven designs, none beats buy-and-hold on the prior-only path, of exp02-exp07 only exp06 beats both of its uninformed baselines | Session ended |
+| *Correction 2026-10-06, after the independent audit (I2)* | — | — | *In the row above, "only exp06 beats both of its uninformed baselines" means it beat the median of each random family (19/20 random exits, 15/20 random re-entries): empirical p ≈ 0.10 and ≈ 0.29 for a data-dependent design with 12 candidates, after about 7,400 trials, "consistent with weak timing information; not statistically supported". The recommendation (a) is unchanged* | — |
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
 
 ### Open items
@@ -167,3 +191,4 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 | 2026-10-06 | Nicolas + assistant | exp01-exp03 re-run and stopped; results logged; roadmap of the "stay invested" family; Cursor agent set up in autonomous mode (Nicolas, 2026-10-06: no permission requests; decisions only he can make are parked in §7; existing data files protected by Windows permissions; agent works on the git branch `agent/research`) | The agent starts with Step 0 |
 | 2026-10-06 | agent | Branch `agent/research` created; tests pass; first message saved (AGENT_SETUP §5); open item 1 closed (exp01 step 02 first-run counts reproduced); Step 0 implemented and tested (no trials) | exp04_trend_exit: protocol, code, tests, pre-registration |
 | 2026-10-06 | agent | exp04, exp05, exp06 and exp07 pre-registered, run once each and stopped by their own stopping rules (prior-only +70.84%, +165.69%, +147.38%, +49.09% vs +229.74%); 1,265 trials added (workspace 3,292 + 4,089 legacy); backward-compatible cooling-off added to the shared simulator (exp01-exp04 numbers unchanged); exp05 step 01 constant-baseline defect recorded; no candidate result pending review | Blocked: VIX, text and dividends/T-bill data are parked decisions for Nicolas (§7) |
+| 2026-10-06 | agent | Independent audit of exp04-exp07 (`docs/AUDIT_2026-10-06_agent_session.md`): all results reproduced, issues I1-I6 recorded as corrections; no new runs | Blocked as above: parked decisions for Nicolas (§7) |

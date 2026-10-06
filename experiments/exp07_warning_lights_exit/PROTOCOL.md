@@ -14,6 +14,12 @@ exp04 (one trend signal) exited 12 times on the validation span and bought back 
 exits plus a buy-stop carry some timing information but are wrong four times out of five. exp07 asks whether requiring
 **several independent warnings at once** makes exits rare enough, and right often enough, to pay for the time out.
 
+*Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I2): the sentence
+"exp06 showed that exits plus a buy-stop carry some timing information" overstates the evidence. exp06's path beat 19 of
+20 random exits (empirical p ≈ (1 + 1) / 21 ≈ 0.10) and 15 of 20 random re-entries (p ≈ 0.29), for a data-dependent
+design with 12 candidates, after about 7,400 trials. It should read: exp06's timing was "consistent with weak timing
+information; not statistically supported". This sentence is motivation only; no rule depends on it.*
+
 **Question.** Does exiting SPY only when at least k of 5 fixed warning lights are on, and buying back when fewer than
 k − 1 are on, beat buy-and-hold's total return after costs, on one continuous path over the validation span 2015-04-17
 → 2026-04-15?
@@ -34,6 +40,14 @@ episodes decide the result: the **episode scorecard is the evidence**, and no st
   same span (exp04's trend exit, which is light 1, and exp03/exp06's near-ATH logic, related to light 4). The light
   thresholds were fixed in the roadmap (2026-10-06) before any of exp04-exp06 was run. The re-entry rule was fixed in
   commit `30c8c96` after exp06's 2005-2014 exploration but **before** exp06's validation outputs were read.
+- *Correction 2026-10-06, after the independent audit (I1): the statement "The re-entry rule was fixed in commit
+  `30c8c96` after exp06's 2005-2014 exploration but **before** exp06's validation outputs were read" cannot be verified.
+  Commit `30c8c96` (14:49:13) came 51 s after exp06 step 02 had logged its summary in the trial log (14:48:22), and the
+  motivation of this protocol (§1) cites exp06's validation result ("wrong four times out of five"), so this text was
+  at least finalized after that result. The re-entry rule dropped the roadmap's "or by exp06's buy-stop" option (§5,
+  §11): this choice is **possibly informed by exp06's results (cannot be verified)**. The direction of its effect on
+  exp07's result is unknown (the buy-stop was not run with exp07's exits). The light thresholds and the grid
+  k ∈ {3, 4, 5} came from the roadmap, fixed before exp04-exp06 were run, and are unaffected.*
 
 ## 3. Success criteria (`so/core/evaluation.py`, `so/core/continuous_replay.py`)
 
@@ -132,6 +146,7 @@ notebook). A crash half-way is recorded and the notebook re-run once (workflow.m
 | Choice | Options | Chosen | Why |
 |---|---|---|---|
 | Re-entry | fewer than k − 1 lights; or that rule OR exp06's buy-stop | lights only | The buy-stop is not a validated component (exp06 was data-dependent) and would add a parameter b; fixed before exp06's validation outputs were read |
+| *Correction 2026-10-06, after the independent audit (I1)* | — | — | *This row is a **deviation from the roadmap**, which allowed "or by exp06's buy-stop". Its wording "fixed before exp06's validation outputs were read" cannot be verified: commit `30c8c96` (14:49:13) came 51 s after exp06 step 02 logged its summary (14:48:22), and §1 cites exp06's result. The choice is **possibly informed by exp06's results (cannot be verified)**; the direction of its effect on exp07's result is unknown. Thresholds and grid (from the roadmap) are unaffected* |
 | Light thresholds | roadmap values, or tuned | roadmap values | Never fitted |
 | Missing feature | on, off | off | A light without data cannot warn; fewer exits early in the data |
 | Forced buy-back | 60, 250, none | none | As exp04; a cap would add an untested parameter |
@@ -166,3 +181,4 @@ notebook). A crash half-way is recorded and the notebook re-run once (workflow.m
 |---|---|---|
 | 1.0 | 2026-10-06 | Initial protocol (agent, autonomous mode), pre-registered before any run |
 | 1.0 | 2026-10-06 | Step 01 and step 02 run once each (136 trials). Stopping rule §9 fired: prior-only +49.09% vs buy-and-hold +229.74%, information test failed. **STOP**; no new version (`docs/RESULTS_LOG.md`) |
+| 1.0 | 2026-10-06 | *Correction after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), documentation only, no rule changed, no re-run.* I1: the re-entry rule deviates from the roadmap (the "or by exp06's buy-stop" option was dropped); the claim that it was fixed before exp06's validation outputs were read cannot be verified (commit `30c8c96` at 14:49:13, 51 s after exp06 step 02's summary at 14:48:22; §1 cites exp06's result); labelled **possibly informed by exp06's results (cannot be verified)**, effect direction unknown; thresholds and grid unaffected (notes in §2 and §11). I2: §1's "carry some timing information" corrected (note in §1). I4: the scorecard has 11 closed episodes, all bought back higher, plus 1 episode open at the end (exit 2026-04-01, valued at the last close, also above the sale price) |

@@ -27,6 +27,11 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +49.09% vs +229.74%; beats 0/20 random exits) |
 | VIX experiment(s) | exp05/exp07 with VIX; meta-labeling of exits | — | to write | Planned after exp07 (VIX closes at 16:15 ET; VIX3M starts 2007-12-04); needs Nicolas for the data |
 
+*Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I2): exp06's "beats
+both random families" means it beat the median of each (19/20 random exits, 15/20 random re-entries; empirical p ≈ 0.10
+and ≈ 0.29, data-dependent design, 12 candidates, about 7,400 trials): "consistent with weak timing information; not
+statistically supported".*
+
 ## Adding an experiment
 
 1. **Copy `_template/`** to `expNN_<name>/` (next free number, short snake_case name).

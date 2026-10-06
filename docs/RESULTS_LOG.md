@@ -27,6 +27,16 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
 | `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
 
+*Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
+- *exp05 (I3): "constant exposure +198.52%" is not a constant exposure: with the 20-point dead band it never rebalanced,
+  so it is "**buy 86.3% and hold**" (mean weight 90.9%). The verdict rests on buy-and-hold and the random shifts (the
+  path beats 3/20).*
+- *exp06 (I2): "information test passed" holds as the protocol defined it (beat both medians), but beating 19/20 random
+  exits (empirical p ≈ (1 + 1) / 21 ≈ 0.10) and 15/20 random re-entries (p ≈ 0.29) is "consistent with weak timing
+  information; not statistically supported" (data-dependent design, 12 candidates, about 7,400 trials).*
+- *exp07 (I4): "all 12 exits bought back higher" = 11 closed episodes, all bought back higher, plus 1 episode open at
+  the end (valued at the last close, also higher).*
+
 ## Reproduction checks for the re-run
 
 The trading rules of exp01 and exp02 and the exp03 exploration rules are unchanged, and every run is deterministic, so the
@@ -268,6 +278,10 @@ identical to exp03's; bars cut at 2026-04-15 before any simulation.
   its SPY share drifted up as SPY rose (mean weight 90.9%, not 86.3%); it is "buy 86% and hold". A band-free constant 86.3%
   would have earned less than +198.52%. The verdict does not depend on it: the path also loses to buy-and-hold and to 17
   of 20 random shifts (mean weights 84-89%).
+- *Correction 2026-10-06, after the independent audit (I3): the bullet above labelled "**constant exposure** started at
+  the path's mean weight (86.3%) **+198.52%**" describes a baseline that is not a constant exposure: it is "**buy 86.3%
+  and hold**" (no rebalancing, mean weight 90.9%). A band-free constant exposure would need a new version, which is not
+  run. The verdict rests on buy-and-hold and the random shifts (the path beats 3/20) and is unchanged.*
 - Selections: floor 50%, q 0.75 governed 28 of 44 periods, floor 50%, q 0.50 9, floor 30%, q 0.50 7.
 
 *Mathematically:* with w_t ≤ 1 the strategy's excess over buy-and-hold is about −Σ (1 − w_t) r_t − costs. Holding less
@@ -278,6 +292,12 @@ the return: high-volatility stretches contain the worst and the best sessions (t
 σ̂ was still high and w was at its floor).
 *In plain words:* cutting SPY when the market is jumpy made the ride smoother (drawdown −23% instead of −34%) but cost
 about 64 points of total return over 10.7 years, more than simply keeping 14% in cash all the time would have.
+*Correction 2026-10-06, after the independent audit (I3): "relative to the constant-exposure path the timing cost a
+further growth factor 2.6569 / 2.9852 ≈ 0.89" and "more than simply keeping 14% in cash all the time would have" compare
+the path with a baseline that is "buy 86.3% and hold" (never rebalanced, mean weight 90.9%), not with 14% in cash all
+the time. Corrected plain words: it cost about 64 points of total return over 10.7 years, more than buying 86.3% of the
+account in SPY at the start and holding it (+198.52%) would have; a true constant 86.3% exposure was not run. The
+comparison with uninformed timing rests on the random shifts (the path beats 3 of 20).*
 
 What this supports: on 2015-2026, unlevered volatility scaling with this σ̂ does not beat buy-and-hold and its timing
 adds no return over an uninformed exposure; it does lower the drawdown. What it does not support: anything about levered
@@ -316,6 +336,10 @@ exp03's; bars cut at 2026-04-15.
   +124.82%, the path beats **19 of 20**; random re-entries after the same exits (median) +103.08%, the path beats
   **15 of 20**. With 20 runs per family, 19 of 20 is an empirical p of about 0.05-0.10, before any correction for the 12
   candidates, the data-dependent design and the 6,700+ earlier trials.
+  *Correction 2026-10-06, after the independent audit (I2): "19 of 20 is an empirical p of about 0.05-0.10" should
+  read p ≈ (1 + 1) / 21 ≈ 0.10 (one random run of 20 beat the path); for the random re-entries, 15 of 20 is p ≈ 0.29.
+  The information test as defined in the protocol (beat both medians) was met; the evidence for timing information is
+  weak, before any correction for 12 candidates, the data-dependent design and about 7,400 trials.*
 - Trigger arithmetic of the path (log share gains): 45 episodes, **37 ended by the buy-stop (q = 0.822)**, 8 by the
   recovery; mean gain of the right exits G = +0.0350, mean loss of the wrong ones L = −0.0153; (1 − q) × G = 0.0062 vs
   q × |L| = 0.0126 per episode. 6 of 45 bought back lower; product of S/R 0.7514. Largest right exit: 2022-04-08 →
@@ -329,10 +353,21 @@ right exits frequent enough.
 *In plain words:* the rule sells too often for the few times it is right. Its timing is better than chance with the same
 activity (it beats random exits and random buy-backs), so the signals are not pure noise, but on 2015-2026 the gains of
 the good exits were about half the costs of the bad ones, and the path ended 82 points behind buy-and-hold.
+*Correction 2026-10-06, after the independent audit (I2): "Its timing is better than chance with the same activity (it
+beats random exits and random buy-backs), so the signals are not pure noise" overstates the evidence. Beating 19 of 20
+random exits is an empirical p ≈ (1 + 1) / 21 ≈ 0.10 and beating 15 of 20 random re-entries is p ≈ 0.29, for a
+data-dependent design with 12 candidates, after about 7,400 trials. Corrected wording: the timing is "consistent with
+weak timing information; not statistically supported". The protocol's information test (beat both medians) was met as
+defined.*
 
 What this supports: an exit signal plus a buy-stop carries some timing information over random timing on this span, but
 not enough to beat buy-and-hold after its wrong exits. What it does not support: that this information would survive a
 correction for the selection (data-dependent design, 12 candidates, 6,700+ trials) or appear on new data.
+*Correction 2026-10-06, after the independent audit (I2): "an exit signal plus a buy-stop carries some timing
+information over random timing on this span" should read: the result is "consistent with weak timing information; not
+statistically supported" (p ≈ 0.10 against random exits, p ≈ 0.29 against random re-entries, data-dependent design,
+12 candidates, about 7,400 trials). What it supports is only that the path met the protocol's information test (it beat
+the median of both random families) while failing the primary criterion.*
 
 ## exp07_warning_lights_exit
 
@@ -340,6 +375,15 @@ correction for the selection (data-dependent design, 12 candidates, 6,700+ trial
 Pre-registered in commit `f93e77e` (`preregister exp07`, before any run; config, rules and tests in `30c8c96`); config
 hash `2965fad3e3`. Trials: 3 exploration, 132 validation and 1 summary (2026-10-06), 136 in total against a budget of
 140. Numbers below are copied from the saved outputs of `step01_exploration.ipynb` and `step02_continuous_replay.ipynb`.
+
+*Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I1): the line above
+says "config, rules and tests in `30c8c96`" without stating that this design commit fixed a **deviation from the
+roadmap**: the re-entry rule (below) dropped the roadmap's "or by exp06's buy-stop" option. The commit message of
+`30c8c96` says "before reading exp06 step02 outputs"; this cannot be verified: the commit (14:49:13) came 51 s after
+exp06 step 02 logged its summary in the trial log (14:48:22), and exp07's protocol motivation cites exp06's result
+("wrong four times out of five"). The re-entry choice is therefore **possibly informed by exp06's results (cannot be
+verified)**; the direction of its effect on exp07's result is unknown (the buy-stop variant was never run). The light
+thresholds and the grid k ∈ {3, 4, 5} came from the roadmap, fixed before exp04-exp06 were run, and are unaffected.*
 
 Rule: 5 fixed warning lights (close below the 200-session average; negative 250-session return; 20/60-session
 volatility ratio > 1.2; more than 10% below the all-time high; 60-session high older than 20 sessions). Exit when at
@@ -369,6 +413,10 @@ exp03's; bars cut at 2026-04-15.
   buy-back 2020-05-27 at 303.50 (S/R 0.7940; SPY +25.93% while out). The 2022 bear market gave three exits, all bought
   back higher (S/R 0.9478, 0.9670, 0.9055). The last episode (exit 2026-04-01) is open at the end and valued at the last
   close. Selections: k = 3 governed 12 periods, k = 4 17, k = 5 15.
+  *Clarification 2026-10-06, after the independent audit (I4): "12 episodes, 0 bought back lower" means **11 closed
+  episodes, all bought back higher, plus 1 episode open at the end** (exit 2026-04-01 at 655.35, valued at the last
+  close 699.85, also above the sale price). The summary table's "all 12 exits bought back higher" should be read the
+  same way.*
 
 *Mathematically:* final equity ÷ buy-and-hold = 1.4909 ÷ 3.2974 = 0.452 = Π S/R (0.4521). Every factor is below 1:
 Σ log(S/R) = log 0.452 = −0.79, about −0.066 per episode. A k-of-5 vote of lagging lights turns on after much of a fall
@@ -407,3 +455,26 @@ not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 
 - Observed while running notebooks: `venv-main\Scripts\jupyter.exe` starts its host process from a system Python 3.14
   install, while the notebook kernel (`venv-main`) is the venv's own interpreter; the computations run in the kernel.
   Recorded for traceability, no action taken.
+- *Added 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I5): annualized log excess
+  of the prior-only path over buy-and-hold, 95% interval with 6-month blocks, copied from the saved outputs of each
+  `step02_continuous_replay.ipynb`:*
+  - *exp04_trend_exit: −6.07%/yr [−10.54%, −2.14%]: the underperformance is statistically supported (interval
+    entirely below 0).*
+  - *exp05_vol_scaled_exposure: −1.99%/yr [−4.33%, +0.08%]: the interval includes 0.*
+  - *exp06_capped_regret_reentry: −2.65%/yr [−6.74%, +1.53%]: the interval includes 0.*
+  - *exp07_warning_lights_exit: −7.33%/yr [−12.55%, −3.49%]: the underperformance is statistically supported
+    (interval entirely below 0).*
+  - *The notebooks' `supported` flag (False for all four) tests only a positive excess (lower bound > 0); it says
+    nothing about whether a loss is significant.*
+
+### Limitations of the exp04-exp07 session (added 2026-10-06, after the independent audit, I6)
+
+- exp04-exp07 were built, pre-registered, run and documented by the agent in 56 minutes (commits 14:02 → 14:58),
+  without human review before running. Their integrity rested on the roadmap fixed beforehand (rules, grids,
+  thresholds), which held; the one deviation from it (exp07's re-entry) is recorded in the exp07 section (I1).
+- 2015-2026 has now been used by seven experiments (exp01-exp07; about 7,400 trials including the 4,089 legacy trials):
+  it is development data, not out-of-sample evidence.
+- exp04-exp07 were designed with knowledge of famous episodes (2008, 2020).
+- In 2005-2014 the designs that looked good (exp04, exp05, exp07) did so through 2008 alone, and all of them lost on
+  2015-2026.
+- Any future positive result needs the untouched window (2026-05-14 → 2026-08-13, a parked decision) or new data.
