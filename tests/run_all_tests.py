@@ -13,12 +13,13 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
     tests/test_exp02.py              daily features, exit/re-entry simulator, evaluation helpers, trial log and exp02
     tests/test_exp03.py              exp03 rules, random baselines, walk-forward and exploration table
     tests/test_continuous_replay.py  continuous replay, episode scorecard, log-excess bootstrap, fractional exposure (Step 0)
+    tests/test_exp04.py              exp04 trend exit rules and the continuous walk-forward (so.core.replay_walk_forward)
 
 Output is forced to UTF-8 (the suites print emoji; a Windows console or pipe in cp1252 would otherwise crash the print).
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
