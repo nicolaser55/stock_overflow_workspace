@@ -18,7 +18,7 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 
 | Experiment | Question | Steps | Protocol | Status |
 |---|---|---|---|---|
-| `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy) | 01 model dataset, 02 signal check, 03 walk-forward | 1.0 | **STOP** 2026-10-06 (signal check p = 0.10; prior-only +146.94% vs +218.48%) |
+| `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy) | 01 model dataset, 02 signal check, 03 walk-forward, 04 multivariate signal check (diagnostic, added 2026-10-06) | 1.0 (steps 01-03), 1.1 (step 04) | **STOP** 2026-10-06 (signal check p = 0.10; prior-only +146.94% vs +218.48%); step 04 diagnostic pre-registered 2026-10-06 (cannot reverse the STOP) |
 | `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 mechanism check, 02 signal check, 03 walk-forward | 1.0 | **STOP** 2026-10-05 (0 signals; prior-only +111.66% vs +237.21%) |
 | `exp03_ath_exit` | Sell when the close is near the all-time high; buy back after a delay or a dip (15 rules) | 01 exploration, 02 walk-forward | 1.0 | **STOP** 2026-10-05 (prior-only +143.05% vs +237.21%) |
 | `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +70.84% vs +229.74%) |

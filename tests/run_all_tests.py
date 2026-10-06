@@ -17,12 +17,13 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
     tests/test_exp05.py              exp05 volatility targets, weights, fractional walk-forward, baselines and signal check
     tests/test_exp06.py              exp06 capped re-entry rule, the simulator's cooling-off option and the walk-forward
     tests/test_exp07.py              exp07 warning lights, the k-of-5 rule and the walk-forward
+    tests/test_exp01_step04.py       exp01 step 04 multivariate signal check (planted interaction, noise, null, parallel)
 
     Output is forced to UTF-8 (the suites print emoji; a Windows console or pipe in cp1252 would otherwise crash the print).
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 

@@ -7,6 +7,11 @@ model, policy, schedule and selection are unchanged**; the changes decided by Ni
 check and the reporting (§17). After the first `validation_only` run of step 03, any rule change is a new version with a
 new experiment name.*
 
+*Version 1.1 (2026-10-06) adds a diagnostic, the multivariate signal check of step 04 (§13.3), decided by Nicolas after
+exp01's results were known. exp01 stays **STOPPED** (step 02, p = 0.10); step 04 can help explain the failure but
+cannot reverse the STOP or restart the walk-forward. Only constants were added (no existing rule, constant, function or
+notebook changed), so the config hash changes; steps 01-03 remain recorded under hashes `16493e598a` / `15716b01a3`.*
+
 ---
 
 ## 1. Research question
@@ -136,6 +141,70 @@ from P(TP) and the decision bar's close (time-limit exits counted as losses), be
      features by months may leave part of a regime link in the null, which makes the rule conservative.
 2. **Walk-forward (step 03).** On validation: STOP if the prior-only path fails to beat buy-and-hold and the random-entry
    baseline. On test (after freezing): the success definition of §2.
+3. **Multivariate signal check (step 04, diagnostic, added 2026-10-06 by Nicolas after exp01's results).**
+   *Status.* exp01 is STOPPED (step 02: 2 distinct signal bins vs a null maximum of 4, p = 0.10). This check was added **after**
+   the results were known. It can help explain the failure; **it cannot reverse the STOP or restart the walk-forward**,
+   whatever its outcome. Pre-registered (protocol, config, code, tests and output-free notebook committed) before the run on
+   real data; budget **1 trial**, one run.
+   - *Question.* (a) Does the **combination** of the 33 features predict TP-first better than the base rate, out of sample,
+     beyond chance and beyond what the model's flexibility produces on unrelated features? (b) If so, does the edge clear
+     break-even after costs? Step 02 tested each feature bin alone; a model can use interactions (A high **and** B high)
+     that no single bin shows.
+   - *Windows and data (identical to step 02).* Fold schedule `get_fold_pdf(..., [10])`; the 4 most recent validation
+     quarters pooled (folds 41-44, 2025-05-01 → 2026-04-29); training = the 10-year window of fold 41 (2015-04-16 →
+     2025-04-15); 15-minute interval sampling; the 33 model features (absolute features excluded); the 21 distances of step
+     02. Rows are read with step 02's code (`read_model_dataset_pdf`, duplicates dropped). The notebook asserts that the
+     windows equal those logged by the step 02 entry (hash `15716b01a3`). Raw bars (for uniqueness weights) are read with
+     `get_complete_ohlcv_pdf(cutoff_date_str_in = last validation date)`; `check_last_date_bool` raises if any row, bar or
+     the last date is dated after the last validation date or on/after 2026-05-14 (the untouched window is never read).
+   - *Model (exactly exp01's, `walk_forward.py`, unchanged).* `fit_tp_model_dict` / `predict_tp_proba_pdf`,
+     `LGBM_PARAM_DICT`, uniqueness weights, one classifier per distance, fit on training only, `random_state` =
+     `RANDOM_SEED`. The only addition: `n_jobs = MULTIVARIATE_CHECK_LGBM_THREAD_COUNT = 1` for the real and every null
+     model (a computational setting so that the 19 null runs can run in parallel processes; a test checks parallel =
+     sequential).
+   - *Measures per distance (resolved validation rows, i.e. rows with a TP or not-TP label).* AUC of the predicted P(TP);
+     top decile = the 10% of rows with the highest P(TP) (`max(1, round(0.1 n))`, stable sort); its TP rate, its **lift**
+     over the window's base rate and the **mean break-even TP rate** of those rows (`get_breakeven_tp_rate_arr`, costs of
+     `so/config.py`). 95% intervals by week-block bootstrap (whole ISO weeks, `BOOTSTRAP_ITERATION_COUNT` = 1,000,
+     `RANDOM_SEED`; the same weight draws as `so.core.signal_bins`), because minute-level labels overlap.
+   - *Primary statistic.* The **mean AUC over the 21 distances**.
+   - *Null (calibration of flexibility and chance).* The step 02 shift `get_session_shifted_feature_pdf`: feature columns
+     shifted together by a random number of whole sessions (25-75% of each window, circularly; training and validation
+     shifted independently) against the unchanged labels, then the models are **retrained** on the shifted training rows
+     and the same mean AUC is computed on the shifted validation rows. **19 runs**, seeds `default_rng([RANDOM_SEED,
+     run_id])`, run_id 0-18 (deterministic). No bootstrap in the null runs.
+   - *Verdict.* **INFORMATION only if the real mean AUC is strictly above every null run** (a tie means no information);
+     p = (1 + #{null ≥ real}) / 20.
+   - *Outcomes.* **A**: no information. **B**: information, but at no distance is the top decile's TP-rate 95% lower bound
+     above that decile's mean break-even TP rate (a statistical edge that does not pay the costs). **C**: information and
+     at least one distance clears break-even. Outcome C is recorded as a **candidate pending review**; the decision to look
+     at the untouched window is parked for Nicolas, and **no trading experiment is built** from it in this session.
+   - *Descriptive reports (not part of the verdict).* AUC and lift per distance, real vs the null runs; split-gain
+     importance (mean share of total gain over the 21 models, top 10: what the models used, not evidence of information);
+     calibration table by decile of predicted P(TP) (deciles per distance, pooled over distances).
+   - *Trial log.* **One** entry, stage `multivariate_check`: setting = windows, features, distances, model parameters, null
+     settings; metric = real mean AUC, the 19 null mean AUCs, p, verdict, per-distance summaries.
+   - *Planted-interaction test (`tests/test_exp01_step04.py`).* Synthetic rows where P(TP) = 0.45 + c when features A and
+     B are both in their top quarter, lowered when exactly one of them is (compensated so that each feature alone has
+     almost no marginal effect: TP rate 0.45 in its top 25%, about 0.42 below), c = 0.40. The multivariate check must
+     find information (outcome C) while step 02's univariate check on the same data stops; both results are printed. Pure
+     noise must give outcome A; the null shift must keep labels and feature rows intact; parallel = sequential; the
+     untouched assertion must raise on a row dated 2026-05-14. The compensation is deliberate: without it, a one-sided
+     raise leaks into each feature's marginal and step 02 also finds it, so the test would not show what only the
+     multivariate check can see.
+   - *Conservative choices.* Windows reused exactly from step 02 (no new window can be picked after seeing results); ties
+     count as no information; one primary statistic (mean AUC over all 21 distances, no best distance); the same fixed
+     model (no tuning); the break-even comparison uses the lower bound of the interval.
+   - *Rejected alternative.* Searching feature pairs or triples one by one (33 features → 528 pairs, × bins × 21
+     distances = hundreds of thousands of tests, more with triples) is rejected: the multiple-testing burden would swamp
+     any real effect and invite selection after the fact. A single model with a single null-calibrated statistic tests
+     all interactions at once in **one** trial.
+   - *Limitations.* The validation quarters are reused development data (they were seen in step 02 and as test windows
+     of older folds); the motivation is data-dependent (added because exp01 failed); a single 10-year training window
+     (no walk-forward); minute-level labels overlap (handled by the week-block bootstrap, but neighbouring weeks are still
+     correlated); shifting slowly varying features by months may leave part of a regime link in the null (conservative);
+     a positive verdict would be one diagnostic after about 7,400 earlier trials (3,292 in this workspace's trial log plus
+     4,089 legacy trials), not a strategy.
 
 ## 14. Discipline against luck and leakage
 
@@ -153,6 +222,7 @@ from P(TP) and the decision bar's close (time-limit exits counted as losses), be
 | `model_dataset.py`, `step01_model_dataset.ipynb` | Join of pipeline features and targets per day → `step01_model_dataset_data/` |
 | `signal_check.py`, `step02_signal_check.ipynb` | Base-rate signal check → `step02_signal_check_data/` |
 | `walk_forward.py`, `step03_walk_forward.ipynb` | Model, policy, fold runner, baselines, prior-only path, test → `step03_walk_forward_data/` |
+| `multivariate_check.py`, `step04_multivariate_check.ipynb` | Diagnostic multivariate signal check (§13.3, protocol 1.1) → `step04_multivariate_check_data/` |
 
 ## 16. Known limitations
 
@@ -167,3 +237,4 @@ ex-dividend overnight drops trigger small SL distances on overnight holds.
 |---|---|---|
 | (v1 1 – 1.2) | 2026-10-01 → 10-04 | Protocol v1 (`signal_check_v1`, `lgbm_ev_policy_v1`, `*_clean`): see `docs/history/RESEARCH_PROTOCOL_v1.md` |
 | 1.0 | 2026-10-05 | Re-run in the reorganized workspace as `exp01_minute_entry`. Trading rules, targets, features, model, policy, schedule and selection unchanged. Changed (decided by Nicolas, 2026-10-05): the signal check compares bins with the window's **base rate** instead of the break-even rate, is two-sided, pools the 4 most recent validation quarters (training = the 10-year window of the first pooled fold) and requires ≥ 6 months per bin in each window; the verdict counts distinct signal bins and must beat 19 session-shifted null runs (adopted 2026-10-05 after a synthetic random walk passed the uncalibrated rule; the first real run of step 02 used the uncalibrated rule and step 02 is re-run once with the null); secondary criterion = Sharpe **or** drawdown; honest reporting of §12 (prior-only path with baselines on validation, exposure and the zero-skill reference, MDE, summary trial entry) |
+| 1.1 | 2026-10-06 | Added (decided by Nicolas, 2026-10-06, **after** exp01's results were known; data-dependent motivation): the diagnostic multivariate signal check of step 04 (§13.3; `multivariate_check.py`, `step04_multivariate_check.ipynb`, `MULTIVARIATE_CHECK_*` constants, `tests/test_exp01_step04.py`). No existing rule, constant, function or notebook of exp01 changed; `EXPERIMENT_NAME` unchanged. The config hash changes only because constants were **added** (step 04 runs under the new hash); steps 01-03 stay recorded under `16493e598a` (step 02, first run) / `15716b01a3` (steps 01-03). exp01 stays STOPPED whatever step 04 finds. |

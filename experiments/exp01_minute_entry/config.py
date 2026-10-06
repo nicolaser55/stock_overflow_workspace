@@ -10,6 +10,10 @@ conventions) are READ from so.config, never copied. The trial-log configuration 
 
 Rule: once the first validation run of step 03 exists, any change to a constant below is a new protocol version with a
 new EXPERIMENT_NAME (e.g. "exp01_minute_entry_v1_1"), recorded in PROTOCOL.md.
+
+Protocol 1.1 (decided by Nicolas, 2026-10-06): the diagnostic step 04 (multivariate signal check) was ADDED with its own
+constants at the end of this file; no constant of steps 01-03 changed, and the experiment name stays. The configuration
+hash changes because constants were added: the results of steps 01-03 stay under hashes 16493e598a / 15716b01a3.
 """
 
 """
@@ -18,7 +22,7 @@ Experiment
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
 EXPERIMENT_NAME = "exp01_minute_entry"
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 
 """
 Sampling And Weights (step 01 / model_dataset.py)
@@ -107,3 +111,21 @@ Honest Reporting (step 03)
 
 # DEFINE THE NUMBER OF VALIDATION QUARTERS USED BY THE PRIOR-ONLY SELECTION (v1 rule: the previous quarter only)
 PRIOR_SELECTION_QUARTER_COUNT = 1
+
+"""
+Multivariate Signal Check (step 04 / multivariate_check.py; diagnostic added in protocol 1.1, PROTOCOL.md §13.3)
+Windows, sampling, features, distances, model and null shifts are those of steps 02-03 (SIGNAL_CHECK_*, LGBM_PARAM_DICT).
+"""
+
+# DEFINE THE FIRST DATE THAT MUST NEVER BE LOADED (THE UNTOUCHED WINDOW STARTS HERE)
+MULTIVARIATE_CHECK_UNTOUCHED_START_DATE_STR = "2026-05-14"
+# DEFINE THE SHARE OF VALIDATION ROWS WITH THE HIGHEST PREDICTED P(TP) (TOP DECILE)
+MULTIVARIATE_CHECK_TOP_SHARE = 0.10
+# DEFINE THE NUMBER OF BINS OF THE CALIBRATION TABLE (DECILES OF PREDICTED P(TP), PER DISTANCE, POOLED)
+MULTIVARIATE_CHECK_CALIBRATION_BIN_COUNT = 10
+# DEFINE THE NUMBER OF FEATURES SHOWN IN THE DESCRIPTIVE IMPORTANCE TABLE
+MULTIVARIATE_CHECK_IMPORTANCE_TOP_COUNT = 10
+# DEFINE THE LIGHTGBM THREADS PER MODEL (REAL AND NULL MODELS ALIKE: RESULTS DO NOT DEPEND ON THE NUMBER OF PROCESSES)
+MULTIVARIATE_CHECK_LGBM_THREAD_COUNT = 1
+# DEFINE THE STAGE NAME OF THE TRIAL-LOG ENTRY
+MULTIVARIATE_CHECK_STAGE_STR = "multivariate_check"
