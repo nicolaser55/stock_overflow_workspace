@@ -78,7 +78,61 @@ kernel and the Cursor login have to work for that user); ask if you want the ste
   experiment; not the automatic router.
 - **Spending:** autonomous sessions use a lot of model requests; set a monthly usage limit in Cursor's billing settings.
 
-## 5. First message to the agent (paste as is, in a new Agent chat)
+## 5. First message actually sent, 2026-10-06
+
+Sent by Nicolas on 2026-10-06 at about 14:00 (UTC+3); saved verbatim by the agent. It supersedes the draft of §6.
+
+```
+You are continuing the Stock Overflow thesis research AUTONOMOUSLY. I will not answer questions or approve anything
+during your work: never ask me for permission and never wait for me. Follow AGENTS.md and the three rules in
+.cursor/rules/ (research-integrity.mdc, workflow.mdc, code-conventions.mdc) at all times.
+
+SCOPE
+- You may only work in C:\Users\nico\Desktop\stock_overflow_workspace and C:\Users\nico\Desktop\stock_overflow_data.
+  Never read or write anything else on this computer (running venv-main's Python, Jupyter and git is allowed).
+- Workspace: you may add, modify and delete files. Work on the git branch agent/research only (create it from main if it
+  does not exist), commit after every meaningful step, push agent/research (never --force) at the end of each session.
+  Never commit to main, never rewrite history.
+- Data folder: you may create new files and folders, and modify or delete only what you created. Existing files are
+  protected by Windows permissions (no delete; raw data and pipeline caches 00-05 are read-only). An "access denied" on
+  them means the action is forbidden: do not work around it, record it. Never change file permissions.
+  Ignore store04_experiments\_protection_test.txt (a harmless test file of the protection script).
+- You may consult documentation or literature online, but never download data. New data sources (dividends, T-bill
+  rates, VIX, text) are parked decisions.
+
+START
+1. Read AGENTS.md, docs/RESEARCH_STATE_2026-10-06.md, docs/RESULTS_LOG.md, experiments/README.md,
+   experiments/exp02_stop_reentry/PROTOCOL.md, and the code of so/core/reentry_simulation.py, so/core/evaluation.py,
+   so/core/trial_log.py and experiments/exp03_ath_exit/rules.py.
+2. Switch to the branch agent/research and run venv-main\Scripts\python.exe tests\run_all_tests.py.
+3. Save this message verbatim in docs/AGENT_SETUP_2026-10-06.md as the new §5 ("First message actually sent,
+   2026-10-06"), and commit.
+4. Close open item 1 of the research state (the first-run counts of exp01 step 02 at git tag first-run-20261006:
+   test_count 5628, train_pass_count 174, signal_count 4) and record the outcome in docs/RESULTS_LOG.md.
+5. Write in the chat, in a few lines: the goal, the success criterion (beat buy-and-hold's total return), what has been
+   learned so far, and what data must never be touched.
+
+WORK
+6. Work through the roadmap of the research state in order, starting with Step 0 (continuous replay, episode scorecard,
+   annualized log-excess bootstrap, fractional exposure), then exp04, exp05, exp06, exp07. For each item follow the
+   working loop of workflow.mdc: short plan in the chat, protocol, code and tests, pre-registration commit BEFORE any
+   validation run, runs, recording in the results log (numbers copied from the outputs, explained mathematically and in
+   plain words), commit.
+7. Whenever something needs my decision, add it to "Parked decisions for Nicolas" in §7 of the research state (decision,
+   options, your recommendation, what you did instead) and continue with the next allowed item.
+8. When a methodological choice is open, choose the most conservative option (the one least likely to flatter the
+   result) and write why in the protocol.
+9. Usage is limited and may cut you off at any moment: keep every step small and committed, and keep the research state's
+   session log current, so a new chat can resume exactly where you stopped.
+
+END
+10. Stop only when the roadmap is done or every remaining item is blocked by a parked decision. Then end the session as
+    workflow.mdc says: update the research state (session log, open items, parked decisions), snapshot the trial log
+    into records\, commit, push agent/research, and summarize in the chat: what was run, the outcomes, the trials added,
+    the parked decisions, and the next step.
+```
+
+## 6. First message to the agent (draft, paste as is, in a new Agent chat)
 
 ```
 You are continuing the Stock Overflow research autonomously. Read AGENTS.md, then docs/RESEARCH_STATE_2026-10-06.md,
@@ -99,7 +153,7 @@ Then, without waiting for me:
 If the chat stops before the roadmap is done (context limit, Cursor restart), open a new Agent chat and send:
 `Continue the research autonomously from the latest RESEARCH_STATE (session log, open items, parked decisions).`
 
-## 6. What to review yourself
+## 7. What to review yourself
 
 1. `git log agent/research`: the `preregister expNN` commits come **before** the validation runs of each experiment.
 2. `docs/RESULTS_LOG.md`: numbers copied from notebook outputs; the prior-only path is the headline; experiments stopped
