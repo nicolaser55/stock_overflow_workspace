@@ -150,6 +150,21 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
   protocol, never fitted).
 - Expect 3-8 exits in 21 years: the episode scorecard is the evidence; say so.
 
+### exp01_minute_entry step 04: multivariate signal check (diagnostic) — decided by Nicolas 2026-10-06
+- **Status of exp01: STOPPED** (step 02 verdict, p = 0.10). Step 04 is a **diagnostic added after exp01's results were
+  known**: it can explain exp01's failure; it **cannot reverse the STOP or restart exp01's walk-forward**.
+- Question: (a) does the **combination** of the 33 model features (exp01's LightGBM, one classifier per distance) predict
+  "take profit first" better than the base rate, out of sample, beyond what chance and the model's flexibility produce?
+  (b) if so, is the edge large enough to clear the break-even TP rate after costs?
+- Windows and data as step 02 (training 2015-04-16 → 2025-04-15; validation folds 41-44 pooled, 2025-05-01 →
+  2026-04-29; 15-minute sampling; 21 distances); nothing on or after 2026-05-14 loaded.
+- Primary statistic: mean validation AUC over the 21 distances; null = the same models retrained on session-shifted
+  features (19 runs, as step 02). INFORMATION only if the real mean AUC is above every null run. Outcomes: A no
+  information; B information, not tradable (no distance's top-decile TP rate lower bound above break-even); C
+  information, possibly tradable (candidate pending review; untouched-window decision parked; no new trading experiment).
+- Trial budget: 1 (stage `multivariate_check`). Protocol: `experiments/exp01_minute_entry/PROTOCOL.md` §13.3 (version
+  1.1, same experiment name, decided by Nicolas).
+
 ### Then: VIX (new data, needs Nicolas)
 - Data: VIX daily (closes at 16:15 ET, after the 15:58 decision: use the previous day's close or intraday values) and
   VIX3M (from 2007-12-04). Re-run exp05 with VIX as σ̂; add a VIX light to exp07; then a **meta-labeling** model that
