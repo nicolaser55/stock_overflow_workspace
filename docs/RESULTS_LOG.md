@@ -19,7 +19,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 
 | Experiment | Protocol | Status | One-line outcome |
 |---|---|---|---|
-| `exp01_minute_entry` | 1.0 | **STOP** (2026-10-06) | Signal check: 2 signal bins vs null max 4, p = 0.10 → STOP. Walk-forward (run before the verdict): prior-only +146.94% vs buy-and-hold +218.48% |
+| `exp01_minute_entry` | 1.0 (1.1: step 04) | **STOP** (2026-10-06) | Signal check: 2 signal bins vs null max 4, p = 0.10 → STOP. Walk-forward (run before the verdict): prior-only +146.94% vs buy-and-hold +218.48%. Step 04 diagnostic (multivariate, added after the results): mean AUC 0.4943 vs null max 0.5282, p = 0.75, no information (Outcome A) |
 | `exp02_stop_reentry` | 1.0 | **STOP** (2026-10-05) | 0 signals; prior-only +111.66% vs +237.21%; the model's re-entry is worse than all 20 random re-entry runs |
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
@@ -133,6 +133,67 @@ validation trials + 1 summary.
   +124.55%; the model beats 16 of 20 runs (empirical p ≈ 0.24); fixed 10:00 entry +18.87%.
 - Reading: the stop/target machinery with costs loses about 50 points against passive exposure; the model recovers about
   22 of them. Not evidence of an edge over buy-and-hold.
+
+*Step 04, multivariate signal check (diagnostic; protocol 1.1, §13.3; decided by Nicolas 2026-10-06 after exp01's
+results).* **exp01 stays STOPPED**: this check was added after the results were known and cannot reverse the STOP or
+restart the walk-forward. Pre-registration commit `ae15c20` (2026-10-06 18:21:47 +0300); run once, 2026-10-06 (agent,
+nbconvert in the background), config hash `1ea6cfdc0a`; **1 trial added** (stage `multivariate_check`, trial
+`20261006182748398278_1ea6cfdc0a`, logged 2026-10-06T18:27:48; trial log 3,292 → 3,293). Source of every number below:
+the saved outputs of `experiments/exp01_minute_entry/step04_multivariate_check.ipynb` and the CSV files of
+`store04_experiments/exp01_minute_entry/step04_multivariate_check_data/`.
+- Windows (asserted identical to the step 02 entry `20261006124646690847_15716b01a3`): training 2015-04-16 → 2025-04-15
+  (60,144 rows), validation folds 41-44 pooled 2025-05-01 → 2026-04-29 (5,964 rows). Last row and last bar loaded:
+  2026-04-29; the untouched window (from 2026-05-14) was not read. 33 features, 21 distances (0.10%-1.00%), exp01's
+  LightGBM (`LGBM_PARAM_DICT`, uniqueness weights, `n_jobs` = 1), one classifier per distance, trained on training only.
+- **Primary statistic: mean AUC over the 21 distances = 0.4943.** The 19 null runs (features shifted by whole sessions,
+  models retrained): `[0.5050, 0.4960, 0.4876, 0.4959, 0.5058, 0.5259, 0.4989, 0.5049, 0.5047, 0.4869, 0.5282, 0.4851,
+  0.5215, 0.5151, 0.5014, 0.5045, 0.4867, 0.4946, 0.4694]` (max 0.5282). 14 of 19 null runs are ≥ the real value:
+  **p = (1 + 14) / 20 = 0.75 → no information → Outcome A.** No distance clears break-even (the top-decile lower bound is
+  below the top decile's mean break-even TP rate at all 21 distances), so outcome B or C would not have applied either.
+- Per distance (descriptive; not part of the verdict and **chosen after the fact** when singled out):
+  - Small distances 0.10%-0.14%: AUC 0.516-0.535, above all 19 null runs at each of these 4 distances; top-decile lift
+    +1.9 to +6.6 points. The best (optimistic) one, 0.14%: AUC 0.5346 [0.5073, 0.5620], top-decile TP rate 56.7%
+    [49.2%, 64.2%] vs a mean break-even of 51.4% (point estimate above break-even, lower bound below: does not clear).
+  - 0.16%-0.25%: AUC 0.515-0.520, inside the null range (1-6 null runs ≥ real); no top-decile lower bound above 50%.
+  - 0.28%-0.71%: AUC 0.469-0.516, inside the null range.
+  - Large distances 0.79%-1.00%: AUC 0.437, 0.428, 0.406, **below all 19 null runs**; the top decile hits TP 36.6%,
+    32.1%, 31.2% vs base rates 47.4%, 47.0%, 47.6% (lift −10.9 to −16.4 points; at 0.89% and 1.00% the whole 95% interval
+    of the lift is below zero). The models trained on 2015-2025 rank validation rows **in the wrong order** there.
+  - 11 of 21 distances have AUC > 0.5; mean top-decile lift −1.4 points (null runs: −4.1 to +6.2).
+- Calibration (deciles of predicted P(TP), per distance, pooled over the 21 distances): mean predicted P(TP) rises from
+  41.6% (decile 1) to 59.7% (decile 10), the observed TP rate stays flat between 48.2% and 50.8% and is **lowest in the
+  top decile** (48.2%). The predicted spread of about 18 points is not realized at all.
+- Split-gain importance (mean share of total gain over the 21 models, top 10; descriptive, what the models used):
+  `prev_day_return_pct` 9.4%, `overnight_gap_pct` 9.1%, `prev_day_range_pct` 8.2%, `daily_volatility` 8.1%,
+  `intraday_return_pct` 7.4%, `ath_drawdown_pct` 7.1%, `prev_day_high_dist_pct` 6.1%, `prev_day_low_dist_pct` 5.4%,
+  `prev_seg_delta_pct` 3.9%, `day_of_week` 3.5%. Eight of the ten are daily context features (constant or slowly varying
+  within a session).
+- *Mathematically.* For each distance d the AUC is P(p̂(x_i) > p̂(x_j) | y_i = TP, y_j = not TP) on the validation rows
+  (0.5 = ranking no better than a coin). The statistic is A = (1/21) Σ_d AUC_d. Under the null hypothesis "the features
+  carry no information about which barrier is hit first", shifting the feature rows by whole sessions against the labels
+  gives exchangeable copies of A that include the model's flexibility and the overlap of minute labels; the real
+  A = 0.4943 ranks 15th of 20 (p = 0.75), so the null is not rejected. The rejection rule would have needed A > 0.5282.
+  The calibration table shows that the model's probabilities have a spread (standard deviation of the 10 decile means of p̂ = 4.95
+  points, computed by the agent from `calibration_data.csv`) that the outcomes do not follow (standard deviation of the
+  10 observed TP rates = 0.92 points), i.e. the in-sample relation does not transfer.
+- *In plain words.* Giving the model all 33 features at once, so that it can combine them ("A high **and** B high"),
+  does not help: on the validation year it ranks future TP-first outcomes no better than models trained on features
+  deliberately misaligned in time (it does worse than 14 of those 19). There is a faint ordering at the very tightest
+  brackets (0.10%-0.14%), too small to pay the costs, and a clear **reversal** at the widest brackets (what predicted a
+  TP hit in 2015-2025 predicted the opposite in 2025-2026). The models lean mostly on day-level context (yesterday's
+  return and range, the overnight gap, volatility), so they learn about one value per day; ten years give only about
+  2,500 such values, and the day-level regimes they found did not persist.
+- **What it supports:** the step 02 STOP was not caused by testing features one at a time; the combination of the 33
+  features carries no out-of-sample information on TP-first beyond chance and flexibility, under exp01's model, on these
+  windows. The exp01 failure is consistent with "no exploitable signal in these features at minute horizons" rather
+  than with "a signal the univariate check could not see".
+- **What it does not support:** it does not show that no model or feature set could work (one model, fixed
+  hyperparameters, one 10-year training window, no walk-forward); the small-distance AUCs above the null and the
+  large-distance reversal are per-distance observations chosen after the fact among 21 (both tails), on reused
+  validation quarters, and are not evidence of anything without a new pre-registered test; the reversal is an inference
+  about non-stationarity, not tested. The motivation of the check is data-dependent; the conclusion rests on 1 trial of
+  this check after 3,292 earlier workspace trials and 4,089 legacy trials.
+- Status: **diagnostic complete, Outcome A; exp01 remains STOPPED.** No parked decision (no outcome C).
 
 ## exp02_stop_reentry
 
@@ -452,6 +513,8 @@ not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 
 - Trials added by the "stay invested, exit rarely" family (2026-10-06): exp04 406, exp05 182, exp06 541, exp07 136
   (1,265 in total). Workspace total 3,292, plus the 4,089 legacy trials (7,381). No prior-only path of exp01-exp07 beats
   buy-and-hold; no candidate result is pending review.
+- *Added 2026-10-06 (exp01 step 04 diagnostic): 1 `multivariate_check` trial. Workspace total 3,293, plus the 4,089
+  legacy trials (7,382). Outcome A (no information); still no candidate result pending review.*
 - Observed while running notebooks: `venv-main\Scripts\jupyter.exe` starts its host process from a system Python 3.14
   install, while the notebook kernel (`venv-main`) is the venv's own interpreter; the computations run in the kernel.
   Recorded for traceability, no action taken.

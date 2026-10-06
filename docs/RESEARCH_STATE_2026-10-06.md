@@ -150,7 +150,9 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
   protocol, never fitted).
 - Expect 3-8 exits in 21 years: the episode scorecard is the evidence; say so.
 
-### exp01_minute_entry step 04: multivariate signal check (diagnostic) — decided by Nicolas 2026-10-06
+### exp01_minute_entry step 04: multivariate signal check (diagnostic) — decided by Nicolas 2026-10-06 — **DONE 2026-10-06 (agent): Outcome A, no information**
+- *Result (`docs/RESULTS_LOG.md`, exp01 step 04):* pre-registered in commit `ae15c20`, run once; real mean AUC 0.4943 vs
+  19 null runs 0.4694-0.5282 (14 of 19 ≥ real), p = 0.75; no distance clears break-even. 1 trial. exp01 stays STOPPED.
 - **Status of exp01: STOPPED** (step 02 verdict, p = 0.10). Step 04 is a **diagnostic added after exp01's results were
   known**: it can explain exp01's failure; it **cannot reverse the STOP or restart exp01's walk-forward**.
 - Question: (a) does the **combination** of the 33 model features (exp01's LightGBM, one classifier per distance) predict
@@ -207,3 +209,4 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
 | 2026-10-06 | agent | Branch `agent/research` created; tests pass; first message saved (AGENT_SETUP §5); open item 1 closed (exp01 step 02 first-run counts reproduced); Step 0 implemented and tested (no trials) | exp04_trend_exit: protocol, code, tests, pre-registration |
 | 2026-10-06 | agent | exp04, exp05, exp06 and exp07 pre-registered, run once each and stopped by their own stopping rules (prior-only +70.84%, +165.69%, +147.38%, +49.09% vs +229.74%); 1,265 trials added (workspace 3,292 + 4,089 legacy); backward-compatible cooling-off added to the shared simulator (exp01-exp04 numbers unchanged); exp05 step 01 constant-baseline defect recorded; no candidate result pending review | Blocked: VIX, text and dividends/T-bill data are parked decisions for Nicolas (§7) |
 | 2026-10-06 | agent | Independent audit of exp04-exp07 (`docs/AUDIT_2026-10-06_agent_session.md`): all results reproduced, issues I1-I6 recorded as corrections; no new runs | Blocked as above: parked decisions for Nicolas (§7) |
+| 2026-10-06 | agent | exp01 step 04 multivariate signal check (diagnostic decided by Nicolas, protocol 1.1 §13.3): pre-registered (`ae15c20`), run once; mean AUC 0.4943 vs null max 0.5282, p = 0.75, Outcome A (no information); 1 trial (workspace 3,293 + 4,089 legacy); exp01 stays STOPPED; no parked decision added | Blocked as above: parked decisions for Nicolas (§7) |
