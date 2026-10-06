@@ -182,3 +182,4 @@ run of each notebook). A crash half-way is recorded and the notebook re-run once
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-06 | Initial protocol (agent, autonomous mode), pre-registered before any run |
+| 1.0 | 2026-10-06 | Runs: step 01 (signal check PASS, 4 exploration trials) and step 02 (176 validation + 1 summary). Prior-only +165.69% vs +229.74%, below the constant exposure (+198.52%) and 17 of 20 random shifts: the stopping rule (§9) fires, **STOP**. Recorded defect: step 01's descriptive constant-exposure column is invalid (initial weight 1 at the first session of the data); step 02 unaffected. Observed: the 20-point band makes the constant baseline a buy-and-hold of 86% (docs/RESULTS_LOG.md). No new version |

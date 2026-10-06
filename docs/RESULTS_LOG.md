@@ -23,6 +23,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp02_stop_reentry` | 1.0 | **STOP** (2026-10-05) | 0 signals; prior-only +111.66% vs +237.21%; the model's re-entry is worse than all 20 random re-entry runs |
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
+| `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
 
 ## Reproduction checks for the re-run
 
@@ -217,6 +218,68 @@ happened, every time. Over 2015-2026 the rule lost about half of the shares buy-
 What this supports: on 2015-2026, the 200-session trend exit (with buffers and confirmation) does not beat buy-and-hold,
 and its timing is worse than random. What it does not support: a statement about deep, slow bear markets (only one
 in the exploration decade, none in the validation decade) or about other trend measures (not tested).
+
+## exp05_vol_scaled_exposure
+
+**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9). Pre-registered in commit `5305b83` (`preregister
+exp05`, before any run); config hash `b1763b5981`. Trials: 1 signal check and 4 exploration (2026-10-06T14:34:52 /
+14:34:54), 176 validation and 1 summary (step 02, same day), 182 in total against a budget of 185. Numbers below are
+copied from the saved outputs of `step01_exploration.ipynb` and `step02_continuous_replay.ipynb`.
+
+Rule: hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, σ̂ = `daily_volatility` (std of the previous 20
+daily returns), σ_target = the q-quantile of every earlier σ̂ value (fixed per period); rebalance only if the target is
+more than 20 points from the current weight. Grid floor ∈ {30%, 50%} × q ∈ {0.50, 0.75} (4 candidates).
+
+**Step 01 (decisions 2005-01-03 → 2014-12-31, data cut 2015-03-18).**
+- **Signal check: PASS.** Spearman correlation between σ̂ and the realized volatility of the next 20 sessions **0.593**,
+  95% interval (6-month blocks) **[0.332, 0.754]**; log-log slope 0.686, R² 0.472 (2,495 decisions, 119 months).
+  Volatility is predictable, as expected; the pipeline is consistent.
+- Descriptive, forward 20-session log return by σ̂ quintile (lowest → highest): +0.72%, −0.35%, +0.86%, +1.32%, −0.47%
+  (all decisions +0.42%); share positive 71%, 47%, 70%, 75%, 55%; SD 2.4% → 7.8%. The highest-volatility fifth has a
+  slightly negative mean, but so does the second-lowest; there is no monotone pattern, and the spread of outcomes grows
+  far faster than the mean falls.
+- Exploration (context only, hindsight-prone): all 4 candidates above buy-and-hold (+69.02%) on 2005-2014: +89.84%,
+  +107.22%, +88.58%, +97.11%; mean weight 82-90%; every log-excess interval includes 0 (e.g. floor 30%, q 0.75: +2.04%/yr
+  [−1.63%, +7.63%]). As in exp04, 2008 carries the decade.
+- **Defect found in a descriptive column (recorded, not fixed by a re-run):** the step 01 column
+  `constant_exposure_total_return` equals buy-and-hold (+69.02%) for every candidate. Cause: the replay starts at the
+  first session of the data, where no earlier decision exists, so `simulate_weight_path_dict` falls back to an initial
+  weight of 1; the target (the mean weight, 0.82-0.90) is then within the 20-point band and is never traded. The column
+  is invalid and was not used for any decision. Step 02 is not affected (its span starts at session > 0 and the
+  constant baseline is assigned to the session before the span; its output shows the intended starting weight).
+
+**Step 02, continuous fractional replay over the 44 validation periods (2015-04-17 → 2026-04-15).** Schedule asserted
+identical to exp03's; bars cut at 2026-04-15 before any simulation.
+- After the fact (optimistic): every candidate loses to buy-and-hold (+235.39%). Best floor 50%, q 0.75: **+187.88%**
+  (mean weight 93.3%, 27 rebalances, −1.38%/yr log excess [−2.77%, −0.07%]); worst floor 50%, q 0.50: +166.37%.
+- **Prior-only path (43 periods, 2015-07-17 → 2026-04-15): +165.69% vs buy-and-hold +229.74%** (annualized 9.54% vs
+  11.77%). **Mean weight in SPY 86.3%**, 32 rebalances. 9 of 43 periods won (sign test p = 1.000); mean period excess
+  −0.61% (SD 2.39%, t = −1.66); MDE 1.02% per period (4.07% per year).
+- Annualized log excess **−1.99%/yr**, 95% interval (6-month blocks) [−4.33%, +0.08%] (1-month blocks [−4.59%, +0.81%]).
+  Sharpe 0.73 vs 0.71; max drawdown **−23.20% vs −34.21%**. Comparable return False (165.69 / 229.74 = 72% of buy-and-hold's
+  total return, below 90%), so the secondary flags are False by definition. Costs barely matter: excess −63.92% / −64.05% / −64.08% at
+  0 / 1 / 2 cents.
+- Information test: **constant exposure** started at the path's mean weight (86.3%) **+198.52%**; **random shifts** of the
+  path's weights (median of 20) **+192.15%**, the path beats 3 of 20. The volatility timing is worse than holding the
+  same average amount of SPY at uninformed times.
+- Caveat on the constant baseline (observed): with the 20-point band it never rebalanced (0 trades after the start), so
+  its SPY share drifted up as SPY rose (mean weight 90.9%, not 86.3%); it is "buy 86% and hold". A band-free constant 86.3%
+  would have earned less than +198.52%. The verdict does not depend on it: the path also loses to buy-and-hold and to 17
+  of 20 random shifts (mean weights 84-89%).
+- Selections: floor 50%, q 0.75 governed 28 of 44 periods, floor 50%, q 0.50 9, floor 30%, q 0.50 7.
+
+*Mathematically:* with w_t ≤ 1 the strategy's excess over buy-and-hold is about −Σ (1 − w_t) r_t − costs. Holding less
+SPY on average costs about (1 − 0.863) × 11.8% ≈ 1.6% a year in a rising market; the volatility timing had to earn that
+back by having (1 − w_t) large when r_t < 0. It did not: relative to the constant-exposure path the timing cost a further
+growth factor 2.6569 / 2.9852 ≈ 0.89 over 10.7 years. Volatility predicts volatility (step 01, ρ ≈ 0.59), not the sign of
+the return: high-volatility stretches contain the worst and the best sessions (the rebounds of 2020 and 2025 came while
+σ̂ was still high and w was at its floor).
+*In plain words:* cutting SPY when the market is jumpy made the ride smoother (drawdown −23% instead of −34%) but cost
+about 64 points of total return over 10.7 years, more than simply keeping 14% in cash all the time would have.
+
+What this supports: on 2015-2026, unlevered volatility scaling with this σ̂ does not beat buy-and-hold and its timing
+adds no return over an uninformed exposure; it does lower the drawdown. What it does not support: anything about levered
+volatility management (excluded by the project), about implied volatility (VIX, new data, parked), or about other σ̂.
 
 ## Cross-experiment notes (2026-10-06)
 
