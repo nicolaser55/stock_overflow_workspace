@@ -152,6 +152,23 @@ summary trials).
 - Reading: selling near the high may carry a little timing information relative to random exits (not significant at
   5%), but the buy-back rules lose more than it brings, and the time out of the market is not paid for.
 
+## Step 0: evaluation code for long holding periods (2026-10-06, agent; shared code, no trial)
+
+*Implemented and tested, nothing run on real data.* `so/core/continuous_replay.py` and `so/core/fractional_exposure.py`,
+tests `tests/test_continuous_replay.py` (synthetic data): a continuous replay with no exit equals buy-and-hold; one
+episode carries across a period boundary and the period returns chain to the total return; the scorecard's S/R equals
+the share ratio within 1 share; w = 1 equals buy-and-hold and w = 0 equals cash; the guard refuses any window ending on
+or after 2026-05-14. No existing function was modified, so the exp01-exp03 reproduction checks are unaffected (all
+previous suites pass). `tests/run_all_tests.py` now forces UTF-8 output (it crashed on a cp1252 pipe before, an output
+problem only).
+
+Design choices (the conservative option, documented in each protocol that uses them):
+- Replay periods: validation quarter f runs to the session before quarter f + 1 starts (the anchored schedule makes
+  some quarters overlap by 1-2 sessions), so each session counts once.
+- Interval: annualized log excess = 12 × mean monthly log excess, with a **circular block bootstrap of 6-month blocks**
+  as the primary interval (long exits create dependence across months; longer blocks give wider, more honest intervals),
+  the 1-month version printed alongside.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of

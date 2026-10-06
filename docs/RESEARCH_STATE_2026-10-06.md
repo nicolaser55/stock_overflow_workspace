@@ -69,7 +69,12 @@ Facts that constrain every new design:
 
 Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this family.
 
-### Step 0: evaluation for long holding periods (shared code, no trials)
+### Step 0: evaluation for long holding periods (shared code, no trials) — **DONE 2026-10-06 (agent)**
+*Implemented and tested:* `so/core/continuous_replay.py` (guard against the untouched data, non-overlapping replay
+periods from the validation quarters, continuous replay, rule switching for prior-only selection on a continuous path,
+period returns, episode scorecard, annualized log-excess circular block bootstrap, replay summary) and
+`so/core/fractional_exposure.py`; tests `tests/test_continuous_replay.py` (9 tests). No existing function changed.
+
 - **Continuous replay:** one path from the first validation session (2015-04-17) to the last validation session
   (2026-04-15); the position **carries across quarters**; no forced buy-back, or a long optional cap (e.g. 250 sessions).
   Rule parameters, if selected, use only data before each decision (expanding window or the pooled rule of exp02).
@@ -140,7 +145,9 @@ Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this 
 1. ~~Confirm that the first run of exp01 step 02 (notebook at git tag `first-run-20261006`) shows `test_count 5628`,
    `train_pass_count 174`, `signal_count 4`.~~ **Closed 2026-10-06 (agent):** confirmed from commit `da790c1` (the label
    is a commit message, not a tag) and the trial log; recorded in `docs/RESULTS_LOG.md` (exp01 step 02).
-2. Reporting improvement (Step 0): replace the total-return bootstrap interval with an annualized log-excess interval.
+2. ~~Reporting improvement (Step 0): replace the total-return bootstrap interval with an annualized log-excess interval.~~
+   **Closed 2026-10-06:** `so.core.continuous_replay.get_log_excess_bootstrap_dict` (used from exp04 on; exp01-exp03
+   outputs are not re-run).
 3. Dividends and cash yield (§4): ask Nicolas for the data sources before exp04's first validation run, or run with the
    bias stated.
 4. Commit executed notebooks of every run with their outputs; snapshot the trial log into `records/` after each session.
@@ -150,3 +157,4 @@ Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this 
 | Date | Who | What was done | Next step |
 |---|---|---|---|
 | 2026-10-06 | Nicolas + assistant | exp01-exp03 re-run and stopped; results logged; roadmap of the "stay invested" family; Cursor agent set up in autonomous mode (Nicolas, 2026-10-06: no permission requests; decisions only he can make are parked in §7; existing data files protected by Windows permissions; agent works on the git branch `agent/research`) | The agent starts with Step 0 |
+| 2026-10-06 | agent | Branch `agent/research` created; tests pass; first message saved (AGENT_SETUP §5); open item 1 closed (exp01 step 02 first-run counts reproduced); Step 0 implemented and tested (no trials) | exp04_trend_exit: protocol, code, tests, pre-registration |

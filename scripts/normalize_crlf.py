@@ -4,7 +4,7 @@ from pathlib import Path
 """
 CRLF Normalizer (code-conventions.mdc: .py and .md files use CRLF line endings)
 
-Usage: venv-main\Scripts\python.exe scripts\normalize_crlf.py <file> [<file> ...]
+Usage: venv-main/Scripts/python.exe scripts/normalize_crlf.py <file> [<file> ...]
 Every given file is rewritten with CRLF line endings (LF and CRLF inputs both give CRLF; content is otherwise unchanged).
 """
 
