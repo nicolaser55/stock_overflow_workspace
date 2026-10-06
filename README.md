@@ -50,7 +50,8 @@ stock_overflow_workspace/
 | exp04_trend_exit | **STOP** (continuous replay: prior-only +70.84% vs +229.74%) | `experiments/exp04_trend_exit/PROTOCOL.md` |
 | exp05_vol_scaled_exposure | **STOP** (prior-only +165.69% vs +229.74%; lower drawdown) | `experiments/exp05_vol_scaled_exposure/PROTOCOL.md` |
 | exp06_capped_regret_reentry | **STOP** (prior-only +147.38% vs +229.74%; beats its random baselines) | `experiments/exp06_capped_regret_reentry/PROTOCOL.md` |
-| exp07, then VIX, then text | Planned: the "stay invested, exit rarely" family | `docs/RESEARCH_STATE_2026-10-06.md` |
+| exp07_warning_lights_exit | **STOP** (prior-only +49.09% vs +229.74%; all 12 exits bought back higher) | `experiments/exp07_warning_lights_exit/PROTOCOL.md` |
+| VIX, then text | Blocked: new data sources (parked decisions for Nicolas) | `docs/RESEARCH_STATE_2026-10-06.md` |
 
 **Start here:** `docs/RESEARCH_STATE_2026-10-06.md` (state and roadmap), then `docs/RESULTS_LOG.md`. Agents also read
 `AGENTS.md` and `.cursor/rules/`.

@@ -165,3 +165,4 @@ notebook). A crash half-way is recorded and the notebook re-run once (workflow.m
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-06 | Initial protocol (agent, autonomous mode), pre-registered before any run |
+| 1.0 | 2026-10-06 | Step 01 and step 02 run once each (136 trials). Stopping rule §9 fired: prior-only +49.09% vs buy-and-hold +229.74%, information test failed. **STOP**; no new version (`docs/RESULTS_LOG.md`) |

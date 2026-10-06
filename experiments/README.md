@@ -24,7 +24,7 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +70.84% vs +229.74%) |
 | `exp05_vol_scaled_exposure` | Hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, 20-point dead band (4 candidates) | 01 signal check + exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +165.69% vs +229.74%) |
 | `exp06_capped_regret_reentry` | Trend or near-ATH exit + buy-stop at S × (1 + b) with a cooling-off, or recovery above the 200-session average (12 candidates; data-dependent follow-up of exp03) | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +147.38% vs +229.74%; beats both random families) |
-| `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 exploration, 02 continuous replay | 1.0 | Pre-registered 2026-10-06 |
+| `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +49.09% vs +229.74%; beats 0/20 random exits) |
 | VIX experiment(s) | exp05/exp07 with VIX; meta-labeling of exits | — | to write | Planned after exp07 (VIX closes at 16:15 ET; VIX3M starts 2007-12-04); needs Nicolas for the data |
 
 ## Adding an experiment

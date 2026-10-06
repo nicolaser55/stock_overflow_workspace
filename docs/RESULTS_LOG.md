@@ -25,6 +25,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
+| `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
 
 ## Reproduction checks for the re-run
 
@@ -333,6 +334,53 @@ What this supports: an exit signal plus a buy-stop carries some timing informati
 not enough to beat buy-and-hold after its wrong exits. What it does not support: that this information would survive a
 correction for the selection (data-dependent design, 12 candidates, 6,700+ trials) or appear on new data.
 
+## exp07_warning_lights_exit
+
+**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9: the primary criterion and the information test fail).
+Pre-registered in commit `f93e77e` (`preregister exp07`, before any run; config, rules and tests in `30c8c96`); config
+hash `2965fad3e3`. Trials: 3 exploration, 132 validation and 1 summary (2026-10-06), 136 in total against a budget of
+140. Numbers below are copied from the saved outputs of `step01_exploration.ipynb` and `step02_continuous_replay.ipynb`.
+
+Rule: 5 fixed warning lights (close below the 200-session average; negative 250-session return; 20/60-session
+volatility ratio > 1.2; more than 10% below the all-time high; 60-session high older than 20 sessions). Exit when at
+least k are on, buy back when fewer than k − 1 are on. Grid k ∈ {3, 4, 5}.
+
+**Step 01, exploration 2005-01-03 → 2014-12-31 (context only).** Share of decisions with at least 3 / 4 / 5 lights on:
+24.9% / 14.1% / 2.7%. Buy-and-hold +69.02% (drawdown −56.44%). k = 3: +42.71% (14 exits); k = 4: **+74.56%** (11 exits);
+k = 5: **+136.41%** (2 exits, 90.7% in the market, drawdown −21.93%; log excess +3.36%/yr [−2.56%, +12.70%]). Observed:
+every winning candidate wins through one 2008 episode (k = 5: exit 2008-06-27 at 127.69, buy-back 2009-04-29 at 87.27,
+S/R 1.4632; k = 4: S/R 1.4168); all its other exits, but one, bought back higher.
+
+**Step 02, continuous replay over the 44 validation periods (2015-04-17 → 2026-04-15).** Schedule asserted identical to
+exp03's; bars cut at 2026-04-15.
+- After the fact (optimistic): every candidate loses to buy-and-hold (+235.39%). k = 3 +95.07% (18 exits), **k = 4
+  +115.60%** (12 exits, 84.1% in the market; −3.99%/yr [−7.65%, −0.83%]), k = 5 +101.90% (8 exits, 0 bought back lower).
+  All three log-excess intervals lie below 0.
+- **Prior-only path (43 periods, 2015-07-17 → 2026-04-15): +49.09% vs buy-and-hold +229.74%** (annualized 3.79% vs
+  11.77%), below every candidate after the fact, because switching k at period boundaries added exits. 84.4% in the
+  market, 12 exits, mean 37.5 cash decisions per episode. 18 of 43 periods won (sign test p = 0.889); mean period excess
+  −1.85% (SD 3.73%, t = −3.25); MDE 1.59% per period (6.37% per year).
+- Annualized log excess **−7.33%/yr**, 95% interval (6-month blocks) [−12.55%, −3.49%] (1-month blocks [−12.28%,
+  −2.46%]): the loss is statistically supported. Sharpe 0.33 vs 0.71; max drawdown −31.44% vs −34.21%; comparable,
+  Sharpe and drawdown flags all False. Excess −180.58% / −180.65% / −180.82% at 0 / 1 / 2 cents.
+- Information test failed: random exits with the same re-entry rule (median of 20) +183.31%, the path beats **0 of 20**;
+  random re-entries after the same exits (median) +52.66%, the path beats **7 of 20** (35%).
+- Scorecard: 12 episodes, **0 bought back lower**, product of S/R 0.4521. Largest loss: exit 2020-03-19 at 240.99,
+  buy-back 2020-05-27 at 303.50 (S/R 0.7940; SPY +25.93% while out). The 2022 bear market gave three exits, all bought
+  back higher (S/R 0.9478, 0.9670, 0.9055). The last episode (exit 2026-04-01) is open at the end and valued at the last
+  close. Selections: k = 3 governed 12 periods, k = 4 17, k = 5 15.
+
+*Mathematically:* final equity ÷ buy-and-hold = 1.4909 ÷ 3.2974 = 0.452 = Π S/R (0.4521). Every factor is below 1:
+Σ log(S/R) = log 0.452 = −0.79, about −0.066 per episode. A k-of-5 vote of lagging lights turns on after much of a fall
+and turns off after much of the rebound, so with fast (V-shaped) declines the buy-back price is above the sale price.
+*In plain words:* the warning lights worked in 2008, a slow bear market, and that one exit made the 2005-2014 result.
+On 2015-2026 the declines were fast (2018, 2020, 2022, 2025): the lights agreed near the bottoms and cleared only after
+the recovery, so each of the 12 exits lost money, and random exits at the same frequency did better every time.
+
+What this supports: on the validation span, requiring several lagging warnings at once does not fix the problem of
+exp04; the exits are late and the buy-backs later. What it does not support: any statement about slow bear markets in
+general (one episode, 2008, in the exploration span only).
+
 ## Shared code change for exp06 (2026-10-06, agent; no trial)
 
 *Implemented and tested.* `so/core/reentry_simulation.simulate_stop_reentry_dict` gained a backward-compatible
@@ -353,3 +401,9 @@ not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 
   the annualized log excess would be easier to read (reporting change, not yet made).
 - Trials added by this round: exp01 2 signal-check + 540 validation + 1 summary; exp02 14 + 1 + 792 + 1; exp03 15 + 660 +
   1 (2,027 in total), on top of the 4,089 legacy trials.
+- Trials added by the "stay invested, exit rarely" family (2026-10-06): exp04 406, exp05 182, exp06 541, exp07 136
+  (1,265 in total). Workspace total 3,292, plus the 4,089 legacy trials (7,381). No prior-only path of exp01-exp07 beats
+  buy-and-hold; no candidate result is pending review.
+- Observed while running notebooks: `venv-main\Scripts\jupyter.exe` starts its host process from a system Python 3.14
+  install, while the notebook kernel (`venv-main`) is the venv's own interpreter; the computations run in the kernel.
+  Recorded for traceability, no action taken.
