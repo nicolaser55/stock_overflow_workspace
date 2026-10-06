@@ -43,9 +43,25 @@ corrected raw data. The exp02 and exp03 exploration numbers above were reproduce
 exp03 walk-forward and the new validation baselines, so those results were seen by the assistant before Nicolas's official
 run; no rule, grid or baseline was changed afterwards. exp01 was smoke-tested on synthetic data only (a 2010-2022 random
 walk with random indicator columns, so no real result was seen). That smoke test showed that the exp01 base-rate signal
-check returns CONTINUE on data without any signal (2 signals in one bin of 3,255 tests, about 4 expected by chance); the
-verdict now also prints the chance count, and the rule itself is an open decision (`experiments/exp01_minute_entry/PROTOCOL.md`
-§13).
+check, with the uncalibrated rule, returns CONTINUE on data without any signal (2 signals in one bin of 3,255 tests, about
+4 expected by chance). The verdict was therefore calibrated on 19 session-shifted null runs
+(`experiments/exp01_minute_entry/PROTOCOL.md` §13; decided 2026-10-05, delivered in the second zip of that day).
+Nicolas's first real run of step 02 (first zip, config hash `16493e598a`) still used the uncalibrated rule; the calibrated verdict comes from re-running step 02 with the second zip (hash `15716b01a3`), whose real-check part must reproduce the first run's signal table exactly. On the same synthetic data, the null runs found 0-4 distinct signal
+bins (15 of 19 runs found at least one), so the real check's 1 bin gives p = 0.80 and the calibrated verdict is STOP, as
+it should be. Run time in the sandbox (2 cores): real check 2.0 min, null runs 13.9 min.
+
+## Decisions of 2026-10-05
+
+Taken by Nicolas on 2026-10-05, in reply to the open points of the reorganization, and delivered in the second zip of
+that day. Nicolas ran exp01-exp03 with the **first** zip, so those executed notebooks predate the code of these decisions:
+the exp02 and exp03 notebooks print both secondary flags (the "either" criterion is read from them; no re-run), and the
+exp01 signal check is re-run once to add the null runs (`docs/UPDATE_GUIDE_2026-10-06.md`).
+
+| Decision | Applies to | Why |
+|---|---|---|
+| The exp01 signal-check verdict is calibrated on 19 session-shifted null runs: CONTINUE only if the real check has more distinct signal bins than every null run | exp01 step 02 | The uncalibrated rule ("at least one signal") passed a synthetic random walk; Nicolas asked for the most reasonable fix, the assistant recommended this one |
+| The random exit and 200-session trend baselines are kept | exp03 | Random exit tests the ATH exit signal itself; the trend rule is context only |
+| Secondary criterion: higher Sharpe **or** smaller drawdown (either is enough), at a comparable return | all experiments (`so/core/evaluation.py`) | Audit F7 left "and" or "or" open; Nicolas chose "or" |
 
 ## exp01_minute_entry
 

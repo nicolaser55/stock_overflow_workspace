@@ -354,11 +354,18 @@ def test_success_criteria():
     same_dict = get_success_criteria_dict(buy_hold_pdf, buy_hold_pdf)
     bootstrap_dict = get_excess_return_bootstrap_dict(buy_hold_pdf, buy_hold_pdf, iteration_count_in=200)
     assert not same_dict["primary_success"] and same_dict["comparable_return"] and not same_dict["secondary_sharpe"]
+    # ASSERT THE SECONDARY CRITERION IS "EITHER": TRUE IFF ONE OF THE TWO FLAGS IS TRUE
+    assert same_dict["secondary_success"] == (same_dict["secondary_sharpe"] or same_dict["secondary_drawdown"])
     assert np.isclose(bootstrap_dict["excess_return"], 0) and not bootstrap_dict["supported"]
     # A STRATEGY THAT SKIPS EVERY DAY BELOW -1% (HINDSIGHT): PRIMARY SUCCESS, SUPPORTED, SMALLER DRAWDOWN
     strategy_pdf = buy_hold_pdf.assign(daily_return=np.where(buy_hold_pdf["daily_return"] < -0.01, 0.0, buy_hold_pdf["daily_return"]))
     better_dict = get_success_criteria_dict(strategy_pdf, buy_hold_pdf, {"fixed_delay_1": 0.0})
     assert better_dict["primary_success"] and better_dict["secondary_drawdown"] and better_dict["all_baselines_beaten"]
+    assert better_dict["secondary_success"]
+    # A SCALED-DOWN STRATEGY WITH A TINY DAILY DRAG: SMALLER DRAWDOWN, LOWER SHARPE, COMPARABLE RETURN -> SECONDARY MET ("EITHER")
+    scaled_pdf = buy_hold_pdf.assign(daily_return=buy_hold_pdf["daily_return"] * 0.95 - 1e-6)
+    scaled_dict = get_success_criteria_dict(scaled_pdf, buy_hold_pdf)
+    assert scaled_dict["comparable_return"] and scaled_dict["secondary_drawdown"] and not scaled_dict["secondary_sharpe"] and scaled_dict["secondary_success"]
     assert get_excess_return_bootstrap_dict(strategy_pdf, buy_hold_pdf, iteration_count_in=200)["supported"]
     # NEGATIVE BUY-AND-HOLD: THE COMPARABLE FLOOR IS BUY-AND-HOLD - 10% OF ITS SIZE
     down_pdf = buy_hold_pdf.assign(daily_return=-0.001)

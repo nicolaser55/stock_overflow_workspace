@@ -36,11 +36,12 @@ had, before costs. The strategy wins exactly when, on average, it **buys back lo
 | Level | Criterion |
 |---|---|
 | **Primary** | Total return after all costs, chained over the evaluated windows, **above buy-and-hold** over the same windows |
-| **Secondary** (counted only at comparable return) | A **higher Sharpe ratio** and a **smaller maximum drawdown** than buy-and-hold, on the chained daily returns |
+| **Secondary** (counted only at comparable return) | A **higher Sharpe ratio** or a **smaller maximum drawdown** than buy-and-hold, on the chained daily returns |
 | **Comparable return** | Strategy total return ≥ 90% of buy-and-hold's. If buy-and-hold is negative: ≥ buy-and-hold − 10% × \|buy-and-hold\| |
 | **Information** | The strategy must also beat the same-stop baselines of §10 (fixed-delay and random re-entry). Otherwise the stop rule, not the model, does the work |
 
-The two secondary flags are reported separately. *Open question for Nicolas (audit F7): "and" or "or" between them.*
+The two secondary flags are reported separately, and `secondary_success` is true if **either** holds (decided by Nicolas,
+2026-10-05; audit F7).
 
 **Statistical support.** A block-bootstrap interval of the chained excess return over buy-and-hold, resampling calendar
 months. "Statistically supported" only if the lower bound of the 95% interval is above 0; otherwise "observed, not
@@ -176,4 +177,4 @@ Previous sessions are the sessions present in the data. exp02 reads the raw bars
 | Version | Date | Change |
 |---|---|---|
 | (v2 2.0 – 2.0.2) | 2026-10-04 | Protocol v2, `stop_reentry_v2` / `stop_reentry_v2_clean`: see `docs/history/RESEARCH_PROTOCOL_v2.md` |
-| 1.0 | 2026-10-05 | Re-run in the reorganized workspace as `exp02_stop_reentry`. Trading rules, grids, model, schedule and selection unchanged. Changed (decided by Nicolas, 2026-10-05): the signal check requires ≥ 6 months per bin in each window (`DAILY_SIGNAL_CHECK_MIN_MONTH_COUNT`); honest reporting of §12 (prior-only path with baselines on validation, MDE, success criteria on that path, summary trial entry); the random re-entry baseline also runs when no episode closed (probability from every episode). The validation-stage stopping rule is stated on the prior-only path (§11.3) |
+| 1.0 | 2026-10-05 | Re-run in the reorganized workspace as `exp02_stop_reentry`. Trading rules, grids, model, schedule and selection unchanged. Changed (decided by Nicolas, 2026-10-05): the signal check requires ≥ 6 months per bin in each window (`DAILY_SIGNAL_CHECK_MIN_MONTH_COUNT`); honest reporting of §12 (prior-only path with baselines on validation, MDE, success criteria on that path, summary trial entry); the random re-entry baseline also runs when no episode closed (probability from every episode). The validation-stage stopping rule is stated on the prior-only path (§11.3); secondary criterion = Sharpe **or** drawdown (Nicolas, 2026-10-05; the first run's notebook prints both flags) |

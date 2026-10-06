@@ -88,8 +88,9 @@ New folders are created by the notebooks: `store02_workzone/step06_TSDAY_data/` 
   **warns if the trial log already has entries of that stage** (running a notebook again adds trials).
 - Walk-forward notebooks now also report the honest numbers (prior-only path, baselines on validation, minimum
   detectable effect, time in the market) in `validation_only` mode, and log one `summary` entry.
-- The exp01 signal check now compares with the base rate (protocol 1.0); exp02's requires 6 months per bin; exp03 is a full
-  walk-forward experiment. Everything else in exp01 and exp02 is unchanged.
+- The exp01 signal check now compares with the base rate and its verdict is calibrated on 19 null runs (protocol 1.0);
+  exp02's requires 6 months per bin; exp03 is a full walk-forward experiment. The secondary criterion is now Sharpe **or**
+  drawdown. Everything else in exp01 and exp02 is unchanged.
 
 ## E. Run order (restart the kernel before each notebook; keep `RUN_MODE_STR = "validation_only"`)
 
@@ -103,7 +104,7 @@ New folders are created by the notebooks: `store02_workzone/step06_TSDAY_data/` 
 | 6 | `experiments/exp03_ath_exit/step01_exploration.ipynb` | < 1 min | idem |
 | 7 | `experiments/exp03_ath_exit/step02_walk_forward.ipynb` | ~2 min | first run of the walk-forward |
 | 8 | `experiments/exp01_minute_entry/step01_model_dataset.ipynb` | long (all ~5,400 days are generated) | 5,436 files in `store04_experiments/exp01_minute_entry/step01_model_dataset_data/` |
-| 9 | `experiments/exp01_minute_entry/step02_signal_check.ipynb` | tens of minutes | new base-rate verdict |
+| 9 | `experiments/exp01_minute_entry/step02_signal_check.ipynb` | a few minutes to read the data + ~2 min per check × (1 + 19 null runs ÷ CPU cores) | base-rate verdict calibrated on 19 null runs (CONTINUE only above every run) |
 | 10 | `experiments/exp01_minute_entry/step03_walk_forward.ipynb` | ~1-1.5 h | candidates as `lgbm_ev_policy_v1_clean`; new prior-only path |
 
 The order runs the fast experiments first, so a setup problem shows up within minutes. Steps 01-05 of the pipeline are

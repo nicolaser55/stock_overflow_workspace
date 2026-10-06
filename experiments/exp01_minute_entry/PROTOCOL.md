@@ -27,7 +27,7 @@ rate alone can be obtained without skill (audit §4). The qualitative (text) par
 | | Definition |
 |---|---|
 | **Primary metric** | Total return after all costs vs buy-and-hold over the same span (`excess_return = total_return − buy_hold_return`) |
-| **Secondary metrics** | Annualized Sharpe ratio (daily mark-to-market, risk-free 0) and maximum drawdown, at a comparable return (≥ 90% of buy-and-hold's) |
+| **Secondary metrics** | A higher annualized Sharpe ratio (daily mark-to-market, risk-free 0) **or** a smaller maximum drawdown than buy-and-hold, at a comparable return (≥ 90% of buy-and-hold's); either is enough (Nicolas, 2026-10-05) |
 | **Information** | The model must beat the random-entry baseline of matched activity (§11) |
 | **Diagnostics** | Trades, TP/SL/TL rates, WIN/LOSS/NULL counts, exposure, decisions skipped while a position was open |
 | **Benchmark** | Buy-and-hold: buy at the first allowed entry (10:00 open), sell at the last close (or at the strategy's last exit if later), same slippage and fees |
@@ -120,16 +120,20 @@ from P(TP) and the decision bar's close (time-limit exits counted as losses), be
    - **Two-sided:** a bin is a signal if its interval lies entirely above (or entirely below) the base rate on training and
      on validation, on the same side. Signals above the base rate whose validation lower bound is also above break-even are
      counted separately (tradable after costs).
-   - **STOP or pivot if no bin is a signal.** The report gives the training passes expected by chance (5% of the tests),
-     the **signals expected by chance** (tests × 2 × 2.5%², assuming independent tests and windows) and the number of
-     distinct feature bins among the signals (one bin usually passes at several neighbouring distances).
-   - *Calibration warning (found 2026-10-05, before any real run).* With about 3,000 tests the chance count is about 4,
-     so "at least one signal" is a weak bar: in the assistant's smoke run on a synthetic random walk (no signal by
-     construction), the check found 2 signals (one bin of `prev_day_range_pct` at 0.89% and 1.00%) and returned CONTINUE.
-     The tests are strongly correlated (the 21 distances share the same bins), so the realized count is clumpy and the
-     chance count is only a guide. **A CONTINUE whose signal count is not clearly above the chance count is not evidence of
-     a signal.** Whether to tighten the rule (e.g. require more signal bins than expected by chance, or a null run with
-     shuffled weeks) is open for Nicolas to decide **before** the first real run of step 02.
+   - **Statistic:** the number of **distinct feature bins** with at least one signal (one bin usually passes at several
+     neighbouring distances). The report also gives the training passes expected by chance (5% of the tests) and the
+     signals expected by chance if the tests were independent (tests × 2 × 2.5%²; about 4 for ~3,250 tests).
+   - **Null calibration:** the same check is run **19 times** with the feature columns shifted, together, by a random
+     number of whole sessions (25%-75% of each window, circularly; training and validation shifted independently) against
+     the unchanged outcomes. This breaks any feature → outcome link and keeps each series' own structure, the correlation
+     between features and the correlation between the tests.
+   - **CONTINUE only if the real check has more distinct signal bins than every null run** (p ≤ 1/20 = 0.05; ties stop);
+     otherwise **STOP or pivot**.
+   - *Why (found 2026-10-05):* in the assistant's smoke run on a synthetic random walk (no signal by
+     construction), the uncalibrated rule ("at least one signal") found 2 signals (one bin of `prev_day_range_pct` at 0.89%
+     and 1.00%) and returned CONTINUE. Nicolas asked for the most reasonable fix; the assistant recommended the null
+     calibration and it was adopted the same day. Nicolas's first real run of step 02 (first zip, config hash `16493e598a`) still used the uncalibrated rule; the calibrated verdict comes from re-running step 02 with the second zip (hash `15716b01a3`), whose real-check part must reproduce the first run's signal table exactly. Shifting slowly varying
+     features by months may leave part of a regime link in the null, which makes the rule conservative.
 2. **Walk-forward (step 03).** On validation: STOP if the prior-only path fails to beat buy-and-hold and the random-entry
    baseline. On test (after freezing): the success definition of §2.
 
@@ -138,7 +142,8 @@ from P(TP) and the decision bar's close (time-limit exits counted as losses), be
 - Shared trial log; experiment `exp01_minute_entry`; hash covers `so/config.py` + this `config.py`.
 - `validation_only` until the design is frozen; any change after the first validation run = new version.
 - Look-ahead tests (`tests/test_shared_and_exp01.py`): context features identical on truncated data; target cells equal
-  simulated trades; embargo gaps; snapshot k contains bars 0..k only; drift-only data is not a signal; month minimum.
+  simulated trades; embargo gaps; snapshot k contains bars 0..k only; drift-only data is not a signal; month minimum; the null shift keeps outcomes and
+  feature rows, a planted signal beats every null run, noise stops, ties stop.
 
 ## 15. Implementation
 
@@ -161,4 +166,4 @@ ex-dividend overnight drops trigger small SL distances on overnight holds.
 | Version | Date | Change |
 |---|---|---|
 | (v1 1 – 1.2) | 2026-10-01 → 10-04 | Protocol v1 (`signal_check_v1`, `lgbm_ev_policy_v1`, `*_clean`): see `docs/history/RESEARCH_PROTOCOL_v1.md` |
-| 1.0 | 2026-10-05 | Re-run in the reorganized workspace as `exp01_minute_entry`. Trading rules, targets, features, model, policy, schedule and selection unchanged. Changed (decided by Nicolas, 2026-10-05): the signal check compares bins with the window's **base rate** instead of the break-even rate, is two-sided, pools the 4 most recent validation quarters (training = the 10-year window of the first pooled fold) and requires ≥ 6 months per bin in each window; the verdict also reports the signals expected by chance and the distinct signal bins (reporting only); honest reporting of §12 (prior-only path with baselines on validation, exposure and the zero-skill reference, MDE, summary trial entry) |
+| 1.0 | 2026-10-05 | Re-run in the reorganized workspace as `exp01_minute_entry`. Trading rules, targets, features, model, policy, schedule and selection unchanged. Changed (decided by Nicolas, 2026-10-05): the signal check compares bins with the window's **base rate** instead of the break-even rate, is two-sided, pools the 4 most recent validation quarters (training = the 10-year window of the first pooled fold) and requires ≥ 6 months per bin in each window; the verdict counts distinct signal bins and must beat 19 session-shifted null runs (adopted 2026-10-05 after a synthetic random walk passed the uncalibrated rule; the first real run of step 02 used the uncalibrated rule and step 02 is re-run once with the null); secondary criterion = Sharpe **or** drawdown; honest reporting of §12 (prior-only path with baselines on validation, exposure and the zero-skill reference, MDE, summary trial entry) |

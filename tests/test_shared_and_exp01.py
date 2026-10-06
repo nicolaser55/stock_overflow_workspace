@@ -47,7 +47,8 @@ from so.features.context_features import add_cum_max_col, get_session_summary_pd
 from experiments.exp01_minute_entry import config as exp_config
 from experiments.exp01_minute_entry.model_dataset import apply_sampling_pdf, get_uniqueness_weight_arr, encode_feature_pdf
 from so.core.backtest_simulation import simulate_decision_trading_dict, simulate_buy_and_hold_dict
-from experiments.exp01_minute_entry.signal_check import get_signal_check_pdf, get_signal_check_verdict_dict
+from experiments.exp01_minute_entry.signal_check import get_signal_check_pdf, get_signal_check_verdict_dict, get_session_shifted_feature_pdf, \
+                                                         get_null_signal_count_pdf
 from so.core.schedule import get_walk_forward_fold_pdf
 from experiments.exp01_minute_entry import walk_forward
 from experiments.exp01_minute_entry.walk_forward import get_fold_pdf, run_walk_forward_fold_dict, run_window_with_baseline_dict, get_window_pdf
@@ -329,6 +330,50 @@ def test_signal_check():
     passed(f"signal check (planted signal found, noise rejected; {verdict_dict['test_count']} tests)")
 
 
+# FUNCTION: TEST THE NULL CALIBRATION OF THE SIGNAL CHECK (SESSION-SHIFTED FEATURES)
+def test_signal_check_null():
+    # CREATE A LABELED DATASET WITH ONE PLANTED FEATURE AND THREE NOISE FEATURES
+    rng = np.random.default_rng(3)
+    row_count = 20_000
+    ts_series = pd.Series(pd.date_range("2020-01-01 10:00", periods=row_count, freq="47min", tz="America/New_York"))
+    planted_arr = rng.random(row_count)
+    y_arr = (rng.random(row_count) < np.where(planted_arr > 0.9, 0.75, 0.45)).astype(float)
+    test_pdf = pd.DataFrame({"decision_ts": ts_series, "entry_price": 700.0, "rsi": planted_arr * 100, "stoch_k": rng.random(row_count) * 100,
+                             "relative_volume": rng.random(row_count), "daily_volatility": rng.random(row_count),
+                             "y_tp_0.0050": y_arr, "net_return_0.0050": np.where(y_arr == 1, 0.0049, -0.0051)})
+    train_pdf, valid_pdf = test_pdf.iloc[:14_000], test_pdf.iloc[14_000:]
+    feature_list = ["rsi", "stoch_k", "relative_volume", "daily_volatility"]
+    # SHIFT THE FEATURES OF THE TRAINING WINDOW
+    shifted_pdf = get_session_shifted_feature_pdf(train_pdf, feature_list, np.random.default_rng(0))
+    session_count = train_pdf["decision_ts"].dt.date.nunique()
+    # ASSERT THE OUTCOMES STAY IN PLACE, THE FEATURE VALUES ARE ONLY MOVED, TOGETHER, BY 25%-75% OF THE SESSIONS
+    assert shifted_pdf["y_tp_0.0050"].equals(train_pdf["y_tp_0.0050"].reset_index(drop=True))
+    assert np.array_equal(np.sort(shifted_pdf["rsi"].to_numpy()), np.sort(train_pdf["rsi"].to_numpy()))
+    assert not np.array_equal(shifted_pdf["rsi"].to_numpy(), train_pdf["rsi"].to_numpy())
+    pair_set = set(zip(train_pdf["rsi"], train_pdf["stoch_k"]))
+    assert all(pair in pair_set for pair in zip(shifted_pdf["rsi"], shifted_pdf["stoch_k"]))
+    assert 0.25 * session_count - 1 <= shifted_pdf.attrs["null_shift_session_count"] <= 0.75 * session_count
+    # RUN THE REAL CHECK AND 5 NULL RUNS
+    check_kwargs = {"iteration_count_in": 300}
+    signal_pdf = get_signal_check_pdf(train_pdf, valid_pdf, feature_list, [0.005], alert_in=False, **check_kwargs)
+    null_pdf = get_null_signal_count_pdf(train_pdf, valid_pdf, feature_list, [0.005], run_count_in=5, job_count_in=1, **check_kwargs)
+    null_again_pdf = get_null_signal_count_pdf(train_pdf, valid_pdf, feature_list, [0.005], run_count_in=5, job_count_in=2, **check_kwargs)
+    verdict_dict = get_signal_check_verdict_dict(signal_pdf, null_pdf)
+    # ASSERT THE NULL RUNS ARE REPRODUCIBLE (ALSO IN PARALLEL) AND THE PLANTED SIGNAL BEATS EVERY RUN
+    assert null_pdf.equals(null_again_pdf) and len(null_pdf) == 5
+    assert verdict_dict["verdict"] == "CONTINUE" and verdict_dict["signal_bin_count"] > verdict_dict["null_max_signal_bin_count"]
+    assert np.isclose(verdict_dict["null_p_value"], 1 / 6)
+    # WITHOUT THE PLANTED FEATURE: THE CALIBRATED VERDICT STOPS
+    noise_list = feature_list[1:]
+    noise_verdict_dict = get_signal_check_verdict_dict(get_signal_check_pdf(train_pdf, valid_pdf, noise_list, [0.005], alert_in=False, **check_kwargs),
+                                                       get_null_signal_count_pdf(train_pdf, valid_pdf, noise_list, [0.005], run_count_in=5, job_count_in=1, **check_kwargs))
+    assert noise_verdict_dict["verdict"] == "STOP"
+    # A TIE WITH THE NULL STOPS
+    tie_pdf = null_pdf.assign(signal_bin_count=verdict_dict["signal_bin_count"])
+    assert get_signal_check_verdict_dict(signal_pdf, tie_pdf)["verdict"] == "STOP"
+    passed(f"signal check null (session shifts keep outcomes and feature rows; planted bins {verdict_dict['signal_bin_count']} vs null max "
+           f"{verdict_dict['null_max_signal_bin_count']}; noise stops; ties stop; parallel = sequential)")
+
 # FUNCTION: TEST THAT MARKET DRIFT ALONE IS NOT A SIGNAL (BASE-RATE REFERENCE, NEW IN exp01 1.0)
 def test_signal_check_drift_only():
     # CREATE A DATASET WHERE EVERY ROW HAS THE SAME 62% TP PROBABILITY (DRIFT), WELL ABOVE BREAK-EVEN, AND NO FEATURE EFFECT
@@ -589,6 +634,7 @@ if __name__ == "__main__":
     test_walk_forward_schedule()
     test_uniqueness_weights(synthetic_ohlcv_array_dict)
     test_signal_check()
+    test_signal_check_null()
     test_signal_check_drift_only()
     test_signal_check_month_minimum()
     test_end_to_end_fold(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_market_schedule_pdf)

@@ -10,7 +10,8 @@ Evaluation And Honest Reporting (shared by every walk-forward experiment)
 Success criteria (decided by Nicolas, 2026-10-04; the same for every experiment unless its protocol says otherwise):
     Primary      total return after all costs, chained over the evaluated windows, ABOVE buy-and-hold over the same windows
     Comparable   strategy total return >= 90% of buy-and-hold's (for a negative buy-and-hold: >= B&H - 10% of its size)
-    Secondary    a higher Sharpe ratio and a smaller maximum drawdown, counted only at a comparable return
+    Secondary    a higher Sharpe ratio OR a smaller maximum drawdown (either is enough; Nicolas, 2026-10-05), counted only at
+                 a comparable return; both flags are also reported separately
     Information  the strategy must also beat its uninformed baselines (same rule with random / fixed choices); otherwise
                  the rule, not the information, does the work
 
@@ -274,7 +275,8 @@ def get_success_criteria_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, ba
         baseline_total_return_dict_in (dict | None): Chained total return of each same-stop baseline (name -> return)
 
     Returns:
-        dict: chained returns, Sharpe ratios, drawdowns, primary / comparable / secondary flags, baselines beaten
+        dict: chained returns, Sharpe ratios, drawdowns, primary / comparable / secondary flags (secondary_success = Sharpe OR
+              drawdown), baselines beaten
     """
     # FUNCTION: CHAINED METRICS OF A DAILY RETURN SERIES
     def chained_metric_dict(return_pdf):
@@ -295,6 +297,8 @@ def get_success_criteria_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, ba
     # SECONDARY CRITERIA (ONLY COUNTED AT COMPARABLE RETURN)
     sharpe_bool = comparable_bool and strategy_dict["sharpe_ratio"] > buy_hold_dict["sharpe_ratio"]
     drawdown_bool = comparable_bool and strategy_dict["max_drawdown"] > buy_hold_dict["max_drawdown"]
+    # SECONDARY SUCCESS: EITHER IS ENOUGH (DECIDED BY NICOLAS, 2026-10-05; AUDIT F7)
+    secondary_bool = sharpe_bool or drawdown_bool
     # BASELINES BEATEN ON THE PRIMARY METRIC
     baseline_dict = baseline_total_return_dict_in or {}
     beaten_dict = {name: bool(strategy_dict["total_return"] > value) for name, value in baseline_dict.items()}
@@ -303,5 +307,5 @@ def get_success_criteria_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, ba
             "strategy_sharpe_ratio": strategy_dict["sharpe_ratio"], "buy_hold_sharpe_ratio": buy_hold_dict["sharpe_ratio"],
             "strategy_max_drawdown": strategy_dict["max_drawdown"], "buy_hold_max_drawdown": buy_hold_dict["max_drawdown"],
             "primary_success": bool(primary_bool), "comparable_return": bool(comparable_bool), "comparable_floor": comparable_floor,
-            "secondary_sharpe": bool(sharpe_bool), "secondary_drawdown": bool(drawdown_bool),
+            "secondary_sharpe": bool(sharpe_bool), "secondary_drawdown": bool(drawdown_bool), "secondary_success": bool(secondary_bool),
             "baselines_beaten": beaten_dict, "all_baselines_beaten": bool(all(beaten_dict.values())) if beaten_dict else None}

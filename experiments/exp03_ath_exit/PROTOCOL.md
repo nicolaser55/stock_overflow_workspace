@@ -33,7 +33,7 @@ near-ATH days are not enough.
 ## 3. Success criteria
 
 As exp02 (`so/core/evaluation.py`): primary = chained total return after costs above buy-and-hold; secondary = higher Sharpe
-and smaller maximum drawdown at a comparable return (≥ 90% of buy-and-hold's); **information** = the rule must beat its
+**or** smaller maximum drawdown at a comparable return (≥ 90% of buy-and-hold's; either is enough, Nicolas 2026-10-05); **information** = the rule must beat its
 random baselines (§7); monthly block-bootstrap interval of the chained excess return ("statistically supported" only if its
 lower bound is above 0).
 
@@ -72,8 +72,15 @@ As exp02: SPY minute bars, unadjusted, bad ticks corrected (3% rule). The daily 
    invested decision in the window. Tests the ATH exit signal itself.
 4. **200-session moving-average rule** (reference only).
 
-When the rule never exits in a window, every random run equals the rule. *Baselines 3 and 4 were added by the assistant
-when writing this protocol (the agreed design named buy-and-hold and random buy-back); Nicolas to confirm.*
+When the rule never exits in a window, every random run equals the rule. The **information test** uses baselines 2 and 3:
+the rule must beat the median of both random families. Baseline 4 is context only (a well-known simple timing rule) and
+decides nothing.
+
+*Baselines 3 and 4 were added by the assistant when writing this protocol (the agreed design named buy-and-hold and
+random buy-back). Nicolas kept them on 2026-10-05 "if they benefit the experiment": baseline 3 is the direct test of the
+hypothesis (is selling near the ATH better than selling at random times, with the same buy-back?), baseline 4 gives
+context. Disclosure: the assistant had seen one sandbox run of these baselines when recommending to keep them; Nicolas
+had not; neither baseline affects which rule is selected.*
 
 ## 8. Reporting
 
@@ -109,4 +116,4 @@ information test). The test windows are evaluated only after the design is froze
 | Version | Date | Change |
 |---|---|---|
 | (exploration) | 2026-10-04 | Step 13 exploration, 15 rules, 2005-2014 (`ath_exit_exploration`, `ath_exit_exploration_clean`) |
-| 1.0 | 2026-10-05 | Full experiment (decided by Nicolas): all 15 rules as walk-forward candidates, exp02's schedule and pooled selection, buy-and-hold and random buy-back baselines; random exit and trend baselines added by the assistant (to confirm); honest reporting as exp02 |
+| 1.0 | 2026-10-05 | Full experiment (decided by Nicolas): all 15 rules as walk-forward candidates, exp02's schedule and pooled selection, buy-and-hold and random buy-back baselines; random exit and trend baselines added by the assistant and kept by Nicolas; secondary criterion = Sharpe **or** drawdown; honest reporting as exp02 |
