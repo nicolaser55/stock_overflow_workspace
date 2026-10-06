@@ -168,3 +168,4 @@ notebook). A crash half-way is recorded and the notebook re-run once (workflow.m
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-06 | Initial protocol (agent, autonomous mode), pre-registered before any run |
+| 1.0 | 2026-10-06 | Runs: step 01 (9 exploration trials) and step 02 (396 validation + 1 summary). Prior-only +70.84% vs +229.74%, beats 0/20 random exits and 4/20 random re-entries: the stopping rule (§11) fires, **STOP**. No new version (docs/RESULTS_LOG.md) |

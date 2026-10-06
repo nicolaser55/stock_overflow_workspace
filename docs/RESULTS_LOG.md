@@ -22,6 +22,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp01_minute_entry` | 1.0 | **STOP** (2026-10-06) | Signal check: 2 signal bins vs null max 4, p = 0.10 → STOP. Walk-forward (run before the verdict): prior-only +146.94% vs buy-and-hold +218.48% |
 | `exp02_stop_reentry` | 1.0 | **STOP** (2026-10-05) | 0 signals; prior-only +111.66% vs +237.21%; the model's re-entry is worse than all 20 random re-entry runs |
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
+| `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 
 ## Reproduction checks for the re-run
 
@@ -168,6 +169,54 @@ Design choices (the conservative option, documented in each protocol that uses t
 - Interval: annualized log excess = 12 × mean monthly log excess, with a **circular block bootstrap of 6-month blocks**
   as the primary interval (long exits create dependence across months; longer blocks give wider, more honest intervals),
   the 1-month version printed alongside.
+
+## exp04_trend_exit
+
+**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §11). Pre-registered in commit `preregister exp04`
+(before any run); config hash `8f4c178319`. Trials: 9 exploration (2026-10-06T14:22:35), 396 validation and 1 summary
+(2026-10-06T14:24:31 / 14:25:18), 406 in total against a budget of 410. Numbers below are copied from the saved
+outputs of `step01_exploration.ipynb` and `step02_continuous_replay.ipynb`.
+
+Rule: leave SPY when the close has been more than x below its 200-session average for n sessions in a row; buy back
+when it is more than x above it. Grid x ∈ {0, 3, 5}%, n ∈ {1, 5, 10} (9 candidates); one continuous replay, no reset.
+
+**Step 01, exploration 2005-01-03 → 2014-12-31 (context only, hindsight-prone).**
+- Reproduction: the textbook rule (x = 0, n = 1) gives **+50.39% vs buy-and-hold +69.02%** (33 exits, 1 bought back
+  lower, product of S/R 0.8921), matching the exp02 step 01 number (+50.4% vs +69.0%).
+- 7 of 9 candidates beat buy-and-hold on this decade, best x = 5%, n = 10: +116.85% (2 exits; the 2008-01-25 → 2009-07-15
+  exit has S/R 1.4238, the 2011 one 0.9011). Every 95% log-excess interval includes 0 (e.g. best: +2.49%/yr,
+  [−4.54%, +13.00%]). Observed: the whole gain comes from one episode, 2008, which every buffered rule sat out.
+
+**Step 02, continuous replay over the 44 validation periods (2015-04-17 → 2026-04-15, 2,765 sessions).** Schedule
+asserted identical to exp03's; bars cut at 2026-04-15 before any simulation.
+- After the fact (optimistic): every candidate loses to buy-and-hold (+235.39%). Best x = 3%, n = 1: **+131.27%**
+  (7 exits, 78.2% in the market, annualized log excess −3.35%/yr [−6.81%, +0.19%]); worst x = 5%, n = 10: +51.63%.
+- **Prior-only path (43 periods, 2015-07-17 → 2026-04-15): +70.84% vs buy-and-hold +229.74%** (annualized 5.12% vs
+  11.77%). 83.0% in the market, 12 exits, mean 38.3 cash decisions per episode. 18 of 43 periods won (sign test
+  p = 0.889); mean period excess −1.60% (SD 3.80%, t = −2.76); MDE 1.62% per period (6.50% per year).
+- Annualized log excess **−6.07%/yr**, 95% interval with 6-month blocks [−10.54%, −2.14%] (1-month blocks [−11.73%,
+  −0.50%]): the loss is significant, the gain is excluded. Sharpe 0.43 vs 0.71; max drawdown −29.24% vs −34.21%
+  (comparable return, Sharpe and drawdown flags all False). Costs barely matter: excess −158.69% / −158.90% / −159.13%
+  at 0 / 1 / 2 cents slippage.
+- Information test: random exits with the same re-entry rule (median of 20) **+164.94%**, the path beats 0 of 20; random
+  re-entries after the same exits (median) **+92.67%**, the path beats 4 of 20. Both families beat the path → the
+  trend signal carries no exit or re-entry information on this period; the rule is worse than chance at both ends.
+- Scorecard: **0 of 12 episodes bought back lower**; product of S/R **0.5182**. Large ones: 2018-12-28 → 2019-03-21
+  (S/R 0.8702, SPY +14.91% while out), 2020-03-11 → 2020-06-03 (0.8818, +13.39%), 2022-05-11 → 2023-02-02 (0.9421, 183
+  sessions out, +6.14%).
+
+*Mathematically:* each episode multiplies the share count by S/R = exit fill / re-entry fill (minus costs), and at the
+end the path holds the same cash-free position as buy-and-hold, so final equity / buy-and-hold equity = Π S/R ≈ 0.518;
+indeed 1.7084 / 3.2974 = 0.518. A trend filter needs at least one episode with S/R well above 1 (2008 gave 1.42-1.56)
+to pay for the many small losses; 2015-2026 had no such bear market: the declines (2018, 2020, 2022, 2025) were
+recovered before the average turned back, so every buy-back price was higher than the sale price.
+*In plain words:* waiting for SPY to cross back over its 200-day average meant buying back after the rebound had already
+happened, every time. Over 2015-2026 the rule lost about half of the shares buy-and-hold kept. The rule worked in
+2005-2014 only because of 2008.
+
+What this supports: on 2015-2026, the 200-session trend exit (with buffers and confirmation) does not beat buy-and-hold,
+and its timing is worse than random. What it does not support: a statement about deep, slow bear markets (only one
+in the exploration decade, none in the validation decade) or about other trend measures (not tested).
 
 ## Cross-experiment notes (2026-10-06)
 
