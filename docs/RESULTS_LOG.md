@@ -35,7 +35,7 @@ re-run must reproduce these earlier numbers (corrected data). A difference means
 | exp02 step02 | 0 signals (the verdict cannot change with the month minimum: no bin passed training in v2) | reproduced |
 | exp03 step01 | buy-and-hold +69.02%; 5 of 15 rules above it; best: within 0.5%, 5% dip, +80.69% (+11.68 pts) | reproduced |
 | exp01 step03 | validation candidates identical to `lgbm_ev_policy_v1_clean` (best setting +158% vs +230%; at most 16 of 45 quarters) | reproduced (+158.08% vs +230.36%; at most 16 of 45) |
-| exp01 step02 | new result (base-rate check); the old break-even check found 1,339 training passes and 0 signals | new result, below; the first run (hash `16493e598a`) and the re-run must show the same real-check counts (to confirm from the notebook tagged `first-run-20261006`) |
+| exp01 step02 | new result (base-rate check); the old break-even check found 1,339 training passes and 0 signals | new result, below; the first run (hash `16493e598a`) and the re-run show the same real-check counts (5,628 / 174 / 4; confirmed by the agent on 2026-10-06 from commit `da790c1`) |
 | exp03 step02 | first official run; the assistant's sandbox run gave +143.05% | identical (+143.05%) |
 
 *Verification run by the assistant (2026-10-05).* To test the reorganized code, the assistant executed pipeline steps 00
@@ -99,6 +99,13 @@ in the trial log.
 - Reading: the two bins are suggestive (intraday momentum on very tight brackets; fewer TP hits after wide-range days)
   but not established. The validation lift is about three times the training lift, a typical sign of noise in small
   samples (about 600 overlapping rows per validation bin).
+- *Reproduction confirmed (agent, 2026-10-06; research state open item 1, closed).* The first run's executed notebook
+  (commit `da790c1`, message `first-run-20261006`; there is no git tag of that name, the label is the commit message),
+  cell 6 output: `test_count 5628`, `train_pass_count 174`, `signal_count 4`, `signal_bin_count 2`, signal features
+  `['intraday_return_pct', 'prev_day_range_pct']`, distances `[0.0013, 0.0014, 0.0016, 0.0018]`, verdict `CONTINUE`
+  (uncalibrated rule). The re-run (hash `15716b01a3`, cell 7) prints the same seven values, then the null calibration
+  and `STOP`. The two `signal_check` entries of the trial log (2026-10-05T15:17:38 `16493e598a` and 2026-10-06T12:46:46
+  `15716b01a3`) hold the same counts. The real-check part is reproduced; the verdict STOP stands. No trial added.
 
 *Step 03, walk-forward* (2026-10-05, hash `16493e598a`; run before the step 02 verdict existed, as the re-run guide ran
 every notebook in order: these results are reported as **run past the stopping rule**). 45 folds × 12 candidates = 540

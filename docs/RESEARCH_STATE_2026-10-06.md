@@ -137,8 +137,9 @@ Numbering: the VIX experiment, planned as exp04 on 2026-10-05, moves after this 
 
 ### Open items
 
-1. Confirm that the first run of exp01 step 02 (notebook at git tag `first-run-20261006`) shows `test_count 5628`,
-   `train_pass_count 174`, `signal_count 4` (the re-run's real-check numbers). Record the result in `docs/RESULTS_LOG.md`.
+1. ~~Confirm that the first run of exp01 step 02 (notebook at git tag `first-run-20261006`) shows `test_count 5628`,
+   `train_pass_count 174`, `signal_count 4`.~~ **Closed 2026-10-06 (agent):** confirmed from commit `da790c1` (the label
+   is a commit message, not a tag) and the trial log; recorded in `docs/RESULTS_LOG.md` (exp01 step 02).
 2. Reporting improvement (Step 0): replace the total-return bootstrap interval with an annualized log-excess interval.
 3. Dividends and cash yield (§4): ask Nicolas for the data sources before exp04's first validation run, or run with the
    bias stated.
