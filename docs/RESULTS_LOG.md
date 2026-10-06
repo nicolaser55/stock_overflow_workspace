@@ -24,6 +24,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
+| `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
 
 ## Reproduction checks for the re-run
 
@@ -280,6 +281,57 @@ about 64 points of total return over 10.7 years, more than simply keeping 14% in
 What this supports: on 2015-2026, unlevered volatility scaling with this σ̂ does not beat buy-and-hold and its timing
 adds no return over an uninformed exposure; it does lower the drawdown. What it does not support: anything about levered
 volatility management (excluded by the project), about implied volatility (VIX, new data, parked), or about other σ̂.
+
+## exp06_capped_regret_reentry
+
+**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9: the primary criterion fails). **Data-dependent
+follow-up of exp03** (disclosed in the protocol). Pre-registered in commit `1bac3b4` (`preregister exp06`, before any
+run); config hash `5927a03c1d`. Trials: 12 exploration, 528 validation and 1 summary (2026-10-06), 541 in total against a
+budget of 545. Numbers below are copied from the saved outputs of `step01_exploration.ipynb` and
+`step02_continuous_replay.ipynb` and their CSV files.
+
+Rule: exit on `trend_ma200` (close below the 200-session average) or `ath_1pct` (close within 1% of the all-time high);
+buy back at once if the close reaches S × (1 + b) (buy-stop; then no exit for c decisions), or when the close is back
+above the average after a close below it (recovery). Grid 2 exits × b ∈ {1, 2, 3}% × c ∈ {0, 20} (12 candidates).
+
+**Step 01, exploration 2005-01-03 → 2014-12-31 (context only).** Buy-and-hold +69.02%. Only 1 of 12 candidates beats it
+(trend, b = 2%, c = 20: +78.60%, log excess +0.55%/yr [−7.91%, +12.02%]). Every ATH candidate loses (+20.83% to
++38.59%; drawdowns about −55%, as buy-and-hold's, because the buy-stop puts it back in before 2008): their wrong-exit
+share q is 0.69-0.96 and (1 − q) × G < q × |L| in all six. Observed: trend, b = 1%, c = 20 ends at −9.44% with a −66.33%
+drawdown: a buy-stop re-entry followed by the 20-decision block kept it invested into the 2008 decline.
+
+**Step 02, continuous replay over the 44 validation periods (2015-04-17 → 2026-04-15).** Schedule asserted identical to
+exp03's; bars cut at 2026-04-15.
+- After the fact (optimistic): every candidate loses to buy-and-hold (+235.39%). Best ATH 1%, b = 1%, c = 20:
+  **+200.12%** (70.6% in the market, 45 exits; −1.00%/yr [−4.13%, +2.18%]); worst ATH 1%, b = 1%, c = 0: +68.67% (104
+  exits, 43.2% in the market). Trend candidates +101.75% to +144.80%.
+- **Prior-only path (43 periods, 2015-07-17 → 2026-04-15): +147.38% vs buy-and-hold +229.74%** (annualized 8.81% vs
+  11.77%). 69.8% in the market, 45 exits, mean 18.1 cash decisions per episode. 13 of 43 periods won (sign test
+  p = 0.997); mean period excess −0.79% (SD 4.25%, t = −1.21); MDE 1.81% per period (7.26% per year).
+- Annualized log excess **−2.65%/yr**, 95% interval (6-month blocks) [−6.74%, +1.53%] (1-month blocks [−7.99%, +3.07%]).
+  Sharpe 0.66 vs 0.71; max drawdown −28.84% vs −34.21%; comparable, Sharpe and drawdown flags all False. Excess
+  −81.70% / −82.36% / −82.98% at 0 / 1 / 2 cents.
+- **Information test passed** (first time in this family): random exits with the same re-entry rule (median of 20)
+  +124.82%, the path beats **19 of 20**; random re-entries after the same exits (median) +103.08%, the path beats
+  **15 of 20**. With 20 runs per family, 19 of 20 is an empirical p of about 0.05-0.10, before any correction for the 12
+  candidates, the data-dependent design and the 6,700+ earlier trials.
+- Trigger arithmetic of the path (log share gains): 45 episodes, **37 ended by the buy-stop (q = 0.822)**, 8 by the
+  recovery; mean gain of the right exits G = +0.0350, mean loss of the wrong ones L = −0.0153; (1 − q) × G = 0.0062 vs
+  q × |L| = 0.0126 per episode. 6 of 45 bought back lower; product of S/R 0.7514. Largest right exit: 2022-04-08 →
+  2022-11-30, S/R 1.0994 (162 sessions out, SPY −9.05%).
+- Selections: ATH 1%, b = 1%, c = 20 governed 15 periods; trend candidates 18 of 44 in total.
+
+*Mathematically:* final equity ÷ buy-and-hold ≈ Π S/R = 0.7514 (2.4738 ÷ 3.2974 = 0.750). In logs, Σ log(S/R) =
+45 × (0.0062 − 0.0126) ≈ −0.29 = log 0.75: each wrong exit costs about b + costs (1.5%), each right one earns 3.5%, and
+four of five exits were wrong. The buy-stop did its job (it capped every wrong exit near b); what it cannot do is make
+right exits frequent enough.
+*In plain words:* the rule sells too often for the few times it is right. Its timing is better than chance with the same
+activity (it beats random exits and random buy-backs), so the signals are not pure noise, but on 2015-2026 the gains of
+the good exits were about half the costs of the bad ones, and the path ended 82 points behind buy-and-hold.
+
+What this supports: an exit signal plus a buy-stop carries some timing information over random timing on this span, but
+not enough to beat buy-and-hold after its wrong exits. What it does not support: that this information would survive a
+correction for the selection (data-dependent design, 12 candidates, 6,700+ trials) or appear on new data.
 
 ## Shared code change for exp06 (2026-10-06, agent; no trial)
 
