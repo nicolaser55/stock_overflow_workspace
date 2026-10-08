@@ -79,7 +79,7 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 
 | Zone | Folder | Written by | Kept? |
 |---|---|---|---|
-| raw | `store01_rawzone/ibkr_ohlcv_data/` | IBKR download, bad ticks corrected once (`records/bad_tick_corrections.csv`) | always |
+| raw | `store01_rawzone/ibkr_SPY_ohlcv_data/` | IBKR download, bad ticks corrected once (`records/bad_tick_corrections.csv`) | always |
 | pipeline | `store02_workzone/step00_data_quality_report/` | pipeline step 00 | yes |
 | pipeline | `store02_workzone/step01_PA_ohlcv_data/` ... `step04_TSCTX_data/` | pipeline steps 01-04 (per-day caches) | yes |
 | pipeline | `store03_goldzone/step05_TSBAR_data/` | pipeline step 05 (barrier targets, per day) | yes |
