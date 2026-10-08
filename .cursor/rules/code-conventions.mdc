@@ -1,0 +1,49 @@
+---
+description: Code and notebook conventions of the Stock Overflow workspace (comments, naming, docstrings, notebooks, line endings)
+globs: "**/*.py,**/*.ipynb,**/*.md"
+alwaysApply: false
+---
+
+# Code conventions (Nicolas's style; follow it exactly in new and edited code)
+
+- **Every code line is preceded by an UPPERCASE `#` comment** saying what it does (one comment may cover a short block of
+  2-3 tightly related lines, as in the existing code).
+- Every function has a `# FUNCTION: <WHAT IT DOES>` header line and a docstring with `Args:` and `Returns:` sections.
+- Variable and parameter suffixes: `_pdf` (pandas DataFrame), `_str`, `_list`, `_dict`, `_arr` (numpy array), `_bool`,
+  `_float`, `_int`; function parameters end with `_in` (e.g. `date1_str_in`). Function names say what they return:
+  `get_..._pdf`, `get_..._dict`, `simulate_..._dict`, `run_..._dict`.
+- Module docstrings explain the design in plain words (what, why, the rules), placed after the imports, as in
+  `so/core/reentry_simulation.py`. Sections inside a module are separated by short `"""Section Title"""` strings.
+- Experiment constants live in `experiments/expNN_<name>/config.py`, one comment per constant, grouped in sections; shared
+  constants are read from `so.config`, never copied. Inside notebooks `config` is the shared configuration and
+  `exp_config` the experiment's.
+- Notebooks are named `stepNN_<purpose>.ipynb`. Cell 0 is a docstring cell (objective, prerequisites, outputs, how it
+  connects to the protocol); cell 1 the imports; cell 2 the header (experiment name, protocol version, config hash,
+  output folder, earlier-trial warning via `print_previous_trial_warning`). Then data, work, save, **log to the trial
+  log**, and a last cell with the trial count (`get_trial_count_pdf`). Outputs go to
+  `store04_experiments/<EXPERIMENT_NAME>/stepNN_<purpose>_data/`. Assign return values that would otherwise print
+  (e.g. `previous_trial_count = ...`).
+- Timestamps are parsed as UTC and converted to `America/New_York`. Per-day files are `{name}_YYYYMMDD.csv`.
+- `.py` and `.md` files use **CRLF** line endings.
+- Tests are plain-assert functions on synthetic data (`tests/synthetic_data.py`), each ending with
+  `passed("<what was checked>")`; a new suite is added to `tests/run_all_tests.py`.
+
+Example of the expected style:
+
+```python
+# FUNCTION: GET THE MINIMUM DETECTABLE EFFECT
+def get_mde_float(std_float_in, count_int_in, z_factor_in=config.MDE_Z_FACTOR):
+    """
+    Minimum detectable effect of a mean: the true mean that a two-sided 5% test detects with 80% power.
+
+    Args:
+        std_float_in (float): Standard deviation of the observations
+        count_int_in (int): Number of observations
+        z_factor_in (float): z(0.975) + z(0.80)
+
+    Returns:
+        float: Minimum detectable mean (NaN with fewer than 2 observations)
+    """
+    # RETURN THE MDE
+    return float(z_factor_in * std_float_in / np.sqrt(count_int_in)) if count_int_in > 1 and np.isfinite(std_float_in) else np.nan
+```
