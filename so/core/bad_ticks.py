@@ -6,7 +6,7 @@ raw data arrives and step 00 reports bad ticks:
 
     python scripts/fix_raw_bad_ticks.py                      # DRY RUN: report the bars that would be corrected, write nothing
     python scripts/fix_raw_bad_ticks.py --apply              # back up the raw files, correct them, write the correction log
-    python scripts/fix_raw_bad_ticks.py --path "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_ohlcv_data/"
+    python scripts/fix_raw_bad_ticks.py --path "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_SPY_ohlcv_data/"
 
 Known limitation (audit of 2026-10-05, docs/history/AUDIT_2026-10-05.md, F1): the 3% threshold leaves smaller wicks of
 the same kind (1.5-3%), including some in 2015-2026. The rule is kept unchanged so the pipeline caches stay valid.
@@ -59,7 +59,7 @@ from so.core.local_file_management import get_path_file_list, write_csv_file_to_
 from so import paths
 
 # DEFINE THE DEFAULT RAW FOLDER (THE NETWORK SHARE OF NICODESKTOP; FORWARD SLASHES WORK ON WINDOWS)
-DEFAULT_RAW_PATH_STR = "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_ohlcv_data/"
+DEFAULT_RAW_PATH_STR = "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_SPY_ohlcv_data/"
 # DEFINE THE BAD TICK THRESHOLD (DISTANCE BEYOND THE REFERENCE PRICE)
 BAD_TICK_THRESHOLD = 0.03
 # DEFINE THE PRICE COLUMNS USED BY THE RULE

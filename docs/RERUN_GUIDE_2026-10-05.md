@@ -74,7 +74,7 @@ Do the parts in order. Parts A-C take a few minutes; part E takes a few hours (m
 3. **Optional** (legacy, no code reads them any more): `store02_workzone/strat01_transaction_data/` …
    `strat14_transaction_data/`, and `store03_goldzone/step12_TS_delta_matrix_sell_data/` if it exists.
 
-4. **Keep**: `store01_rawzone/ibkr_ohlcv_data/` (corrected raw data), `store01_rawzone/ibkr_ohlcv_data_backup_<timestamp>/`
+4. **Keep**: `store01_rawzone/ibkr_SPY_ohlcv_data/` (corrected raw data), `store01_rawzone/ibkr_SPY_ohlcv_data_backup_<timestamp>/`
    (the originals before the correction: the evidence for `records/bad_tick_corrections.csv`),
    `store02_workzone/step00_data_quality_report/`, `step01_PA_ohlcv_data/`, `step02_TSIND_data/`, `step03_TSSEG_data/`,
    `step04_TSCTX_data/`, and `store03_goldzone/step05_TSBAR_data/`.

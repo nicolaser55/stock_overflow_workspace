@@ -31,7 +31,7 @@ Rawzone
 """
 
 # DEFINE THE RAW IBKR MINUTE BARS FOLDER (YEARLY FILES)
-LOCAL_OHLCV_DATA_FILE_PATH_STR = f"{LOCAL_RAWZONE_PATH_STR}ibkr_ohlcv_data/"
+LOCAL_OHLCV_DATA_FILE_PATH_STR = f"{LOCAL_RAWZONE_PATH_STR}ibkr_spy_1min/"
 
 """
 Pipeline (shared by every experiment)
