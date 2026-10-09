@@ -214,6 +214,27 @@ exp09-exp11 are data-dependent follow-ups of failed experiments (exp04/exp07, ex
 2008 and 2020; 2015-2026 is development data reused for the eighth time; VIX3M starts 2009-08-12; the IBKR index data
 was not compared with Cboe's values; the bar-label convention is unproven.
 
+### exp12_vix_fear_reentry (decided by Nicolas on 2026-10-09; data-dependent follow-up of exp08; exp09's rules, primary timing only; budget 300)
+*Added 2026-10-09 (Nicolas's answer (b) to the parked decision "VIX line closed"). exp09-exp11 stay SKIPPED.*
+- **Why:** exp08's gates did not open exp09 (G1 S1 = 0, p = 1.00; G2 dAUC +0.0359, null max +0.0563, p = 0.15). After
+  seeing exp08's descriptive table (mean 20-session forward return after a top-quintile VIX +2.82% vs about +1% on
+  validation; after an inverted term structure +3.07% vs +0.81%), Nicolas decided to run the VIX-timed re-entry anyway:
+  the decision to run is **data-dependent** and overrides a pre-registered gate. The audit of 2026-10-09 (A1) noted that
+  G1/G2 tested the sign of forward returns, while exp09's mechanism concerns their size after fear peaks.
+- **Rules:** exactly exp09's (sent before exp08 ran; roadmap commit `5131de7`): exits E1 (exp04 x = 0, n = 1) and E2
+  (exp07 k = 4), each with its original re-entry as the fallback; M1 fear-fade re-entry (VIX ≤ 0.85 × its maximum since
+  the exit decision), M2 term-structure re-entry (VIX / VIX3M back below 1 after being ≥ 1 since the exit), M3 no exit
+  into fear (exit ignored when VIX / VIX3M ≥ 1 or the 250-session VIX percentile ≥ 0.9); after a VIX-triggered re-entry a
+  new exit needs a fresh signal. **The one change from exp09:** the `_intraday` secondary variant is dropped (Nicolas,
+  2026-10-09, before any exp12 run). 6 candidates, `_prev` features only.
+- **Steps:** step 01 exploration 2009-08-13 → 2014-12-31 (data cut 2015-03-18; 6 trials); step 02 continuous replay
+  over the 44 periods (264 validation trials) and the prior-only path with exp04's pooled 4-period selection (1 summary).
+  Expected 271 trials, budget 300.
+- **Success:** primary = the prior-only path beats buy-and-hold (+229.74% on 2015-07-17 → 2026-04-15); information =
+  it also beats the unmodified prior-only path over {E1, E2} and the median of both random families. Primary fails →
+  STOP, the VIX line closes definitively. Primary passes → "candidate result pending review" only, parked. This is the
+  **last** VIX re-entry test: no later version may be motivated by its results.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -229,7 +250,7 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | 2026-10-06 (agent) | What next if no new data is allowed | (a) stop the "time the exit" line and write up the negative result (exp01-exp07, 7,381 trials); (b) a new roadmap item proposed by Nicolas | (a): seven designs, none beats buy-and-hold on the prior-only path, of exp02-exp07 only exp06 beats both of its uninformed baselines | Session ended |
 | *Correction 2026-10-06, after the independent audit (I2)* | — | — | *In the row above, "only exp06 beats both of its uninformed baselines" means it beat the median of each random family (19/20 random exits, 15/20 random re-entries): empirical p ≈ 0.10 and ≈ 0.29 for a data-dependent design with 12 candidates, after about 7,400 trials, "consistent with weak timing information; not statistically supported". The recommendation (a) is unchanged* | — |
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
-| 2026-10-09 (agent) | VIX line closed: exp08's gates opened none of exp09-exp11 (G1, G2, G4 fail; G3 passes) | (a) stop the "time the exit" line and write up the negative result (exp01-exp08, 3,299 workspace trials, 7,388 with the legacy trials); (b) new ideas from Nicolas | (a) | Session ended; nothing else on the roadmap is allowed (text data is parked) |
+| 2026-10-09 (agent) | VIX line closed: exp08's gates opened none of exp09-exp11 (G1, G2, G4 fail; G3 passes) | (a) stop the "time the exit" line and write up the negative result (exp01-exp08, 3,299 workspace trials, 7,388 with the legacy trials); (b) new ideas from Nicolas | (a) | Session ended; nothing else on the roadmap is allowed (text data is parked). **ANSWERED 2026-10-09 (Nicolas): (b), one data-dependent follow-up, exp12, then the write-up** |
 
 ### Open items
 
