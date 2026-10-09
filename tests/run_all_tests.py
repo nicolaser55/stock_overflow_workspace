@@ -21,12 +21,13 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
     tests/test_vix_features.py       VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, no look-ahead, formulas)
     tests/test_exp08.py              exp08 VIX gate (analysis rows, shifted null, G1-G4 on planted data, gate decisions)
     tests/test_exp12.py              exp12 VIX re-entry rules (M1-M3, fresh-exit option of the simulator, walk-forward, reports)
+    tests/test_exp13.py              exp13 E1M1 robustness (average distances, variants = frozen, delay, VIX shift, nulls, reports, verdict)
 
     Output is forced to UTF-8 (the suites print emoji; a Windows console or pipe in cp1252 would otherwise crash the print).
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp08.py", "test_exp12.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp08.py", "test_exp12.py", "test_exp13.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
