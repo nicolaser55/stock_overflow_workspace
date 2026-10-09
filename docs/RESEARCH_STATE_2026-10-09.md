@@ -30,6 +30,7 @@ every working session (section 8) and write a new dated copy when the roadmap ch
 | exp06_capped_regret_reentry (agent, data-dependent) | Exit + buy-stop at S(1 + b) + recovery trigger | +147.38% vs +229.74% | First timing better than random (19/20 exits, 15/20 re-entries), but 4 of 5 exits wrong: (1 − q)G = 0.0062 < q|L| = 0.0126 |
 | exp07_warning_lights_exit (agent) | Exit when k of 5 lagging warning lights agree | +49.09% vs +229.74% | Worked on 2008 (one exit) only; on 2015-2026 all 12 exits bought back higher; worse than random exits (0/20) |
 | exp08_vix_signal_check (agent, 2026-10-09) | Gate of the VIX line (G1-G4) | No strategy: no gate opens, exp09-exp11 skipped | The VIX forecasts volatility (G3 passes) but not direction (G1 S1 = 0; G2 dAUC +0.036 vs null max +0.056); the top VIX quintile was followed by +1.9% / +2.8% per 20 sessions (G4 fails): high fear preceded good returns |
+| exp12_vix_fear_reentry (agent, 2026-10-09, data-dependent) | exp09's rules: E1 / E2 exits with VIX fear-fade (M1) or term-structure (M2) re-entry, or no exit into fear (M3) | +119.24% vs +229.74% | VIX buy-backs did buy back lower (10 of 29 episodes, Π S/R 1.19), but the 19 price-rule buy-backs cost more (Π S/R 0.56); beats the unmodified exits (+82.88%) and 13/20 random re-entries, 0/20 random exits. Optimistic best E1M1 +314.80% vs +235.39% was not found in advance |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
 - *exp05 (I3): "below constant exposure (+198.52%)": that baseline is "buy 86.3% and hold" (never rebalanced, mean
@@ -61,7 +62,7 @@ Facts that constrain every new design:
 | Period | Status |
 |---|---|
 | 2005-01-03 → 2014-12-31 | Exploration period, explored by exp02 step 01 and exp03 step 01 (and earlier work). Famous events (2008) are known to everyone, including the agent: any result that depends on 2008 is hindsight-prone |
-| 2015-04 → 2026-04 (validation quarters) | **Development data**, looked at many times by exp01-exp03 and earlier work (audit F6). Every older test window is inside a later validation quarter |
+| 2015-04 → 2026-04 (validation quarters) | **Development data**, looked at many times by exp01-exp03 and earlier work (audit F6). Every older test window is inside a later validation quarter. *2026-10-09: used nine times (exp01-exp08, exp12); exp12's last loaded SPY and VIX date is 2026-04-15* |
 | **2026-05-14 → 2026-08-13** | The latest test window: **never read by any experiment. Untouched. Protect it** |
 | After 2026-08-13 | Future data: the final confirmation of a frozen design (paper trading / forward test) |
 | VIX / VIX3M (`store01_rawzone\ibkr_vix_family\`) | The files run to 2026-10-07 (VIX) and 2026-10-06 (VIX3M); every loader (`so.features.vix_features`) refuses dates from 2026-05-14 on. VIX starts 2005-10-03, VIX3M 2009-08-12 in the IBKR data. Never read for the untouched window; the staging folder is never read |
@@ -214,8 +215,10 @@ exp09-exp11 are data-dependent follow-ups of failed experiments (exp04/exp07, ex
 2008 and 2020; 2015-2026 is development data reused for the eighth time; VIX3M starts 2009-08-12; the IBKR index data
 was not compared with Cboe's values; the bar-label convention is unproven.
 
-### exp12_vix_fear_reentry (decided by Nicolas on 2026-10-09; data-dependent follow-up of exp08; exp09's rules, primary timing only; budget 300)
+### exp12_vix_fear_reentry (decided by Nicolas on 2026-10-09; data-dependent follow-up of exp08; exp09's rules, primary timing only; budget 300) — **STOP 2026-10-09 (agent): the VIX line is closed definitively**
 *Added 2026-10-09 (Nicolas's answer (b) to the parked decision "VIX line closed"). exp09-exp11 stay SKIPPED.*
+*Result (2026-10-09): pre-registered `1e6a2e6`, run once, 271 trials. Prior-only +119.24% vs buy-and-hold +229.74%
+(log excess −3.77%/yr [−7.95%, −0.37%]); primary fails → STOP. Details: `docs/RESULTS_LOG.md`, exp12.*
 - **Why:** exp08's gates did not open exp09 (G1 S1 = 0, p = 1.00; G2 dAUC +0.0359, null max +0.0563, p = 0.15). After
   seeing exp08's descriptive table (mean 20-session forward return after a top-quintile VIX +2.82% vs about +1% on
   validation; after an inverted term structure +3.07% vs +0.81%), Nicolas decided to run the VIX-timed re-entry anyway:
@@ -251,6 +254,7 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | *Correction 2026-10-06, after the independent audit (I2)* | — | — | *In the row above, "only exp06 beats both of its uninformed baselines" means it beat the median of each random family (19/20 random exits, 15/20 random re-entries): empirical p ≈ 0.10 and ≈ 0.29 for a data-dependent design with 12 candidates, after about 7,400 trials, "consistent with weak timing information; not statistically supported". The recommendation (a) is unchanged* | — |
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
 | 2026-10-09 (agent) | VIX line closed: exp08's gates opened none of exp09-exp11 (G1, G2, G4 fail; G3 passes) | (a) stop the "time the exit" line and write up the negative result (exp01-exp08, 3,299 workspace trials, 7,388 with the legacy trials); (b) new ideas from Nicolas | (a) | Session ended; nothing else on the roadmap is allowed (text data is parked). **ANSWERED 2026-10-09 (Nicolas): (b), one data-dependent follow-up, exp12, then the write-up** |
+| 2026-10-09 (agent) | Write-up of the negative result: exp12 stopped (prior-only +119.24% vs +229.74%), the VIX line is closed definitively; no roadmap item remains that is not blocked (text data is a new source) | (a) the agent drafts the write-up (`docs/`): question, the nine experiments run (exp01-exp08, exp12; exp09-exp11 skipped), the prior-only path vs buy-and-hold for each, the S/R identity and the rent of cash, the baselines, the trial counts (3,570 workspace, 7,659 with the legacy trials), the data-dependence of exp06 and exp12, and the limitations; Nicolas reviews; (b) Nicolas writes it from `docs/RESULTS_LOG.md`; (c) a new roadmap item first | (a): every number is already in the results log, so drafting it adds no trial and reads no new data; the untouched window stays unread (no design qualifies for it) | Session ended; no draft written (the write-up was not on the roadmap as an agent task) |
 
 ### Open items
 
@@ -276,3 +280,4 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | 2026-10-06 | agent | Independent audit of exp04-exp07 (`docs/AUDIT_2026-10-06_agent_session.md`): all results reproduced, issues I1-I6 recorded as corrections; no new runs | Blocked as above: parked decisions for Nicolas (§7) |
 | 2026-10-06 | agent | exp01 step 04 multivariate signal check (diagnostic decided by Nicolas, protocol 1.1 §13.3): pre-registered (`ae15c20`), run once; mean AUC 0.4943 vs null max 0.5282, p = 0.75, Outcome A (no information); 1 trial (workspace 3,293 + 4,089 legacy); exp01 stays STOPPED; no parked decision added | Blocked as above: parked decisions for Nicolas (§7) |
 | 2026-10-09 | agent | VIX roadmap (Nicolas 2026-10-08/09): branch `agent/research` on main `a4418d8`; roadmap commit `5131de7`; SPY rename check passed (5,436 sessions; +69.02%, +50.39%, +108.03% with 35 exits, +235.39%); VIX data layer + `pipeline/step07_VIX_data_check.ipynb` (no trials); exp08 pre-registered (`2c810d1`) and run once: G1, G2, G4 FAIL, G3 PASS; exp09-exp11 skipped; 6 trials (workspace 3,299 + 4,089 legacy = 7,388); parked "VIX line closed" | Blocked: text data and the "VIX line closed" decision are parked for Nicolas (§7) |
+| 2026-10-09 | agent | exp12_vix_fear_reentry (Nicolas's answer (b)): main `22ad606` merged (fast-forward); roadmap commit `6bfd642`; audit corrections A1, A2, A4 (`ca86bd0`); backward-compatible fresh-exit option of the simulator; exp12 pre-registered (`1e6a2e6`) and run once: reproduction asserts passed, exploration all 6 below buy-and-hold, prior-only +119.24% vs +229.74% → STOP, the VIX line is closed definitively; 271 trials (workspace 3,570 + 4,089 legacy = 7,659); parked "write-up of the negative result" | Blocked: the write-up and text data are parked for Nicolas (§7) |

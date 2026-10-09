@@ -202,4 +202,5 @@ A notebook is run once; a crash half-way is recorded with the trials it logged, 
 
 | Version | Date | Change |
 |---|---|---|
-| 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode, from Nicolas's decision of 2026-10-09), pre-registered before any run |
+| 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode, from Nicolas's decision of 2026-10-09), pre-registered before any run (`1e6a2e6`) |
+| 1.0 (result) | 2026-10-09 | Run once (271 trials, as expected). Primary fails (prior-only +119.24% vs +229.74%) → **STOP** by §8; the VIX line is closed definitively. No new version (no defect found). Details: `docs/RESULTS_LOG.md`, exp12 |
