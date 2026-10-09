@@ -40,7 +40,7 @@ from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.features.vix_features import (check_cutoff_date, read_vix_daily_pdf, read_vix_1min_pdf, get_vix_table_pdf, get_vix_feature_pdf,
                                       get_vix_feature_col_list, get_vix_coverage_pdf, get_vix_daily_feature_dict)
-from synthetic_data import get_synthetic_ohlcv_pdf
+from synthetic_data import get_synthetic_ohlcv_pdf, get_synthetic_index_daily_pdf, get_synthetic_index_minute_pdf
 
 # DEFINE THE TEMPORARY FOLDER (INSIDE THE WORKSPACE, GITIGNORED)
 TMP_PATH_STR = os.path.join(WORKSPACE_PATH_STR, "logs", "test_vix_tmp").replace("\\", "/") + "/"
@@ -51,30 +51,8 @@ SPAN_START_STR, SPAN_END_STR = "2019-01-02", "2021-06-30"
 def passed(name_str_in):
     print(f"✅ {name_str_in}")
 
-# FUNCTION: BUILD SYNTHETIC DAILY INDEX BARS (ONE PER NYSE DATE, MIDNIGHT NEW YORK LABEL)
-def get_synthetic_daily_bar_pdf(date1_str_in, date2_str_in, start_in, seed_in):
-    # COLLECT THE DATES
-    date_list = pd.to_datetime(get_date_range_market_schedule_pdf(date1_str_in, date2_str_in)["date"]).dt.date.tolist()
-    # GENERATE A POSITIVE RANDOM WALK
-    close_arr = np.round(start_in * np.exp(np.cumsum(np.random.default_rng(seed_in).normal(0, 0.05, len(date_list)))), 2)
-    # RETURN THE BARS
-    return pd.DataFrame({"timestamp": [pd.Timestamp(d).tz_localize(ny_tz) for d in date_list], "close": close_arr, "date": date_list})
-
-# FUNCTION: BUILD SYNTHETIC 1-MINUTE INDEX BARS (09:31 TO 15 MINUTES AFTER THE CLOSE)
-def get_synthetic_minute_bar_pdf(date1_str_in, date2_str_in, start_in, seed_in):
-    # CREATE THE GENERATOR AND COLLECT THE SCHEDULE
-    rng = np.random.default_rng(seed_in)
-    schedule_pdf = get_date_range_market_schedule_pdf(date1_str_in, date2_str_in)
-    # LIST TO HOLD THE SESSIONS
-    pdf_list = []
-    # ITERATE OVER THE SESSIONS
-    for open_ts, close_ts in zip(schedule_pdf.market_open_ts, schedule_pdf.market_close_ts):
-        # CREATE THE LABELS AND THE CLOSES
-        ts_index = pd.date_range(pd.Timestamp(open_ts) + pd.Timedelta(minutes=1), pd.Timestamp(close_ts) + pd.Timedelta(minutes=15), freq="min").tz_convert(ny_tz)
-        close_arr = np.round(start_in * np.exp(rng.normal(0, 0.1) + np.cumsum(rng.normal(0, 0.002, len(ts_index)))), 2)
-        pdf_list.append(pd.DataFrame({"timestamp": ts_index, "close": close_arr, "date": ts_index.date}))
-    # RETURN THE BARS
-    return pd.concat(pdf_list, ignore_index=True)
+# DEFINE THE SHORT NAMES OF THE SHARED SYNTHETIC INDEX GENERATORS
+get_synthetic_daily_bar_pdf, get_synthetic_minute_bar_pdf = get_synthetic_index_daily_pdf, get_synthetic_index_minute_pdf
 
 # FUNCTION: WRITE BARS IN THE RAW FILE FORMAT
 def write_raw_bar_file(bar_pdf_in, file_path_str_in):
