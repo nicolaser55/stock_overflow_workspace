@@ -765,6 +765,14 @@ commitment that it was "the last VIX re-entry test; no later version may be moti
 +235.39%, optimistic). exp12's verdict stays STOP; "the VIX line is closed definitively" above is suspended until exp13
 ends.
 
+*Audit notes 2026-10-09 (documentation only; the text above is unchanged):*
+- *B1: the prior-only log-excess interval is [−7.95%, −0.37%] with 6-month blocks and [−7.80%, +0.30%] with 1-month
+  blocks (the latter includes 0).*
+- *B3: in several periods all pooled scores were exactly 0 and the pre-registered tie order chose the candidate; the
+  prior-only path partly reflects that order.*
+- *B4: the split of the product of S/R by re-entry reason (M1 1.1324, M2 1.0538, original 0.5582) was computed after
+  the run from the saved scorecard.*
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
