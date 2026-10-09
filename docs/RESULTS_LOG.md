@@ -28,6 +28,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
 | `exp08_vix_signal_check` | 1.0 | **DONE, VIX line STOP** (2026-10-09) | Gate: G1 0 signal bins (null max 0, p = 1.00); G2 dAUC +0.0359 vs null max +0.0563 (p = 0.15); G3 PASS (D +0.1165 [+0.0441, +0.2227]); G4 FAIL (top VIX quintile mean forward return +1.91% / +2.82%). No gate opens: exp09-exp11 skipped |
 | `exp09_vix_reentry`, `exp10_vix_vol_scaled_exposure`, `exp11_vix_model_exit` | — | **SKIPPED** (2026-10-09) | Not run, by exp08's pre-registered gates (exp09 needs G1 or G2, exp10 G3 and G4, exp11 G2) |
+| `exp12_vix_fear_reentry` | 1.0 | **STOP** (2026-10-09) | Data-dependent follow-up of exp08 (Nicolas), exp09's rules. Prior-only +119.24% vs +229.74% (log excess −3.77%/yr [−7.95%, −0.37%]); unmodified path +82.88%; beats 0/20 random exits, 13/20 random re-entries. Optimistic best E1M1 +314.80% vs +235.39%. VIX line closed |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
 - *exp05 (I3): "constant exposure +198.52%" is not a constant exposure: with the 20-point dead band it never rebalanced,
@@ -513,6 +514,16 @@ block ends at the re-entry session itself. Checks: all 7 test suites pass (the n
 both cases), and exp04 step 01's numbers were recomputed with the changed simulator on the exploration data (not logged,
 not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 2 exits, identical to the saved outputs.
 
+## Shared code change for exp12 (2026-10-09, agent; no trial)
+
+*Implemented and tested.* `so/core/reentry_simulation.simulate_stop_reentry_dict` gained a backward-compatible
+fresh-exit option for exp12's M1 / M2 rules: a re-entry rule may set `episode_dict["require_fresh_exit"] = True`; if the
+exit signal is on at that re-entry decision, the simulator ignores it until it has been off on at least one decision
+(a state flag, cleared by the first decision with the signal off; causal). Without the key (every rule of exp01-exp08)
+the behaviour is unchanged. Checks: all 12 test suites pass (`tests/test_exp12.py` verifies the option with and without
+the key, and that unmodified E1 / E2 replays equal exp04 / exp07 exactly); exp12 step 02 asserts the real-data
+reproduction of exp04 (+108.03%, 35 exits) and exp07 (+115.60%, 12 exits) before printing any exp12 number.
+
 ## VIX data layer (2026-10-09, agent; shared code, no trial)
 
 *Implemented and tested* (roadmap 2026-10-09, step 0.4): `so/paths.py` (the four raw folders of
@@ -633,6 +644,121 @@ leverage (not allowed here); anything about the untouched window. The descriptiv
 a high or inverted VIX) is not tested and is not a trading result: it rests on few episodes (2011, 2015-16, 2018, 2020,
 2022, 2025) and is the kind of pattern the gates were designed not to chase.
 
+*Corrections 2026-10-09, after the independent audit of 2026-10-09 (the text above is unchanged):*
+- *A2: in "Mathematically", the sentence "because with the same regularization (C = 0.1) the extra columns dilute the
+  BASE model's (wrong-signed) weights and pull its predictions towards chance" is an inference, not a tested result.
+  Read instead: "consistent with the extra columns diluting the BASE model's wrong-signed weights (an inference, not
+  tested)".*
+- *A1: exp09's gates (G1: share of positive 20-session returns per bin; G2: ranking of their sign) tested the sign of
+  forward returns, while exp09's mechanism concerns their size after fear peaks; G1 also had little power (1,408
+  overlapping training sessions, every null run S1 = 0). The descriptive pattern (higher mean returns after a high or
+  inverted VIX) was not tested by exp08.*
+
+## exp12_vix_fear_reentry
+
+**2026-10-09, protocol 1.0, config hash `eec3977199`, agent (autonomous mode). Status: STOP; the VIX line is closed
+definitively.**
+
+*Disclosure (read first).* exp12 is a **data-dependent** follow-up of exp08: Nicolas decided to run it on 2026-10-09
+after seeing exp08's descriptive table (top-quintile VIX forward return +2.82% vs about +1%; inverted term structure
++3.07% vs +0.81%), **overriding exp08's pre-registered gate** (G1 S1 = 0, p = 1.00; G2 dAUC +0.0359 vs null max +0.0563,
+p = 0.15), partly on audit point A1 (the gates tested the sign of forward returns, the mechanism concerns their size).
+The **rules are not data-dependent on exp08**: they are exp09's rules, sent before exp08 ran (roadmap commit `5131de7`
+at 12:20:21; exp08's first trial 12:55:00), with one change made before any exp12 run: the `_intraday` variant was
+dropped (6 candidates, `_prev` only). They carry **hindsight** of the 2018, 2020, 2022 and 2025 declines. 2015-2026 is
+development data, reused here for the **ninth** time. This was declared the **last** VIX re-entry test.
+
+*Pre-registration:* commit `1e6a2e6` (2026-10-09 14:30:48 +0300); first exp12 trial logged at 14:31:19. Roadmap commit
+`6bfd642` (14:15:21), audit corrections `ca86bd0` (14:15:58). Shared code: the backward-compatible fresh-exit option of
+the simulator (section "Shared code change for exp12").
+
+*Windows and data (observed, notebook outputs).* Step 01: SPY and VIX cut at 2015-03-18 (last SPY, VIX and VIX3M dates
+loaded 2015-03-18), continuous paths 2009-08-13 → 2014-12-31 (1,356 sessions). Step 02: 44 periods asserted (first
+valid_start 2015-04-17, last valid_end 2026-04-15, latest test_start 2026-05-14, never read); SPY cut at 2026-04-15,
+VIX cutoff 2026-04-15 (last SPY, VIX and VIX3M dates loaded 2026-04-15); no missing VIX feature on either span.
+`test_window_touched` is False on all 271 rows.
+
+*Reproduction asserts (step 02, before any exp12 number): PASSED.* Unmodified E1 +108.03% with 35 exits; unmodified E2
++115.60% with 12 exits; buy-and-hold +235.39% (full span) and +229.74% (prior-only span from 2015-07-17).
+
+*Step 01, exploration (6 trials, stage `exploration`), 2009-08-13 → 2014-12-31, buy-and-hold +104.57%:*
+
+| Candidate | Total return | vs unmodified exit | Exits | VIX buy-backs | Product S/R | In market |
+|---|---|---|---|---|---|---|
+| E1M1 | +104.51% | +55.51 pts (E1 +49.00%) | 16 | 9 | 1.0008 | 94.5% |
+| E1M2 | +71.25% | +22.25 pts | 16 | 5 | 0.8381 | 91.5% |
+| E1M3 | +51.98% | +2.98 pts | 14 | 0 | 0.7437 | 90.2% |
+| E2M1 | +84.25% | +23.12 pts (E2 +61.14%) | 10 | 6 | 0.9013 | 96.9% |
+| E2M2 | +66.38% | +5.25 pts | 11 | 5 | 0.8141 | 94.8% |
+| E2M3 | +74.76% | +13.62 pts | 7 | 0 | 0.8546 | 96.5% |
+
+Every candidate beats its unmodified exit and none beats buy-and-hold (E1M1 is 0.07 points short).
+
+*Step 02, validation (264 candidate-period trials + 1 summary), copied from `step02_continuous_replay.ipynb`:*
+- **Optimistic best after the fact:** E1M1 +314.80% vs buy-and-hold +235.39%, annualized log excess +1.92%
+  [−1.13%, +6.03%] (6-month blocks), in market 94.0%, 35 exits. E2M1 +235.60% (≈ buy-and-hold); E1M2 +195.83%, E2M3
+  +168.95%, E2M2 +167.51%, E1M3 +132.68%. **Optimistic**: chosen after seeing all six, and its interval includes 0.
+- **Prior-only path (the honest estimate):** **+119.24% vs buy-and-hold +229.74%** (2015-07-17 → 2026-04-15, 10.72
+  years; annualized 7.60% vs 11.77%). Annualized log excess **−3.77% [−7.95%, −0.37%]** (6-month blocks; 1-month blocks
+  [−7.80%, +0.30%]). Periods won 7 of 43 (sign test p = 1.000); mean period excess −1.00% (t = −2.38); MDE 1.18% per
+  period (4.72% per year). Time in market 89.5%; 29 exits. Sharpe 0.60 vs 0.71; max drawdown −27.86% vs −34.21%.
+  Costs at 0 / 1 / 2 cents: +119.88% / +119.24% / +118.79%.
+- **Baselines:** unmodified prior-only path over {E1, E2} +82.88% (in market 83.7%, 24 exits, log excess −5.44%
+  [−9.64%, −1.78%]): exp12's path beats it. Random exits (same re-entry rule): median +187.43%, the path beats **0 of
+  20**. Random re-entries (same exits): median +90.60%, the path beats 13 of 20 (65%).
+- **Verdict (pre-registered): PRIMARY FAILS → STOP.** The information test also fails (it beats the unmodified path and
+  the random re-entries, not the random exits).
+- Selections (periods chosen): E1M1 20, E2M1 7, E2M2 7, E2M3 5, E1M2 3, E1M3 2. Many pooled scores are exactly 0
+  (ties, decided by the fixed tie order).
+
+*Concentration (pre-registered reports).*
+- (a) Final equity / buy-and-hold 0.6649 = product of the 29 S/R 0.6661 (the difference is costs and cash residues).
+  Without the episode with the largest log(S/R): 0.6258; without the two largest: 0.5915; neither beats buy-and-hold.
+- (b) Log excess per calendar year: 2015 −0.0870, 2016 −0.0457, 2017 −0.0002, 2018 −0.0049, 2019 −0.0506, 2020
+  −0.0337, 2021 −0.0001, 2022 −0.0132, 2023 **−0.1855**, 2024 −0.0001, 2025 **+0.0237**, 2026 −0.0108. Only 2025 is
+  positive.
+- (c) 4 episodes overlap 2020-02-01 → 2020-06-30; their log(S/R) sum −0.0335 = 8% of the total log excess −0.4081
+  (2020 did not carry the result, in either direction).
+
+*Prior-only scorecard (29 episodes; exit → buy-back, S → R, S/R, sessions out, reason, VIX at exit → at buy-back):*
+2015-09-22 → 10-05 194.15 → 198.51 0.9780 9 original 20.14 → 20.94; 2015-10-15 → 10-23 0.9743 6 original; 2015-11-12 →
+11-18 0.9808 4 original; 2015-12-03 → 12-04 0.9806 1 original; 2015-12-09 → 12-15 1.0018 4 **M2**; 2015-12-17 → 12-29
+0.9887 7 original; 2015-12-30 → 2016-01-12 1.0625 8 **M2** 16.08 → 24.30; 2016-01-25 → 03-11 0.9245 33 original;
+2016-06-27 → 06-28 0.9825 1 original; 2018-04-02 → 04-03 0.9880 1 original; 2018-10-29 → 11-02 0.9698 4 **M2**;
+2018-11-20 → 11-23 1.0033 2 **M2**; 2018-12-07 → 12-13 0.9937 4 **M2**; 2018-12-14 → 2019-01-07 1.0239 14 **M2** 20.65 →
+21.38; 2019-03-08 → 03-11 0.9855 1 original; 2019-05-31 → 06-04 0.9816 2 original; 2020-02-27 → 03-02 0.9670 2 original
+27.56 → 40.11; 2020-03-03 → 03-04 0.9589 1 original; 2020-03-05 → 04-17 302.65 → 286.55 1.0562 30 **M1** 31.99 → 40.11;
+2020-06-26 → 06-29 0.9874 1 original; 2022-04-18 → 05-05 437.43 → 413.50 1.0579 13 **M1** 22.70 → 25.42; 2022-09-29 →
+11-30 362.99 → 406.72 **0.8925** 43 original 30.18 → 21.89; 2022-12-05 → 2023-01-13 1.0028 27 original; 2023-01-18 →
+02-01 0.9534 10 original; 2023-03-09 → 04-28 0.9423 35 original; 2023-10-20 → 10-24 0.9940 2 original; 2023-10-25 →
+11-02 0.9696 6 original; 2025-04-03 → 04-10 537.72 → 524.85 1.0245 5 **M1** 21.51 → 33.62; 2026-03-20 → 04-01 0.9892 8
+**M1** 24.06 → 25.25. (Full table with fills, buy-and-hold return out and costs:
+`step02_continuous_replay_data/prior_only_scorecard_data.csv`.)
+
+*Mathematically.* Final equity / buy-and-hold ≈ Π S/R = 0.6661 (29 episodes), so log excess ≈ Σ log(S/R) = −0.41. By
+re-entry reason (computed from the saved scorecard, not a notebook output): the 4 M1 buy-backs multiply to 1.1324 (3
+above 1), the 6 M2 buy-backs to 1.0538 (4 above 1), the 19 original-rule buy-backs to 0.5582 (1 above 1). The VIX
+re-entries did what they were meant to do, and that was a gain of about +0.17 in log, while the episodes where the VIX
+never fired before the price rule lost about −0.58. The random-exit baseline (median +187.43%, path beats 0/20): with
+the same re-entry rule, exits at random dates with the same frequency did better in every run, which is consistent with
+the exits' timing being the cost (an inference, not separately tested).
+*In plain words.* Buying back when fear fades does buy back lower more often (10 VIX buy-backs, 7 below the sale
+price), and it rescues 2020 and 2025. But the trend and lights exits still sell often in calm pullbacks where the VIX
+never spikes or fades (2015-16, 2019, the autumn of 2022, 2023); those episodes wait for the price rule and buy back
+higher, and they cost more than the VIX re-entries earn. The best candidate after the fact (E1M1, +314.80%) shows that
+a good-looking path exists among six; the walk-forward selection could not find it in advance, because the candidate
+that led recently was not the one that led next.
+
+What this supports: on 2015-2026, under the pre-registered prior-only selection, exp09's VIX re-entry and exit-filter
+rules on E1 and E2 do not beat buy-and-hold (−3.77%/yr, interval entirely below 0), and they lose to random exits with
+the same re-entry rule. They do improve on the unmodified exits (+119.24% vs +82.88%) and beat 13 of 20 random
+re-entries, which is consistent with some re-entry timing value in the VIX that is too small to pay for the exits.
+What it does not support: anything about E1M1 alone (optimistic, interval includes 0, one of six chosen after the fact,
+on data used nine times); anything about the untouched window (not read); other exits, horizons or VIX rules (none
+may be tried: this was the last VIX re-entry test). Biases: dividends ignored (favours the path, which is out 10.5% of
+the time), cash at 0% (penalizes it), informal costs. Trials the conclusion rests on: 271 exp12, 3,570 workspace,
+7,659 with the 4,089 legacy trials.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
@@ -663,6 +789,12 @@ a high or inverted VIX) is not tested and is not a trading result: it rests on f
     (interval entirely below 0).*
   - *The notebooks' `supported` flag (False for all four) tests only a positive excess (lower bound > 0); it says
     nothing about whether a loss is significant.*
+- *Added 2026-10-09, after the independent audit of 2026-10-09 (A4): BASE AUC 0.4233 [0.3648, 0.4829]: the price
+  features' relations reverse out of sample. This is the third observation of a reversal (exp02 mean validation AUC
+  0.470; exp01 step 04 at 0.79%-1.00%). It is evidence of non-stationarity, not a tradable result.*
+- *Added 2026-10-09 (trial totals after exp12): exp08 6 + exp12 271 (6 exploration, 264 validation, 1 summary).
+  Workspace total 3,570, plus the 4,089 legacy trials 7,659. No prior-only path of exp01-exp08 or exp12 beats
+  buy-and-hold; no candidate result is pending review.*
 
 ### Limitations of the exp04-exp07 session (added 2026-10-06, after the independent audit, I6)
 
@@ -691,3 +823,17 @@ a high or inverted VIX) is not tested and is not a trading result: it rests on f
   (every loader refuses dates from 2026-05-14; the last date loaded by any VIX notebook is 2026-05-13).
 - Trials of the VIX line: exp08 6 (`signal_check`); exp09, exp10, exp11 0. Workspace total **3,299**, plus the 4,089
   legacy trials **7,388**.
+- *Correction 2026-10-09, after the independent audit of 2026-10-09 (A1, A2): "no usable VIX information under the
+  pre-registered gates" holds for what the gates tested. exp09's gates (G1: share of positive 20-session returns per
+  bin; G2: ranking of their sign) tested the sign of forward returns, while exp09's mechanism concerns their size after
+  fear peaks; G1 also had little power (1,408 overlapping training sessions, every null run S1 = 0). The descriptive
+  pattern (higher mean returns after a high or inverted VIX) was not tested by exp08. The G2 explanation in the exp08
+  entry ("the extra columns dilute the BASE model's (wrong-signed) weights") is "consistent with the extra columns
+  diluting the BASE model's wrong-signed weights (an inference, not tested)" (A2).*
+- *Added 2026-10-09 (exp12):* Nicolas answered the parked decision "VIX line closed" with (b): one data-dependent
+  follow-up, exp12_vix_fear_reentry (exp09's rules, `_prev` only, 6 candidates), overriding exp08's gate. It ran once and
+  **STOPS**: prior-only +119.24% vs buy-and-hold +229.74% (log excess −3.77%/yr [−7.95%, −0.37%]); it beats the
+  unmodified exits (+82.88%) and 13/20 random re-entries but 0/20 random exits. **The VIX line is closed definitively**
+  (no later version may be motivated by these results). No candidate result is pending review. Trials of the VIX line:
+  exp08 6, exp12 271 (277). Workspace total **3,570**, plus the 4,089 legacy trials **7,659**. 2015-2026 is now used
+  nine times.
