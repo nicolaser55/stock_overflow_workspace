@@ -52,6 +52,18 @@ re-run must reproduce these earlier numbers (corrected data). A difference means
 | exp01 step02 | new result (base-rate check); the old break-even check found 1,339 training passes and 0 signals | new result, below; the first run (hash `16493e598a`) and the re-run show the same real-check counts (5,628 / 174 / 4; confirmed by the agent on 2026-10-06 from commit `da790c1`) |
 | exp03 step02 | first official run; the assistant's sandbox run gave +143.05% | identical (+143.05%) |
 
+*SPY raw folder rename check (agent, 2026-10-09; roadmap 2026-10-09 step 0.3; no trial-log entry).* The SPY raw folder
+is `store01_rawzone/ibkr_spy_1min/` (`so.paths` on `main`, verified at `a4418d8`; `so/paths.py` last changed in
+`1bbb0de`).
+`scripts/check_spy_rename.py` (run once, branch `agent/research`) reads it through `so.core.raw_data`, collects the
+session dates, then cuts the bars at 2026-04-15 before any computation. Console output: (a) 5,436 sessions,
+2005-01-03 → 2026-08-13; (b) buy-and-hold 2005-2014 **+69.02%**, 200-session rule **+50.39%**; (c) exp04 x = 0, n = 1
+continuous replay 2015-04-17 → 2026-04-15 **+108.03% with 35 exits**, buy-and-hold **+235.39%**: "RENAME CHECK: PASSED
+(6 of 6 checks)", every value equal to the earlier records at 2 decimals of a percent. The repository search for
+`ibkr_ohlcv_data` / `ibkr_SPY_ohlcv_data` finds, besides the dated note of `docs/RERUN_GUIDE_2026-10-05.md` and files of
+`docs/history/`, only `records/bad_tick_corrections.csv`, whose `backup_path` column records the backup folder created on
+2026-10-04 under the old name: a dated record of a past action, left unchanged (no code reads it).
+
 *Verification run by the assistant (2026-10-05).* To test the reorganized code, the assistant executed pipeline steps 00
 and 06 and the notebooks of exp02 (steps 01-03) and exp03 (steps 01-02) once, in its sandbox, on a copy of the same
 corrected raw data. The exp02 and exp03 exploration numbers above were reproduced exactly. That run also produced the first
