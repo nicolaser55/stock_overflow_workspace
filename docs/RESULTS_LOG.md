@@ -511,6 +511,50 @@ block ends at the re-entry session itself. Checks: all 7 test suites pass (the n
 both cases), and exp04 step 01's numbers were recomputed with the changed simulator on the exploration data (not logged,
 not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 2 exits, identical to the saved outputs.
 
+## VIX data layer (2026-10-09, agent; shared code, no trial)
+
+*Implemented and tested* (roadmap 2026-10-09, step 0.4): `so/paths.py` (the four raw folders of
+`store01_rawzone/ibkr_vix_family/`), `so/vix_config.py` (every VIX constant; `so/config.py` unchanged),
+`so/features/vix_features.py` (loaders with a required cutoff that refuse 2026-05-14 and later, the per-session table of
+the `_prev` and `_intraday` values, the six features), `tests/test_vix_features.py` (added to `tests/run_all_tests.py`;
+10 suites pass). The staging folder and the three backup folders next to the raw folders are never read.
+
+*Observed* (`pipeline/step07_VIX_data_check.ipynb`, run once on 2026-10-09, every load cut at 2026-04-15; last SPY,
+VIX and VIX3M dates loaded: 2026-04-15 for all four series):
+
+- Rows read: VIX daily 5,148 (2005-10-03 → 2026-04-15), VIX 1-minute 2,996,586 on 5,145 dates; VIX3M daily 4,193
+  (2009-08-12 → 2026-04-15), VIX3M 1-minute 1,675,264 on 4,190 dates. SPY sessions 5,353 (2005-01-03 → 2026-04-15).
+- **Missing vs known gaps:** every missing date is in the known-gap list of the inventory (VIX daily 17 = the 15
+  sessions of 2006-05-01 → 2006-05-19, 2006-11-24, 2011-09-12; VIX3M daily 1 = 2011-09-12; VIX3M 1-minute 4 =
+  2011-09-12, 2017-10-20, 2017-10-23, 2017-10-24), except the 4 half days left in staging for VIX 1-minute (2020-11-27,
+  2020-12-24, 2024-07-03, 2024-12-24), as expected. One VIX date (2007-07-02, daily and 1-minute) has no SPY session (the
+  SPY session is missing in the IBKR data).
+- **`_prev` (primary) per series, sessions to 2026-04-15:** VIX: 5,151 usable (5 of them with a lag of 1-3 sessions:
+  2006-11-27 after the missing 2006-11-24, 2011-09-13, and three in the 2006-05 gap), **12 stale** (2006-05-05 →
+  2006-05-22, NaN), 0 missing, 190 before the first date. VIX3M: 4,193 usable (1 lagged, 2011-09-13), 0 stale, 0 missing,
+  1,160 before 2009-08-12 (or on it).
+- **`_intraday` (secondary) fallbacks to `_prev`:** VIX 20 (the 15 sessions of 2006-05, 2011-09-12 and the 4 staged half
+  days); VIX3M 4 (2011-09-12 and 2017-10-20/23/24). Where a bar exists, the chosen bar is always exactly the allowed one
+  (decision − 1 minute: 15:57, or 12:57 on half days): 5,144 VIX and 4,190 VIX3M sessions at distance 0, none earlier.
+- **Daily close vs last 1-minute close** (agreement = within 0.005 points): VIX 5,010 of 5,144 dates (97.4%), VIX3M
+  3,745 of 4,190 (89.4%); median absolute difference 0.00, 99th percentile 0.02 (VIX) and 0.03 (VIX3M). The disagreements
+  cluster in 2021-2022 for VIX (48 and 58) and 2022-2026 for VIX3M (71 to 124 a year). A few are large: VIX 2026-01-16
+  (daily 18.84 vs 15.86), 2025-06-18 (22.17 vs 20.14), 2025-05-23 (20.57 vs 22.29); VIX3M 2014-07-17 (14.97 vs 12.63).
+  Cause unknown (not investigated; the IBKR data was not compared with Cboe's values). The primary timing uses the daily
+  close, so these dates enter the primary features.
+- **Session window per era (most frequent first / last bar label):** VIX 09:31-15:59 (2005-2011), 09:31-16:14
+  (2012-2015), 03:15-16:14 (2016-2021), 03:15-16:59 (2022-2026); VIX3M 09:31-15:59 (2009-2011), 09:31-16:14 (2012-2026).
+- **Features:** `vix_level_prev` from 2005-10-04 (median 17.07, 1%-99% 9.90-55.86, max 82.69); `vix_pct250_prev` from
+  2007-05-22 (the 2006-05 gap blocks the 250-value window for a year, as specified); `vix_term_prev` from 2009-08-13
+  (median 0.886, 99th percentile 1.144, max 1.344); `vix_fade` is never positive, `vix_pct250` lies in [0, 1] (asserted).
+  Correlation between the two timings of the same feature: level 0.976, pct250 0.949, chg5 0.744, fade 0.878, term 0.911,
+  vrp 0.946.
+
+What this supports: the data layer reads only what it should, the timings behave as specified, and the gaps are the
+known ones. What it does not support: that the IBKR index values equal Cboe's official values, or that the 1-minute bar
+labels are start-of-minute labels (the convention is unproven; the 1-minute lag is a margin). Tables saved in
+`store04_experiments/vix_data_layer/step07_VIX_data_check/`.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
