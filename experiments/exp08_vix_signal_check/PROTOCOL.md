@@ -7,6 +7,10 @@ Nicolas on 2026-10-08 and revised on 2026-10-09 (`docs/RESEARCH_STATE_2026-10-09
 `preregister exp08`) before any run of this experiment. After the first run, any change of a rule, feature, statistic or
 gate is a new version with a new experiment name.*
 
+**Status: DONE 2026-10-09, the VIX line stops.** Pre-registered in commit `2c810d1`; run once (config hash
+`43e86ccb06`, 6 trials). G1 FAIL (S1 = 0), G2 FAIL (dAUC +0.0359 vs null max +0.0563, p = 0.15), G3 PASS, G4 FAIL (top
+VIX quintile mean forward return +1.91% / +2.82%, above 0). No follow-up can run (§5). Details: `docs/RESULTS_LOG.md`.
+
 ---
 
 ## 1. Background and research question
@@ -179,3 +183,4 @@ legacy trials.
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode), pre-registered before any run |
+| 1.0 | 2026-10-09 | Run once (no change to the protocol); status line added at the top |

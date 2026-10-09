@@ -29,6 +29,7 @@ every working session (section 8) and write a new dated copy when the roadmap ch
 | exp05_vol_scaled_exposure (agent) | Hold w = min(1, max(floor, σ_target / σ̂)) | +165.69% vs +229.74% | Volatility is predictable (ρ 0.593) but high-volatility periods did not have lower returns; drawdown −23% vs −34%; below constant exposure (+198.52%) |
 | exp06_capped_regret_reentry (agent, data-dependent) | Exit + buy-stop at S(1 + b) + recovery trigger | +147.38% vs +229.74% | First timing better than random (19/20 exits, 15/20 re-entries), but 4 of 5 exits wrong: (1 − q)G = 0.0062 < q|L| = 0.0126 |
 | exp07_warning_lights_exit (agent) | Exit when k of 5 lagging warning lights agree | +49.09% vs +229.74% | Worked on 2008 (one exit) only; on 2015-2026 all 12 exits bought back higher; worse than random exits (0/20) |
+| exp08_vix_signal_check (agent, 2026-10-09) | Gate of the VIX line (G1-G4) | No strategy: no gate opens, exp09-exp11 skipped | The VIX forecasts volatility (G3 passes) but not direction (G1 S1 = 0; G2 dAUC +0.036 vs null max +0.056); the top VIX quintile was followed by +1.9% / +2.8% per 20 sessions (G4 fails): high fear preceded good returns |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
 - *exp05 (I3): "below constant exposure (+198.52%)": that baseline is "buy 86.3% and hold" (never rebalanced, mean
@@ -172,6 +173,10 @@ period returns, episode scorecard, annualized log-excess circular block bootstra
   1.1, same experiment name, decided by Nicolas).
 
 ### VIX experiments exp08-exp11, decided by Nicolas on 2026-10-08, plan revised by Nicolas on 2026-10-09
+**Status 2026-10-09 (agent): setup DONE (rename check passed; VIX data layer built and checked); exp08 DONE
+(pre-registered `2c810d1`, run once, 6 trials): G1 FAIL, G2 FAIL, G3 PASS, G4 FAIL; exp09, exp10, exp11 SKIPPED by the
+gates; the VIX line STOPS ("no usable VIX information under the pre-registered gates"; `docs/RESULTS_LOG.md`, exp08).**
+
 *The earlier VIX ideas (a VIX light in exp07, a meta-labeling model) are NOT on the roadmap.*
 
 **Data.** IBKR VIX (daily and 1-minute, from 2005-10-03) and VIX3M (daily and 1-minute, from 2009-08-12 in the IBKR
@@ -224,6 +229,7 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | 2026-10-06 (agent) | What next if no new data is allowed | (a) stop the "time the exit" line and write up the negative result (exp01-exp07, 7,381 trials); (b) a new roadmap item proposed by Nicolas | (a): seven designs, none beats buy-and-hold on the prior-only path, of exp02-exp07 only exp06 beats both of its uninformed baselines | Session ended |
 | *Correction 2026-10-06, after the independent audit (I2)* | — | — | *In the row above, "only exp06 beats both of its uninformed baselines" means it beat the median of each random family (19/20 random exits, 15/20 random re-entries): empirical p ≈ 0.10 and ≈ 0.29 for a data-dependent design with 12 candidates, after about 7,400 trials, "consistent with weak timing information; not statistically supported". The recommendation (a) is unchanged* | — |
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
+| 2026-10-09 (agent) | VIX line closed: exp08's gates opened none of exp09-exp11 (G1, G2, G4 fail; G3 passes) | (a) stop the "time the exit" line and write up the negative result (exp01-exp08, 3,299 workspace trials, 7,388 with the legacy trials); (b) new ideas from Nicolas | (a) | Session ended; nothing else on the roadmap is allowed (text data is parked) |
 
 ### Open items
 
@@ -248,3 +254,4 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | 2026-10-06 | agent | exp04, exp05, exp06 and exp07 pre-registered, run once each and stopped by their own stopping rules (prior-only +70.84%, +165.69%, +147.38%, +49.09% vs +229.74%); 1,265 trials added (workspace 3,292 + 4,089 legacy); backward-compatible cooling-off added to the shared simulator (exp01-exp04 numbers unchanged); exp05 step 01 constant-baseline defect recorded; no candidate result pending review | Blocked: VIX, text and dividends/T-bill data are parked decisions for Nicolas (§7) |
 | 2026-10-06 | agent | Independent audit of exp04-exp07 (`docs/AUDIT_2026-10-06_agent_session.md`): all results reproduced, issues I1-I6 recorded as corrections; no new runs | Blocked as above: parked decisions for Nicolas (§7) |
 | 2026-10-06 | agent | exp01 step 04 multivariate signal check (diagnostic decided by Nicolas, protocol 1.1 §13.3): pre-registered (`ae15c20`), run once; mean AUC 0.4943 vs null max 0.5282, p = 0.75, Outcome A (no information); 1 trial (workspace 3,293 + 4,089 legacy); exp01 stays STOPPED; no parked decision added | Blocked as above: parked decisions for Nicolas (§7) |
+| 2026-10-09 | agent | VIX roadmap (Nicolas 2026-10-08/09): branch `agent/research` on main `a4418d8`; roadmap commit `5131de7`; SPY rename check passed (5,436 sessions; +69.02%, +50.39%, +108.03% with 35 exits, +235.39%); VIX data layer + `pipeline/step07_VIX_data_check.ipynb` (no trials); exp08 pre-registered (`2c810d1`) and run once: G1, G2, G4 FAIL, G3 PASS; exp09-exp11 skipped; 6 trials (workspace 3,299 + 4,089 legacy = 7,388); parked "VIX line closed" | Blocked: text data and the "VIX line closed" decision are parked for Nicolas (§7) |
