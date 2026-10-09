@@ -29,7 +29,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp08_vix_signal_check` | 1.0 | **DONE, VIX line STOP** (2026-10-09) | Gate: G1 0 signal bins (null max 0, p = 1.00); G2 dAUC +0.0359 vs null max +0.0563 (p = 0.15); G3 PASS (D +0.1165 [+0.0441, +0.2227]); G4 FAIL (top VIX quintile mean forward return +1.91% / +2.82%). No gate opens: exp09-exp11 skipped |
 | `exp09_vix_reentry`, `exp10_vix_vol_scaled_exposure`, `exp11_vix_model_exit` | — | **SKIPPED** (2026-10-09) | Not run, by exp08's pre-registered gates (exp09 needs G1 or G2, exp10 G3 and G4, exp11 G2) |
 | `exp12_vix_fear_reentry` | 1.0 | **STOP** (2026-10-09) | Data-dependent follow-up of exp08 (Nicolas), exp09's rules. Prior-only +119.24% vs +229.74% (log excess −3.77%/yr [−7.95%, −0.37%]); unmodified path +82.88%; beats 0/20 random exits, 13/20 random re-entries. Optimistic best E1M1 +314.80% vs +235.39%. VIX line closed |
-
+| `exp13_e1m1_robustness` | 1.0 | **E1M1 IS NOT ROBUST** (2026-10-09) | Data-dependent robustness of exp12's after-the-fact E1M1. R1–R4 fail, R5 holds. Stress +53.32% vs +73.09%; 11/36 variants beat B&H on DEV, 3/36 on STRESS; p2 = 0.088; without the best episode equity ratio 0.9775. Delayed +306.15% and 5-cent +310.85% still beat +235.39%. VIX line closed |
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
 - *exp05 (I3): "constant exposure +198.52%" is not a constant exposure: with the 20-point dead band it never rebalanced,
   so it is "**buy 86.3% and hold**" (mean weight 90.9%). The verdict rests on buy-and-hold and the random shifts (the
@@ -773,6 +773,149 @@ ends.
 - *B4: the split of the product of S/R by re-entry reason (M1 1.1324, M2 1.0538, original 0.5582) was computed after
   the run from the saved scorecard.*
 
+## exp13_e1m1_robustness
+
+**2026-10-09, protocol 1.0, config hash `c2e293d595`, agent (autonomous mode). Verdict: E1M1 IS NOT ROBUST. The VIX
+line is closed.**
+
+*Disclosure (read first).* This study is **data-dependent**. E1M1 was chosen **after the fact**: it is the best of
+exp12's six candidates on 2015-04-17 → 2026-04-15 (optimistic, +314.80% vs buy-and-hold +235.39%, log excess +1.92%/yr
+[−1.13%, +6.03%]). exp12's honest prior-only path made +119.24% vs +229.74% and STOPPED. **Nicolas explicitly overrides**
+exp12's commitment that it was "the last VIX re-entry test" (2026-10-09), to run this robustness study of that one
+frozen rule. Nothing here can turn E1M1 into out-of-sample evidence: 2015-2026 is development data reused for the
+**ninth** time; 2005-2014 was explored by exp04-exp08. The rules carry **hindsight** of 2008, 2018, 2020, 2022 and 2025.
+There is **no prior-only path**: every path is one continuous replay of a fixed rule. There is **no success claim**.
+
+*Pre-registration:* commit `afe6b42` (2026-10-09 19:57:17 +0300); first exp13 trial logged at 19:57:49. Roadmap
+`ce2df27` (19:38:34), audit notes B1/B3/B4 `cc243d6` (19:38:45). E1M1 is imported from exp12's code, never re-implemented.
+
+*Reproduction asserts (observed, notebook outputs):* PASSED in steps 02, 03 and 04: frozen E1M1 +314.80% with 35
+exits, unmodified E1 +108.03% with 35 exits, buy-and-hold +235.39%. Step 01 reproduced exp12 step 01 on 2009-08-13 →
+2014-12-31: E1M1 +104.51%, E1 +49.00%, buy-and-hold +104.57%. Last dates loaded: step 01 SPY/VIX/VIX3M **2015-03-18**;
+steps 02-04 DEV cutoff SPY/VIX/VIX3M **2026-04-15** (step 02 also loaded STRESS at 2015-03-18). `test_window_touched`
+False on all 81 rows.
+
+### Step 01 — stress 2005-2014 (`step01_stress_2005_2014.ipynb`)
+
+STRESS window 2005-10-18 → 2014-12-31 (2,316 sessions; first session with both the 200-session average and
+`vix_level_prev`). Numbers from the saved notebook outputs / `stress_path_data.csv`:
+
+| Window | E1M1 | E1 (unmodified) | E2M1 | Buy-and-hold |
+|---|---|---|---|---|
+| STRESS 2005-10-18 → 2014-12-31 | **+53.32%** (33 exits, 93.5% in market, Π S/R 0.8881, log excess −1.31%/yr [−4.18%, +2.03%]) | +54.00% (33, 73.4%, 0.8921) | +58.26% (13, 96.4%, 0.9152) | **+73.09%** |
+| Bear 2007-10-01 → 2009-08-12 | **−34.57%** (6 exits, 91.1% in market, Π S/R 0.9946) | **−5.65%** (6, **16.8%** in market, Π S/R 1.4348) | −33.18% (3, 91.1%, 1.0154) | **−34.16%** |
+| exp12 exploration 2009-08-13 → 2014-12-31 | +104.51% (16, 94.5%, 1.0008) | +49.00% (16, 86.9%, 0.7291) | +84.25% (10, 96.9%, 0.9013) | +104.57% |
+
+E1M1's STRESS scorecard: 33 episodes, 15 M1 and 18 original-rule buy-backs, 8 bought back lower. Episodes with an
+exit in 2007-2009 (from the notebook print; one line each: exit → buy-back, S → R, S/R, sessions out, reason, VIX at
+exit / max / re-entry; for M1, lowest close after the buy-back and drawdown from R):
+2007-08-03 → 08-06 143.40 → 146.71 0.9774 1 original 21.43 / 25.31 / 25.31;
+2007-08-14 → 08-21 143.05 → 144.96 0.9868 5 **M1** 26.40 / 31.65 / 26.36, low 143.66 (−0.90%);
+2007-08-28 → 08-29 143.59 → 146.66 0.9791 1 original 22.66 / 26.39 / 26.39;
+2007-09-07 → 09-11 145.85 → 147.60 0.9881 2 original 23.93 / 27.51 / 27.51;
+2007-11-07 → 11-14 147.64 → 147.18 1.0031 5 **M1** 21.43 / 30.76 / 23.98, low 140.80 (−4.33%);
+2007-12-11 → 12-12 148.30 → 149.14 0.9944 1 original 20.76 / 23.47 / 23.47;
+2007-12-14 → 12-21 147.20 → 148.27 0.9928 5 **M1** 22.45 / 24.61 / 20.66, low 147.52 (−0.51%);
+**2007-12-27 → 2008-02-01 147.39 → 139.35 1.0577 24 M1 18.73 / 30.86 / 26.14, lowest close 68.07 (−51.15%)**;
+2009-06-22 → 06-25 89.35 → 92.03 0.9709 3 original 27.79 / 31.22 / 29.16;
+2009-07-07 → 07-13 88.09 → 90.07 0.9780 4 original 29.19 / 30.94 / 28.98.
+
+*Mathematically / in plain words.* On 2008 the unmodified trend exit stayed in cash (16.8% invested) and lost 5.65%
+while buy-and-hold lost 34%. E1M1's M1 fade fired on 2008-02-01 (VIX 26.14 ≤ 0.85 × 30.86) and bought back at 139.35;
+SPY then fell to 68.07 (−51%) before the next exit in June 2009. The fear-fade bought the crash, not the bottom. Over
+the whole STRESS span E1M1 (+53.32%) is below buy-and-hold (+73.09%) and no better than unmodified E1 (+54.00%).
+**R1 fails.** What this does not support: that M1 never helps (it matched buy-and-hold on 2009-2014); that E2M1 is a
+candidate (reported alongside, not selected).
+
+### Step 02 — neighbourhood (`step02_neighbourhood.ipynb`; descriptive, nothing selected)
+
+72 paths in 67 s; the grid point 0.85 / 200 / on equals frozen E1M1 (+314.80%, 35 exits). Excess of total return over
+buy-and-hold, percentage points (from `neighbourhood_path_data.csv`):
+
+**DEV (buy-and-hold +235.39%), fresh-signal on / off:**
+
+| fade \ MA | 150 on | 200 on | 250 on | 150 off | 200 off | 250 off |
+|---|---|---|---|---|---|---|
+| 0.70 | −57.61 | +0.47 | −5.73 | −162.64 | −137.41 | −133.29 |
+| 0.75 | −27.73 | +19.00 | +1.05 | −149.57 | −120.76 | −119.32 |
+| 0.80 | −5.97 | +50.27 | +21.53 | −129.72 | −103.49 | −93.56 |
+| 0.85 | +7.93 | **+79.41 (E1M1)** | +59.77 | −113.26 | −96.40 | −89.58 |
+| 0.90 | −28.83 | +15.75 | +3.48 | −148.35 | −129.57 | −115.14 |
+| 0.95 | −39.62 | +12.83 | −0.37 | −122.04 | −112.18 | −84.15 |
+
+**STRESS (buy-and-hold +73.09%), fresh-signal on / off:**
+
+| fade \ MA | 150 on | 200 on | 250 on | 150 off | 200 off | 250 off |
+|---|---|---|---|---|---|---|
+| 0.70 | −42.41 | −51.30 | −34.01 | −40.15 | −44.51 | −25.72 |
+| 0.75 | −39.46 | −51.69 | −36.31 | −27.26 | −35.98 | −15.45 |
+| 0.80 | −34.31 | −22.59 | −26.43 | −3.42 | −3.04 | **+14.68** |
+| 0.85 | −24.86 | **−19.77 (E1M1)** | −25.50 | −27.22 | −26.24 | −0.37 |
+| 0.90 | −18.77 | +1.26 | +5.55 | −46.27 | −48.57 | −22.83 |
+| 0.95 | −26.09 | −12.21 | −9.20 | −76.45 | −70.56 | −60.54 |
+
+Variants beating buy-and-hold: **DEV 11 of 36, STRESS 3 of 36, both 2 of 36.** E1M1's rank on DEV: **1 of 36.** Median
+excess DEV −70.88%, STRESS −26.34%. Every one of the 18 variants with the fresh-signal rule off loses on DEV (by 84 to
+163 points). **R2 fails** (need 24 on DEV and 18 on STRESS). The surface is a **spike** at 0.85 / 200 / on, not a
+plateau; the three STRESS winners are different parameters (0.90 / 200 / on, 0.90 / 250 / on, 0.80 / 250 / off) and
+are not used. No variant is picked.
+
+### Step 03 — placebo (`step03_placebo.ipynb`; 999 runs each)
+
+Real E1M1 total 3.148 (+314.80%). The six real totals match exp12 (E1M1 314.80, E1M2 195.83, E1M3 132.68, E2M1 235.60,
+E2M2 167.51, E2M3 168.95). Shift range 1,340 → 4,014 sessions. From the notebook / `placebo_summary_data.csv`:
+
+| Test | Real | Null median | 5th / 95th | Rank | p |
+|---|---|---|---|---|---|
+| P1 misaligned VIX, E1M1 alone | 314.80% | 251.56% | 185.77% / 331.64% | 88 of 1000 | **0.0880** |
+| P2 selection-aware max of six (primary) | 314.80% | 254.35% | 192.50% / 331.64% | 88 of 1000 | **0.0880** |
+| P3 random re-entry after E1M1's exits | 314.80% | 125.88% | 66.23% / 209.69% | 1 of 1000 | 0.0010 |
+| P4 random exits with E1M1's re-entry | 314.80% | 212.04% | 162.53% / 280.54% | 13 of 1000 | 0.0130 |
+
+The candidate giving the shifted maximum: E1M1 860, E2M1 126, E1M2 13 of 999 runs (so P1 and P2 almost coincide).
+**R3 fails** (need p2 ≤ 0.05). What this supports: E1M1's re-entries beat random re-entries (p3 = 0.001) and its exits
+beat random exits with the same re-entry (p4 = 0.013) on this span. What it does not support: that the aligned VIX is
+unlikely under a selection-aware null (87 of 999 shifted best-of-six paths reached ≥ +314.80%). A joblib
+`resource_tracker` KeyError printed on stderr after the parallel runs (loky temp-folder cleanup); the notebook wrote
+its outputs and logged 4 trials, so it is recorded as a non-fatal deviation.
+
+### Step 04 — execution and episodes (`step04_execution_and_episodes.ipynb`)
+
+From the notebook / `execution_path_data.csv` (buy-and-hold under exp12's costs +235.39%): delayed one session
+**+306.15%** (Π S/R 1.2128, 35 exits, 94.0% in market); slippage 0 / 1 / 2 / 5 cents **+315.88% / +314.80% / +313.76% /
++310.85%**. **R5 holds.** Same-slippage buy-and-hold at 5 cents is +235.35%.
+
+Episodes (`concentration_data.csv`, `reason_split_data.csv`, `half_log_excess_data.csv`, `yearly_log_excess_data.csv`):
+35 episodes, product of S/R **1.2383**, equity / buy-and-hold **1.2368**. Without the best episode (2020-03-05 →
+2020-03-16, S/R **1.2652**, M1): equity ratio **0.9775**, product 0.9788, **does not beat buy-and-hold**. Without the
+two best (that one and 2018-12-04 → 2018-12-27, S/R 1.0928, M1): 0.8945. **R4 fails.** Split by reason: 13 M1 buy-backs
+product **1.8188** (10 bought back lower); 22 original-rule product **0.6808** (0 bought back lower). 4 episodes overlap
+2020-02-01 → 2020-06-30: their log(S/R) sum 0.1470 = **69%** of total log excess 0.2125. Halves: 2015-04-17 → 2020-12-31
+log excess +0.2018 (+3.53%/yr); 2021-01-01 → 2026-04-15 log excess +0.0107 (+0.20%/yr). Yearly log excess: 2015 −0.0363,
+2016 +0.0577, 2017 +0.0002, 2018 +0.0665, 2019 −0.0332, 2020 **+0.1469**, 2021 −0.0000, 2022 +0.0341, 2023 −0.0807, 2024
+−0.0001, 2025 +0.0684, 2026 −0.0109.
+
+*In plain words.* Almost all of E1M1's after-the-fact edge is a handful of M1 buy-backs in 2018, 2020 and 2025. Remove
+the single best (the March 2020 fade that bought 239 after selling 303) and the path no longer beats buy-and-hold. The
+original-rule buy-backs still lose (Π S/R 0.68), as in exp04. Delay and extra costs do not destroy the number, because
+the 2020 episode is large enough to survive a one-session lag.
+
+### Verdict (pre-registered §8, applied once)
+
+| | Criterion | Number | Hold? |
+|---|---|---|---|
+| R1 | STRESS total ≥ buy-and-hold | +53.32% vs +73.09% | **FAIL** |
+| R2 | ≥ 24/36 beat B&H on DEV and ≥ 18/36 on STRESS | 11 and 3 | **FAIL** |
+| R3 | p2 ≤ 0.05 | 0.0880 | **FAIL** |
+| R4 | still beats B&H without the best episode | equity ratio 0.9775 | **FAIL** |
+| R5 | delayed and 5-cent each beat B&H +235.39% | +306.15% and +310.85% | PASS |
+
+**E1M1 IS NOT ROBUST.** The after-the-fact +314.80% is a spike at one parameter triple, concentrated in 2020 (and 2018),
+absent on 2005-2014 (where the same fade bought the 2008 crash), and not rare under a selection-aware shifted-VIX null.
+No new version or variant of E1M1 may follow. The VIX line is closed. Biases unchanged (dividends ignored, cash at 0%,
+informal costs); ninth reuse of 2015-2026; after-the-fact choice. Trials: 81 exp13, workspace **3,651**, **7,740** with
+the 4,089 legacy trials.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
@@ -809,6 +952,9 @@ ends.
 - *Added 2026-10-09 (trial totals after exp12): exp08 6 + exp12 271 (6 exploration, 264 validation, 1 summary).
   Workspace total 3,570, plus the 4,089 legacy trials 7,659. No prior-only path of exp01-exp08 or exp12 beats
   buy-and-hold; no candidate result is pending review.*
+- *Added 2026-10-09 (trial totals after exp13): exp13 81 (2 exploration, 74 robustness, 4 placebo, 1 summary).
+  Workspace total 3,651, plus the 4,089 legacy trials 7,740. No candidate result is pending review. The VIX line is
+  closed (exp13 verdict: E1M1 IS NOT ROBUST).*
 
 ### Limitations of the exp04-exp07 session (added 2026-10-06, after the independent audit, I6)
 
@@ -851,3 +997,7 @@ ends.
   (no later version may be motivated by these results). No candidate result is pending review. Trials of the VIX line:
   exp08 6, exp12 271 (277). Workspace total **3,570**, plus the 4,089 legacy trials **7,659**. 2015-2026 is now used
   nine times.
+- *Added 2026-10-09 (exp13):* Nicolas overrode exp12's "last VIX re-entry test" commitment to run a robustness study of
+  E1M1. It ran once: **E1M1 IS NOT ROBUST** (R1–R4 fail, R5 holds). **The VIX line is closed.** Trials of the VIX line:
+  exp08 6 + exp12 271 + exp13 81 = 358. Workspace total **3,651**, plus the 4,089 legacy trials **7,740**. No candidate
+  result is pending review. The untouched window was not read (last date loaded by any exp13 notebook: 2026-04-15).

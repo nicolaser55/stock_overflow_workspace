@@ -206,4 +206,5 @@ it logged, and the notebook is re-run once.
 
 | Version | Date | Change |
 |---|---|---|
-| 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode, from Nicolas's decision of 2026-10-09), pre-registered before any run |
+| 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode, from Nicolas's decision of 2026-10-09), pre-registered before any run (`afe6b42`) |
+| 1.0 (result) | 2026-10-09 | Run once (81 trials, as expected). Verdict **E1M1 IS NOT ROBUST** (R1 STRESS, R2 PLATEAU, R3 INFORMATION, R4 EPISODES fail; R5 EXECUTION holds). The VIX line is closed. No new version. Details: `docs/RESULTS_LOG.md`, exp13 |

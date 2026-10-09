@@ -54,6 +54,7 @@ stock_overflow_workspace/
 | exp08_vix_signal_check | **DONE, VIX line STOP** (no gate opens: G1, G2, G4 fail; G3 passes) | `experiments/exp08_vix_signal_check/PROTOCOL.md` |
 | exp09-exp11 (VIX) | **SKIPPED** by exp08's pre-registered gates | `docs/RESEARCH_STATE_2026-10-09.md` §6 |
 | exp12_vix_fear_reentry | **STOP** (data-dependent follow-up of exp08; prior-only +119.24% vs +229.74%; VIX line closed) | `experiments/exp12_vix_fear_reentry/PROTOCOL.md` |
+| exp13_e1m1_robustness | **E1M1 IS NOT ROBUST** (R1–R4 fail; stress +53.32% vs +73.09%; p2 = 0.088; VIX line closed) | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
 | Text / qualitative data | Blocked: new data source (parked decision for Nicolas) | `docs/RESEARCH_STATE_2026-10-09.md` |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`): exp06's "beats its
