@@ -633,6 +633,16 @@ leverage (not allowed here); anything about the untouched window. The descriptiv
 a high or inverted VIX) is not tested and is not a trading result: it rests on few episodes (2011, 2015-16, 2018, 2020,
 2022, 2025) and is the kind of pattern the gates were designed not to chase.
 
+*Corrections 2026-10-09, after the independent audit of 2026-10-09 (the text above is unchanged):*
+- *A2: in "Mathematically", the sentence "because with the same regularization (C = 0.1) the extra columns dilute the
+  BASE model's (wrong-signed) weights and pull its predictions towards chance" is an inference, not a tested result.
+  Read instead: "consistent with the extra columns diluting the BASE model's wrong-signed weights (an inference, not
+  tested)".*
+- *A1: exp09's gates (G1: share of positive 20-session returns per bin; G2: ranking of their sign) tested the sign of
+  forward returns, while exp09's mechanism concerns their size after fear peaks; G1 also had little power (1,408
+  overlapping training sessions, every null run S1 = 0). The descriptive pattern (higher mean returns after a high or
+  inverted VIX) was not tested by exp08.*
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of
@@ -663,6 +673,9 @@ a high or inverted VIX) is not tested and is not a trading result: it rests on f
     (interval entirely below 0).*
   - *The notebooks' `supported` flag (False for all four) tests only a positive excess (lower bound > 0); it says
     nothing about whether a loss is significant.*
+- *Added 2026-10-09, after the independent audit of 2026-10-09 (A4): BASE AUC 0.4233 [0.3648, 0.4829]: the price
+  features' relations reverse out of sample. This is the third observation of a reversal (exp02 mean validation AUC
+  0.470; exp01 step 04 at 0.79%-1.00%). It is evidence of non-stationarity, not a tradable result.*
 
 ### Limitations of the exp04-exp07 session (added 2026-10-06, after the independent audit, I6)
 
@@ -691,3 +704,10 @@ a high or inverted VIX) is not tested and is not a trading result: it rests on f
   (every loader refuses dates from 2026-05-14; the last date loaded by any VIX notebook is 2026-05-13).
 - Trials of the VIX line: exp08 6 (`signal_check`); exp09, exp10, exp11 0. Workspace total **3,299**, plus the 4,089
   legacy trials **7,388**.
+- *Correction 2026-10-09, after the independent audit of 2026-10-09 (A1, A2): "no usable VIX information under the
+  pre-registered gates" holds for what the gates tested. exp09's gates (G1: share of positive 20-session returns per
+  bin; G2: ranking of their sign) tested the sign of forward returns, while exp09's mechanism concerns their size after
+  fear peaks; G1 also had little power (1,408 overlapping training sessions, every null run S1 = 0). The descriptive
+  pattern (higher mean returns after a high or inverted VIX) was not tested by exp08. The G2 explanation in the exp08
+  entry ("the extra columns dilute the BASE model's (wrong-signed) weights") is "consistent with the extra columns
+  diluting the BASE model's wrong-signed weights (an inference, not tested)" (A2).*

@@ -154,6 +154,16 @@ legacy trials.
   part of it, not all.
 - G1 and G2 test association with the 20-session label, not a trading rule; passing a gate is necessary, not sufficient.
 - G4 compares point estimates with 0; its intervals will be wide.
+- *Added 2026-10-09, after the run and the independent audit of 2026-10-09 (A1):* exp09's gates (G1: share of positive
+  20-session returns per bin; G2: ranking of their sign) tested the sign of forward returns, while exp09's mechanism
+  concerns their size after fear peaks; G1 also had little power (1,408 overlapping training sessions, every null run
+  S1 = 0). The descriptive pattern (higher mean returns after a high or inverted VIX) was not tested by exp08.
+- *Added 2026-10-09 (A2):* the explanation of the G2 result in `docs/RESULTS_LOG.md` ("the extra columns dilute the
+  BASE model's (wrong-signed) weights and pull its predictions towards chance") is an inference, not a tested result:
+  "consistent with the extra columns diluting the BASE model's wrong-signed weights (an inference, not tested)".
+- *Added 2026-10-09 (A4):* BASE AUC 0.4233 [0.3648, 0.4829]: the price features' relations reverse out of sample. This
+  is the third observation of a reversal (exp02 mean validation AUC 0.470; exp01 step 04 at 0.79%-1.00%). It is
+  evidence of non-stationarity, not a tradable result.
 
 ## 11. Methodological choices (the most conservative option)
 
@@ -184,3 +194,4 @@ legacy trials.
 |---|---|---|
 | 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode), pre-registered before any run |
 | 1.0 | 2026-10-09 | Run once (no change to the protocol); status line added at the top |
+| 1.0 | 2026-10-09 | Audit corrections A1, A2, A4 added to §10 (documentation only; no rule, gate or result changed) |
