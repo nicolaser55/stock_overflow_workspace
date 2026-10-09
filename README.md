@@ -39,7 +39,7 @@ stock_overflow_workspace/
 └── records/                     versioned CSV records (bad tick corrections; legacy trial log and audit trials)
 ```
 
-## 2. Current status (2026-10-06)
+## 2. Current status (2026-10-09)
 
 | Experiment | Status | Protocol |
 |---|---|---|
@@ -51,14 +51,16 @@ stock_overflow_workspace/
 | exp05_vol_scaled_exposure | **STOP** (prior-only +165.69% vs +229.74%; lower drawdown) | `experiments/exp05_vol_scaled_exposure/PROTOCOL.md` |
 | exp06_capped_regret_reentry | **STOP** (prior-only +147.38% vs +229.74%; beats its random baselines) | `experiments/exp06_capped_regret_reentry/PROTOCOL.md` |
 | exp07_warning_lights_exit | **STOP** (prior-only +49.09% vs +229.74%; all 12 exits bought back higher) | `experiments/exp07_warning_lights_exit/PROTOCOL.md` |
-| VIX, then text | Blocked: new data sources (parked decisions for Nicolas) | `docs/RESEARCH_STATE_2026-10-06.md` |
+| exp08_vix_signal_check | **DONE, VIX line STOP** (no gate opens: G1, G2, G4 fail; G3 passes) | `experiments/exp08_vix_signal_check/PROTOCOL.md` |
+| exp09-exp11 (VIX) | **SKIPPED** by exp08's pre-registered gates | `docs/RESEARCH_STATE_2026-10-09.md` §6 |
+| Text / qualitative data | Blocked: new data source (parked decision for Nicolas) | `docs/RESEARCH_STATE_2026-10-09.md` |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`): exp06's "beats its
 random baselines" means it beat the median of each random family (19/20, 15/20; empirical p ≈ 0.10 and ≈ 0.29):
 "consistent with weak timing information; not statistically supported" (I2). exp07's "all 12 exits bought back higher"
 = 11 closed episodes, all bought back higher, plus 1 episode open at the end (I4).*
 
-**Start here:** `docs/RESEARCH_STATE_2026-10-06.md` (state and roadmap), then `docs/RESULTS_LOG.md`. Agents also read
+**Start here:** `docs/RESEARCH_STATE_2026-10-09.md` (state and roadmap), then `docs/RESULTS_LOG.md`. Agents also read
 `AGENTS.md` and `.cursor/rules/`.
 
 Earlier results (stopped v1 and v2, the step 13 exploration) are summarized in `docs/history/RESULTS_LOG_2026-10-05.md`.
