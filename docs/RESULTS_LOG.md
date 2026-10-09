@@ -759,6 +759,12 @@ may be tried: this was the last VIX re-entry test). Biases: dividends ignored (f
 the time), cash at 0% (penalizes it), informal costs. Trials the conclusion rests on: 271 exp12, 3,570 workspace,
 7,659 with the 4,089 legacy trials.
 
+*Override 2026-10-09 (Nicolas; the text above is unchanged):* Nicolas explicitly overrides exp12's pre-registered
+commitment that it was "the last VIX re-entry test; no later version may be motivated by its results", to run
+`exp13_e1m1_robustness`, a data-dependent robustness study of E1M1 (exp12's best candidate after the fact, +314.80% vs
++235.39%, optimistic). exp12's verdict stays STOP; "the VIX line is closed definitively" above is suspended until exp13
+ends.
+
 ## Cross-experiment notes (2026-10-06)
 
 - The common failure is time out of the market: at about 12% a year, every session in cash costs about 0.045% of

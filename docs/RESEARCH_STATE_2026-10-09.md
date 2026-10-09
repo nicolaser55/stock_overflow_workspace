@@ -237,6 +237,30 @@ was not compared with Cboe's values; the bar-label convention is unproven.
   it also beats the unmodified prior-only path over {E1, E2} and the median of both random families. Primary fails →
   STOP, the VIX line closes definitively. Primary passes → "candidate result pending review" only, parked. This is the
   **last** VIX re-entry test: no later version may be motivated by its results.
+- *Override 2026-10-09 (Nicolas): Nicolas explicitly overrides the commitment above ("the last VIX re-entry test: no
+  later version may be motivated by its results") to run exp13_e1m1_robustness, a robustness study motivated by
+  exp12's results. The override is his decision, recorded here, in exp12's PROTOCOL.md change log and in its results-log
+  entry; it does not change any exp12 number or verdict (exp12 stays STOP).*
+
+### exp13_e1m1_robustness (decided by Nicolas on 2026-10-09; data-dependent robustness study of exp12's E1M1; overrides exp12's 'last VIX re-entry test' commitment; no new data; budget 150 trials)
+*Added 2026-10-09 (Nicolas).*
+- **What:** exp12's candidate E1M1 (E1 = exit below the 200-session average, re-enter above, x = 0, n = 1; M1 = buy back
+  when vix_level_prev ≤ 0.85 × its maximum since the exit decision, or by the original re-entry; fresh exit signal after
+  an M1 re-entry), FROZEN exactly as exp12 implemented it (exp12's code is imported). After the fact (optimistic, best of
+  6) it made +314.80% vs buy-and-hold +235.39% on 2015-04-17 → 2026-04-15; exp12's honest prior-only path made +119.24%
+  vs +229.74%.
+- **Nature:** E1M1 was chosen because it looked best on 2015-2026; nothing here can turn that into out-of-sample
+  evidence. The study can only show whether the result is ROBUST (a plateau, not tied to two episodes or to the exact
+  parameters, beating misaligned-VIX placebos with selection taken into account) or FRAGILE.
+- **Steps:** 01 stress test on 2005-2014 (2 exploration trials); 02 parameter neighbourhood, 36 variants × {DEV,
+  STRESS} (72 robustness trials, descriptive, nothing selected); 03 placebo and information tests on DEV (4 placebo
+  trials, 999 runs each); 04 execution and episode robustness (2 robustness trials) + 1 summary. Expected 81, budget 150.
+- **Verdict rule (pre-registered with the protocol):** "ROBUST CANDIDATE PENDING REVIEW" only if R1 (stress) to R5
+  (execution) all hold; otherwise "E1M1 IS NOT ROBUST". No success claim either way; no new version or variant of E1M1
+  may follow from these results.
+- **Nicolas's other decisions of 2026-10-09:** no new data (no pre-2005 history, no other markets, no dividends or
+  T-bill data); the untouched window 2026-05-14 → 2026-08-13 stays reserved (never read it, never propose evaluating on
+  it); scope = E1M1 robustness only (no new strategy families, no new rules beyond the neighbourhood of step 02).
 
 ### Then: text / qualitative data (new data, needs Nicolas)
 
@@ -255,6 +279,7 @@ was not compared with Cboe's values; the bar-label convention is unproven.
 | 2026-10-06 | Evaluation on the untouched window 2026-05-14 → 2026-08-13 | only for a frozen design whose prior-only path beats buy-and-hold and its baselines | Nicolas decides per design | Never evaluated |
 | 2026-10-09 (agent) | VIX line closed: exp08's gates opened none of exp09-exp11 (G1, G2, G4 fail; G3 passes) | (a) stop the "time the exit" line and write up the negative result (exp01-exp08, 3,299 workspace trials, 7,388 with the legacy trials); (b) new ideas from Nicolas | (a) | Session ended; nothing else on the roadmap is allowed (text data is parked). **ANSWERED 2026-10-09 (Nicolas): (b), one data-dependent follow-up, exp12, then the write-up** |
 | 2026-10-09 (agent) | Write-up of the negative result: exp12 stopped (prior-only +119.24% vs +229.74%), the VIX line is closed definitively; no roadmap item remains that is not blocked (text data is a new source) | (a) the agent drafts the write-up (`docs/`): question, the nine experiments run (exp01-exp08, exp12; exp09-exp11 skipped), the prior-only path vs buy-and-hold for each, the S/R identity and the rent of cash, the baselines, the trial counts (3,570 workspace, 7,659 with the legacy trials), the data-dependence of exp06 and exp12, and the limitations; Nicolas reviews; (b) Nicolas writes it from `docs/RESULTS_LOG.md`; (c) a new roadmap item first | (a): every number is already in the results log, so drafting it adds no trial and reads no new data; the untouched window stays unread (no design qualifies for it) | Session ended; no draft written (the write-up was not on the roadmap as an agent task) |
+| 2026-10-09 (Nicolas) | Write-up of the negative result | — | — | **Deferred by Nicolas until after exp13** (exp13_e1m1_robustness, §6) |
 
 ### Open items
 
