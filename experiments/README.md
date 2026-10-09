@@ -25,7 +25,10 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp05_vol_scaled_exposure` | Hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, 20-point dead band (4 candidates) | 01 signal check + exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +165.69% vs +229.74%) |
 | `exp06_capped_regret_reentry` | Trend or near-ATH exit + buy-stop at S × (1 + b) with a cooling-off, or recovery above the 200-session average (12 candidates; data-dependent follow-up of exp03) | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +147.38% vs +229.74%; beats both random families) |
 | `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 exploration, 02 continuous replay | 1.0 | **STOP** 2026-10-06 (prior-only +49.09% vs +229.74%; beats 0/20 random exits) |
-| VIX experiment(s) | exp05/exp07 with VIX; meta-labeling of exits | — | to write | Planned after exp07 (VIX closes at 16:15 ET; VIX3M starts 2007-12-04); needs Nicolas for the data |
+| `exp08_vix_signal_check` | The gate of the VIX line: univariate bins (G1), incremental AUC over the 16 price features (G2), VIX as a volatility forecast (G3), top VIX quintile forward return below 0 (G4) | 01 gate | to write | planned (roadmap 2026-10-09) |
+| `exp09_vix_reentry` | VIX-timed re-entry / exit filter on exp04's trend exit and exp07's lights (6 candidates) | 01 exploration, 02 continuous replay | to write | planned (roadmap 2026-10-09); runs only if G1 or G2 passes |
+| `exp10_vix_vol_scaled_exposure` | exp05 with the VIX as the volatility forecast (4 candidates) | 01 exploration, 02 continuous replay | to write | planned (roadmap 2026-10-09); runs only if G3 and G4 pass |
+| `exp11_vix_model_exit` | Exit / re-entry from the price + VIX logistic model (4 candidates) | 01 continuous replay | to write | planned (roadmap 2026-10-09); runs only if G2 passes |
 
 *Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I2): exp06's "beats
 both random families" means it beat the median of each (19/20 random exits, 15/20 random re-entries; empirical p ≈ 0.10
