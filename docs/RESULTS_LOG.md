@@ -513,6 +513,16 @@ block ends at the re-entry session itself. Checks: all 7 test suites pass (the n
 both cases), and exp04 step 01's numbers were recomputed with the changed simulator on the exploration data (not logged,
 not a trial): textbook rule +50.39% with 33 exits, x = 5%, n = 10 +116.85% with 2 exits, identical to the saved outputs.
 
+## Shared code change for exp12 (2026-10-09, agent; no trial)
+
+*Implemented and tested.* `so/core/reentry_simulation.simulate_stop_reentry_dict` gained a backward-compatible
+fresh-exit option for exp12's M1 / M2 rules: a re-entry rule may set `episode_dict["require_fresh_exit"] = True`; if the
+exit signal is on at that re-entry decision, the simulator ignores it until it has been off on at least one decision
+(a state flag, cleared by the first decision with the signal off; causal). Without the key (every rule of exp01-exp08)
+the behaviour is unchanged. Checks: all 12 test suites pass (`tests/test_exp12.py` verifies the option with and without
+the key, and that unmodified E1 / E2 replays equal exp04 / exp07 exactly); exp12 step 02 asserts the real-data
+reproduction of exp04 (+108.03%, 35 exits) and exp07 (+115.60%, 12 exits) before printing any exp12 number.
+
 ## VIX data layer (2026-10-09, agent; shared code, no trial)
 
 *Implemented and tested* (roadmap 2026-10-09, step 0.4): `so/paths.py` (the four raw folders of

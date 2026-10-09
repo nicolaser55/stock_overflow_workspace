@@ -29,7 +29,7 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp09_vix_reentry` | VIX-timed re-entry / exit filter on exp04's trend exit and exp07's lights (6 candidates) | 01 exploration, 02 continuous replay | not written | **SKIPPED** 2026-10-09 by exp08's gate (needs G1 or G2; both fail) |
 | `exp10_vix_vol_scaled_exposure` | exp05 with the VIX as the volatility forecast (4 candidates) | 01 exploration, 02 continuous replay | not written | **SKIPPED** 2026-10-09 by exp08's gate (needs G3 and G4; G4 fails) |
 | `exp11_vix_model_exit` | Exit / re-entry from the price + VIX logistic model (4 candidates) | 01 continuous replay | not written | **SKIPPED** 2026-10-09 by exp08's gate (needs G2; fails) |
-| `exp12_vix_fear_reentry` | Data-dependent follow-up of exp08 (Nicolas, 2026-10-09): exp09's rules (E1, E2 × M1 fear-fade re-entry, M2 term-structure re-entry, M3 no exit into fear), `_prev` timing only (6 candidates) | 01 exploration, 02 continuous replay | to write | planned (roadmap 2026-10-09) |
+| `exp12_vix_fear_reentry` | Data-dependent follow-up of exp08 (Nicolas, 2026-10-09): exp09's rules (E1, E2 × M1 fear-fade re-entry, M2 term-structure re-entry, M3 no exit into fear), `_prev` timing only (6 candidates) | 01 exploration, 02 continuous replay | 1.0 | pre-registered 2026-10-09 (budget 300, 271 expected) |
 
 *Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I2): exp06's "beats
 both random families" means it beat the median of each (19/20 random exits, 15/20 random re-entries; empirical p ≈ 0.10
