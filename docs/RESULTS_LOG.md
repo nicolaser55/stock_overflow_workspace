@@ -20,6 +20,30 @@ window was opened on this date, no design was evaluated, and no trial-log row wa
 still none. Calibration re-runs of exp05 and exp06 under the new split, as new versions, are proposed and waiting for
 Nicolas.
 
+## Methodology note (2026-10-11, Nicolas): rolling retraining
+
+Nicolas decided on 2026-10-11 that model-based designs are evaluated by walk-forward analysis with a rolling training
+window. The model is retrained on a pre-registered schedule using only data available on the retraining day, then
+deployed until the next retraining. Decisions are made every session at the decision bar with the latest model, and
+the path is judged continuously over time in development and in the holdout.
+
+Retraining frequency is a pre-registered setting of each protocol. The default is weekly (the first session of each
+week). Changing it after results is a new version. One optional pre-registered comparison, weekly versus quarterly, is
+allowed. The default training-window candidates are 6 months, 2 years and 10 years. Candidate selection, across
+training windows or any other protocol dimension, is pooled over the last 4 quarters and re-evaluated quarterly,
+prior-only, as in exp02–exp13.
+
+Labels may look forward from their own row. A model trained on day t learns only from rows whose label was complete
+before the decision bar of day t. Unfinished labels are dropped, never filled with 0 or any other value. Features use
+only information available at or before the decision bar.
+
+The shared module was not built. The task requires `main` to contain `so/core/holdout.py` with the T1–T3 follow-up (an
+intraday truncation cut). Observed on 2026-10-11: local `main` and `origin/main` are `11a1322`, which has no
+`so/core/holdout.py`. That file exists on `agent/holdout-split` at `80c67a3`. There, `get_truncated_ohlcv_dict` keeps
+every bar of the cut session through `session_end_idx` (the session close). That is not a cut at the decision bar.
+No experiment was run, no holdout window was opened, and no trial-log row was added. Archived experiments exp01–exp13
+are unchanged.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log
