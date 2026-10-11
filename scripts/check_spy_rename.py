@@ -66,7 +66,8 @@ if __name__ == "__main__":
     # DISPLAY THE RAW FOLDER
     print(f"Raw folder:\t{paths.LOCAL_OHLCV_DATA_FILE_PATH_STR}")
     # READ THE RAW BARS, COLLECT THE SESSION DATES, THEN CUT THE BARS AT THE DATA CUT (NO LATER PRICE IS USED)
-    complete_ohlcv_pdf = get_complete_ohlcv_pdf()
+    # THE RENAME CHECK READS THE RAW BARS TO COUNT SESSIONS; IT IS A DATA CHECK, NOT A NEW STRATEGY RESULT
+    complete_ohlcv_pdf = get_complete_ohlcv_pdf(enforce_holdout_bool_in=False)
     session_date_list = sorted(complete_ohlcv_pdf["date"].unique())
     cut_ohlcv_pdf = complete_ohlcv_pdf[complete_ohlcv_pdf["date"] <= pd.Timestamp(DATA_CUT_DATE_STR).date()].reset_index(drop=True)
     del complete_ohlcv_pdf
