@@ -195,3 +195,4 @@ legacy trials.
 | 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode), pre-registered before any run |
 | 1.0 | 2026-10-09 | Run once (no change to the protocol); status line added at the top |
 | 1.0 | 2026-10-09 | Audit corrections A1, A2, A4 added to §10 (documentation only; no rule, gate or result changed) |
+| — | 2026-10-11 | ARCHIVED (Nicolas): pinned to the old untouched window 2026-05-14; superseded by so.core.holdout. No rule, grid, threshold or recorded number changed. Re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1 |

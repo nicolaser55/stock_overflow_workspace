@@ -19,6 +19,8 @@ re-running the experiment's notebooks; deleting an experiment's folder never aff
 
 # DEFINE THE DATA ROOT (ENVIRONMENT OVERRIDE OR THE DEFAULT FOLDER ON NICODESKTOP)
 LOCAL_PATH_STR = os.environ.get("SO_DATA_PATH", "C:/Users/nico/Desktop/stock_overflow_data/").replace("\\", "/").rstrip("/") + "/"
+# DEFINE THE WORKSPACE ROOT (records/ IS VERSIONED IN GIT; IT IS NOT IN THE DATA FOLDER)
+WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
 
 # DEFINE THE ZONES
 LOCAL_RAWZONE_PATH_STR = f"{LOCAL_PATH_STR}store01_rawzone/"
@@ -60,6 +62,11 @@ Experiments
 
 # DEFINE THE SHARED TRIAL LOG (EVERY EXPLORATION, SIGNAL CHECK, VALIDATION CANDIDATE AND TEST OF EVERY EXPERIMENT)
 LOCAL_TRIAL_LOG_FILE_PATH_STR = f"{LOCAL_EXPERIMENTZONE_PATH_STR}trial_log.csv"
+# DEFINE THE HOLDOUT REGISTRY AND THE EVALUATION LEDGER (DATES AND SUMMARY METRICS; VERSIONED IN GIT)
+HOLDOUT_WINDOWS_FILE_PATH_STR = f"{WORKSPACE_PATH_STR}/records/holdout_windows.csv"
+HOLDOUT_EVALUATIONS_FILE_PATH_STR = f"{WORKSPACE_PATH_STR}/records/holdout_evaluations.csv"
+# DEFINE THE HOLDOUT RESULTS FOLDER (NO DEFAULT: NONE MEANS RESULTS CANNOT BE WRITTEN; SET ONLY BY NICOLAS)
+HOLDOUT_RESULTS_PATH_STR = os.environ.get("SO_HOLDOUT_PATH") or None
 
 # FUNCTION: GET THE DATA FOLDER OF AN EXPERIMENT STEP
 def get_experiment_data_path_str(experiment_name_str_in, folder_name_str_in):

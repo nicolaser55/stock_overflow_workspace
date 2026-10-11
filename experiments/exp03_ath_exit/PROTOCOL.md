@@ -117,3 +117,4 @@ information test). The test windows are evaluated only after the design is froze
 |---|---|---|
 | (exploration) | 2026-10-04 | Step 13 exploration, 15 rules, 2005-2014 (`ath_exit_exploration`, `ath_exit_exploration_clean`) |
 | 1.0 | 2026-10-05 | Full experiment (decided by Nicolas): all 15 rules as walk-forward candidates, exp02's schedule and pooled selection, buy-and-hold and random buy-back baselines; random exit and trend baselines added by the assistant and kept by Nicolas; secondary criterion = Sharpe **or** drawdown; honest reporting as exp02 |
+| — | 2026-10-11 | ARCHIVED (Nicolas): pinned to the old untouched window 2026-05-14; superseded by so.core.holdout. No rule, grid, threshold or recorded number changed. Re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1 |

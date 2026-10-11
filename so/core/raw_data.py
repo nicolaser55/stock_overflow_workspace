@@ -40,20 +40,34 @@ def read_raw_ohlcv_pdf(raw_path_str_in=None):
     return raw_ohlcv_pdf
 
 # FUNCTION: GET THE COMPLETE (FORMATTED) MINUTE BARS
-def get_complete_ohlcv_pdf(raw_path_str_in=None, cutoff_date_str_in=None):
+def get_complete_ohlcv_pdf(raw_path_str_in=None, cutoff_date_str_in=None, enforce_holdout_bool_in=True):
     """
     Reads the raw bars and formats them for the pipeline and the simulators (timestamp, open, high, low, close, volume,
-    date), sorted by timestamp. Optionally cuts the data after a date (exploration notebooks).
+    date), sorted by timestamp. By default the series is cut strictly before the development boundary
+    (so.core.holdout.get_replay_boundary_date) and a cutoff on or after that boundary raises. Pass the guard argument
+    as false only to locate the latest session, including forward data.
 
     Args:
         raw_path_str_in (str | None): Raw folder (None = paths.LOCAL_OHLCV_DATA_FILE_PATH_STR)
-        cutoff_date_str_in (str | None): Last session kept (inclusive); None keeps everything
+        cutoff_date_str_in (str | None): Last session kept (inclusive)
+        enforce_holdout_bool_in (bool): Cut at the development boundary and refuse a later cutoff
 
     Returns:
         pd.DataFrame: Complete minute bars
     """
     # READ THE RAW BARS
     raw_ohlcv_pdf = read_raw_ohlcv_pdf(raw_path_str_in)
+    # IF THE HOLDOUT BOUNDARY IS ENFORCED
+    if enforce_holdout_bool_in:
+        # IMPORT THE BOUNDARY HERE (THE HOLDOUT MODULE LOADS THIS FUNCTION TO FIND THE LATEST SESSION)
+        from so.core.holdout import get_replay_boundary_date
+        # COLLECT THE FIRST DATE DEVELOPMENT CODE MAY NOT READ
+        boundary_date = get_replay_boundary_date(None)
+        # REFUSE A CUTOFF ON OR AFTER THE BOUNDARY
+        if cutoff_date_str_in is not None and pd.Timestamp(cutoff_date_str_in).date() >= boundary_date:
+            raise ValueError(f"❌ cutoff {cutoff_date_str_in} is on or after the development boundary {boundary_date}.")
+        # KEEP THE SESSIONS STRICTLY BEFORE THE BOUNDARY
+        raw_ohlcv_pdf = raw_ohlcv_pdf[raw_ohlcv_pdf["date"] < boundary_date]
     # IF A CUTOFF IS GIVEN
     if cutoff_date_str_in is not None:
         # KEEP THE SESSIONS UP TO THE CUTOFF

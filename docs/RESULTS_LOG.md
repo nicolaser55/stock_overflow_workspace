@@ -8,6 +8,56 @@ does not support. Failures are results. Test windows touched so far: **none** (a
 `docs/history/RESULTS_LOG_2026-10-05.md`; their 4,089 trials are in `records/legacy/trial_log_legacy_20261005.csv` and
 still count.*
 
+## Methodology note (2026-10-11, Nicolas)
+
+The evaluation design is now a rolling 12-month holdout (`so.core.holdout`). It replaces the per-fold 3-month test
+windows and the fixed untouched window 2026-05-14 → 2026-08-13. The holdout is the last 12 calendar months of the data,
+ending at the latest session present when the window is opened, and it stays frozen after that. Train and validation
+boundaries are derived from that window and the experiment's embargo. Sessions after the window's end are forward data
+and are refused. Each frozen design may be evaluated once per window, at most 10 designs, then the window is retired.
+exp01–exp13 are archived: the entries below are unchanged, and their committed notebook outputs stay the record. No
+window was opened on this date, no design was evaluated, and no trial-log row was added. Test windows touched so far:
+still none. Calibration re-runs of exp05 and exp06 under the new split, as new versions, are proposed and waiting for
+Nicolas.
+
+## Methodology note (2026-10-11, Nicolas): rolling retraining
+
+Nicolas decided on 2026-10-11 that model-based designs are evaluated by walk-forward analysis with a rolling training
+window. The model is retrained on a pre-registered schedule using only data available on the retraining day, then
+deployed until the next retraining. Decisions are made every session at the decision bar with the latest model, and
+the path is judged continuously over time in development and in the holdout.
+
+Retraining frequency is a pre-registered setting of each protocol. The default is weekly (the first session of each
+week). Changing it after results is a new version. One optional pre-registered comparison, weekly versus quarterly, is
+allowed. The default training-window candidates are 6 months, 2 years and 10 years. Candidate selection, across
+training windows or any other protocol dimension, is pooled over the last 4 quarters and re-evaluated quarterly,
+prior-only, as in exp02–exp13.
+
+Labels may look forward from their own row. A model trained on day t learns only from rows whose label was complete
+before the decision bar of day t. Unfinished labels are dropped, never filled with 0 or any other value. Features use
+only information available at or before the decision bar.
+
+The shared module was not built. The task requires `main` to contain `so/core/holdout.py` with the T1–T3 follow-up (an
+intraday truncation cut). Observed on 2026-10-11: local `main` and `origin/main` are `11a1322`, which has no
+`so/core/holdout.py`. That file exists on `agent/holdout-split` at `80c67a3`. There, `get_truncated_ohlcv_dict` keeps
+every bar of the cut session through `session_end_idx` (the session close). That is not a cut at the decision bar.
+No experiment was run, no holdout window was opened, and no trial-log row was added. Archived experiments exp01–exp13
+are unchanged.
+
+*Correction later on 2026-10-11:* T1–T3 were implemented on `agent/holdout-split`. The truncation test also cuts each
+month-end at the decision bar (15:58 on a full day, the second-to-last bar on a half day) and requires that session's
+target weight and position change to match the full run. An `invalid_lookahead` evaluation appends one trial-log row
+(stage `test`, `test_window_touched` True, note `invalid_lookahead`, no return metrics). The guard-off argument may
+appear only in the pipeline, `scripts/check_spy_rename.py`, `scripts/holdout_evaluate.py`, `scripts/smoke_notebook.py`,
+`so/core/holdout.py` and `tests/`. Synthetic tests only. The shared trial log was not modified, no window was opened,
+and `main` still does not contain the holdout module. Rolling retraining waits for Nicolas to merge that branch.
+
+*Correction later the same day (audit of `a64c1a9`):* cutting the session at the decision bar moved the decision.
+`get_session_decision_idx_dict` sets it to `session_end_idx` minus one bar, so a session that ended at 15:58 was
+decided at 15:57. That check was replaced by a perturbation: every bar strictly after the cut session's decision bar
+is overwritten (price × 1.25 plus seeded noise) and the session structure is left unchanged. The whole-session
+truncation is unchanged. No experiment was run, no window was opened, and the shared trial log was not modified.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log
