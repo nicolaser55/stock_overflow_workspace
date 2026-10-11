@@ -5,6 +5,8 @@ import time
 import os
 # IMPORT DATA QUALITY FUNCTIONS
 from so.core.data_quality import check_var_type
+# IMPORT PATHS (THE CACHE GUARD APPLIES ONLY TO THE WORK ZONE AND THE GOLD ZONE)
+from so import paths
 
 # DEFINE STORAGE NAME STR
 STORAGE_NAME_STR = "Local File Storage"
@@ -244,13 +246,89 @@ def read_pdf_from_csv_file_path_list(list_in):
     # IF THERE ARE NO ITEMS
     print("There are 0 DataFrame items in the list")
 
-# FUNCTION: COLLECT TRANSACTION DATA FROM PATH
-def read_csv_files_from_path(file_path_str_in):
+# FUNCTION: GET THE HOLDOUT BOUNDARY OF A PIPELINE CACHE
+def get_cache_holdout_boundary_date(file_path_str_in, enforce_holdout_bool_in):
     """
-    Reads all CSV files in directory into single DataFrame
+    The first date a pipeline-cache file may not have, or None when the guard does not apply.
+
+    The guard applies only inside the work zone and the gold zone. store04_experiments is unaffected.
+    With no registered window the guard raises, as the raw loader does. enforce_holdout_bool_in=False
+    is the pipeline itself (it prepares data and computes no strategy result).
+
+    Args:
+        file_path_str_in (str): Directory being read
+        enforce_holdout_bool_in (bool): Apply the guard
+
+    Returns:
+        datetime.date | None: Boundary, or None
+    """
+    # SKIP THE GUARD WHEN THE CALLER IS THE PIPELINE
+    if not enforce_holdout_bool_in:
+        return None
+    # NORMALIZE THE PATH
+    path_str = file_path_str_in.replace("\\", "/")
+    work_str = paths.LOCAL_WORKZONE_PATH_STR.replace("\\", "/")
+    gold_str = paths.LOCAL_GOLDZONE_PATH_STR.replace("\\", "/")
+    # STORE04 AND EVERY OTHER FOLDER ARE UNAFFECTED
+    if not (path_str.startswith(work_str) or path_str.startswith(gold_str)):
+        return None
+    # IMPORT THE BOUNDARY HERE (THIS MODULE IS IMPORTED WIDELY)
+    from so.core.holdout import get_replay_boundary_date
+    # RETURN THE DEVELOPMENT BOUNDARY (RAISES WHEN NO WINDOW IS REGISTERED)
+    return get_replay_boundary_date(None)
+
+# FUNCTION: GET THE DATE STAMPED ON A CACHE FILE
+def get_cache_file_date(file_path_str_in):
+    """
+    The YYYYMMDD stamp at the end of a cache file name, or None when the name has none.
+
+    Args:
+        file_path_str_in (str): File path
+
+    Returns:
+        datetime.date | None: The stamp
+    """
+    # COLLECT THE LAST TOKEN OF THE FILE NAME
+    date_str = os.path.basename(file_path_str_in).replace(".csv", "").split("_")[-1]
+    # TRY TO PARSE IT
+    try:
+        return pd.to_datetime(date_str, format="%Y%m%d").date()
+    except ValueError:
+        return None
+
+# FUNCTION: DROP CACHE FILES ON OR AFTER THE HOLDOUT BOUNDARY
+def get_cache_file_list_before_boundary(file_path_str_list_in, boundary_date_in):
+    """
+    Drops files whose name date is on or after the boundary. Files with no date stamp are kept.
+
+    Args:
+        file_path_str_list_in (list[str]): File paths
+        boundary_date_in (datetime.date | None): Boundary (None keeps every file)
+
+    Returns:
+        list[str]: The files that may be read
+    """
+    # KEEP EVERY FILE WHEN THERE IS NO BOUNDARY
+    if boundary_date_in is None:
+        return list(file_path_str_list_in)
+    # DROP A FILE DATED ON OR AFTER THE BOUNDARY
+    kept_list = []
+    for file_path_str in file_path_str_list_in:
+        file_date = get_cache_file_date(file_path_str)
+        if file_date is not None and file_date >= boundary_date_in:
+            continue
+        kept_list.append(file_path_str)
+    return kept_list
+
+# FUNCTION: COLLECT TRANSACTION DATA FROM PATH
+def read_csv_files_from_path(file_path_str_in, enforce_holdout_bool_in=True):
+    """
+    Reads all CSV files in directory into single DataFrame. Inside the work zone or the gold zone, files dated
+    on or after the holdout boundary are skipped.
     
     Args:
         file_path_str_in: String path to directory containing CSV files
+        enforce_holdout_bool_in (bool): Skip holdout cache files (False = the pipeline)
         
     Returns:
         Combined DataFrame from all CSV files in directory
@@ -259,10 +337,12 @@ def read_csv_files_from_path(file_path_str_in):
     if not file_path_str_in.endswith("/"):
         # RAISE AN ERROR
         raise ValueError(f"❌ File path '{file_path_str_in}' is not valid.\nFile path must end with '/'.")
+    # COLLECT THE BOUNDARY (RAISES WHEN A CACHE IS READ AND NO WINDOW IS REGISTERED)
+    boundary_date = get_cache_holdout_boundary_date(file_path_str_in, enforce_holdout_bool_in)
     # COLLECT ALL THE FILES IN THE DIRECTORY
     file_path_str_list = get_path_file_list(file_path_str_in)
-    # FILTER OUT NON-CSV FILES
-    valid_file_path_str_list = [f for f in file_path_str_list if f.endswith(".csv")]
+    # FILTER OUT NON-CSV FILES AND FILES ON OR AFTER THE BOUNDARY
+    valid_file_path_str_list = get_cache_file_list_before_boundary([f for f in file_path_str_list if f.endswith(".csv")], boundary_date)
     # CALL FUNCTION TO COLLECT DATA
     return read_pdf_from_csv_file_path_list(valid_file_path_str_list)
 
@@ -308,14 +388,17 @@ def get_date_range_file_path_list(file_path_str_in, date1_str_in=None, date2_str
     return [file_path_str for _, file_path_str in sorted(date_file_path_tup_list)]
 
 # FUNCTION: READ THE DATE FILES OF A DIRECTORY WITHIN A DATE RANGE
-def read_date_range_csv_files_from_path(file_path_str_in, date1_str_in=None, date2_str_in=None):
+def read_date_range_csv_files_from_path(file_path_str_in, date1_str_in=None, date2_str_in=None, enforce_holdout_bool_in=True):
     """
     Reads the date-stamped CSV files of a directory within an inclusive date range into a single DataFrame.
+    Inside the work zone or the gold zone, files dated on or after the holdout boundary are skipped, and an
+    explicit date2 on or after that boundary raises.
 
     Args:
         file_path_str_in (str): Directory path ending with '/'
         date1_str_in (str | None): Start date (inclusive)
         date2_str_in (str | None): End date (inclusive)
+        enforce_holdout_bool_in (bool): Apply the holdout guard (False = the pipeline)
 
     Returns:
         pd.DataFrame: Combined DataFrame (empty DataFrame if no files match)
@@ -324,8 +407,13 @@ def read_date_range_csv_files_from_path(file_path_str_in, date1_str_in=None, dat
     if not file_path_str_in.endswith("/"):
         # RAISE AN ERROR
         raise ValueError(f"❌ File path '{file_path_str_in}' is not valid.\nFile path must end with '/'.")
-    # COLLECT THE FILE PATHS WITHIN THE DATE RANGE
-    file_path_str_list = get_date_range_file_path_list(file_path_str_in, date1_str_in, date2_str_in)
+    # COLLECT THE BOUNDARY (RAISES WHEN A CACHE IS READ AND NO WINDOW IS REGISTERED)
+    boundary_date = get_cache_holdout_boundary_date(file_path_str_in, enforce_holdout_bool_in)
+    # REFUSE AN EXPLICIT END ON OR AFTER THE BOUNDARY
+    if boundary_date is not None and date2_str_in is not None and pd.Timestamp(date2_str_in).date() >= boundary_date:
+        raise ValueError(f"❌ Cache read ends {date2_str_in}, on or after the holdout boundary {boundary_date}.")
+    # COLLECT THE FILE PATHS WITHIN THE DATE RANGE AND DROP HOLDOUT FILES
+    file_path_str_list = get_cache_file_list_before_boundary(get_date_range_file_path_list(file_path_str_in, date1_str_in, date2_str_in), boundary_date)
     # IF THERE ARE NO FILES
     if not file_path_str_list:
         # RETURN EMPTY DATAFRAME
