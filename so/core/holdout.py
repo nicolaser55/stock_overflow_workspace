@@ -45,7 +45,9 @@ WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "m
 EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
-                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates", "sources_read"]
+                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates", "sources_read",
+                          "retrain_frequency", "train_window_candidates", "holdout_refit_count", "average_share_purged",
+                          "turnover", "candidate_switches"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
 # DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE A WINDOW-END LOAD IS IN PROGRESS)
@@ -756,7 +758,13 @@ def get_governing_selection_pdf(design_module_in, score_pdf_in, period_pdf_in):
         return pd.DataFrame({"period_id": period_pdf_in["period_id"].astype(int), "candidate": candidate_list[0], "candidate_idx": 0})
     # SELECT FROM EARLIER PERIODS ONLY AND MAP THE CHOICE ONTO THE NEXT PERIOD
     rule_dict = design_module_in.SELECTION_RULE
-    selection_pdf = get_pooled_selection_pdf(score_pdf_in, ["candidate"], "excess_return", int(rule_dict["pooled_periods"]), list(rule_dict["tie_break"]))
+    score_pdf = score_pdf_in.copy()
+    # A DESIGN MAY ATTACH TIE COLUMNS (THE TRAINING-WINDOW LENGTH) THAT THE SCORE TABLE DOES NOT CARRY
+    tie_value_dict = getattr(design_module_in, "CANDIDATE_TIE_VALUE_DICT", None) or {}
+    for column_str, value_dict in tie_value_dict.items():
+        if column_str not in score_pdf.columns:
+            score_pdf[column_str] = score_pdf["candidate"].map(value_dict)
+    selection_pdf = get_pooled_selection_pdf(score_pdf, ["candidate"], "excess_return", int(rule_dict["pooled_periods"]), list(rule_dict["tie_break"]))
     selection_pdf["candidate_idx"] = selection_pdf["candidate"].map({name: idx for idx, name in enumerate(candidate_list)})
     governing_dict = get_prior_only_period_candidate_dict(selection_pdf, period_pdf_in, "candidate_idx")
     # THE FIRST PERIOD HAS NO PRIOR SELECTION
@@ -986,7 +994,8 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
     """
     # IMPORT THE EVALUATION FUNCTIONS HERE
     from so.core.reentry_simulation import get_buy_and_hold_result_dict
-    from so.core.evaluation import get_chained_daily_return_pdf, get_success_criteria_dict, get_mde_float
+    from so.core.evaluation import (get_chained_daily_return_pdf, get_success_criteria_dict, get_mde_float,
+                                    get_turnover_switch_dict, get_refit_report_dict)
     from so.core.continuous_replay import get_log_excess_bootstrap_dict
     # CUT THE PATH TO THE HOLDOUT AND REBASE IT
     start_date, end_date = get_date(window_dict_in["start"]), get_date(window_dict_in["end"])
@@ -1015,6 +1024,45 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
     holdout_period_pdf = period_pdf[period_pdf["period_end"].map(get_date) >= start_date]
     candidate_dict = {int(period_row.period_id): selection_pdf.loc[selection_pdf["period_id"] == period_row.period_id, "candidate"].iloc[0]
                       for period_row in holdout_period_pdf.itertuples(index=False)}
+    # THE CANDIDATE IN FORCE ON EACH HOLDOUT SESSION, FOR THE SWITCH COUNT
+    candidate_list = []
+    for session_date in holdout_pdf["date"]:
+        cover_pdf = period_pdf[(period_pdf["period_start"].map(get_date) <= session_date) & (period_pdf["period_end"].map(get_date) >= session_date)]
+        if len(cover_pdf) == 0:
+            continue
+        period_id = int(cover_pdf["period_id"].iloc[-1])
+        candidate_list.append(selection_pdf.loc[selection_pdf["period_id"] == period_id, "candidate"].iloc[0])
+    # TRADES WHOSE SESSION FALLS INSIDE THE HOLDOUT
+    trade_pdf = result_dict_in["path_dict"].get("trade_pdf")
+    trade_count = 0
+    if trade_pdf is not None and len(trade_pdf) and "trade_ts" in trade_pdf.columns:
+        trade_work_pdf = trade_pdf if "reason" not in trade_pdf.columns else trade_pdf[trade_pdf["reason"] != "END"]
+        trade_clock = pd.to_datetime(trade_work_pdf["trade_ts"])
+        if getattr(trade_clock.dt, "tz", None) is None:
+            trade_clock = trade_clock.dt.tz_localize("America/New_York")
+        else:
+            trade_clock = trade_clock.dt.tz_convert("America/New_York")
+        trade_day = trade_clock.dt.date
+        trade_count = int(((trade_day >= start_date) & (trade_day <= end_date)).sum())
+    # TURNOVER FROM THE HOLDOUT WEIGHTS
+    weight_arr = holdout_pdf["weight"].to_numpy(dtype=float) if "weight" in holdout_pdf.columns and len(holdout_pdf) else np.array([])
+    if len(weight_arr):
+        activity_dict = get_turnover_switch_dict(weight_arr, trade_count, candidate_list)
+        turnover_float = activity_dict["turnover_per_year"]
+        switch_count = activity_dict["candidate_switch_count"]
+    else:
+        turnover_float, switch_count = np.nan, 0 if candidate_list else np.nan
+    # REFITS WHOSE SESSION IS INSIDE THE HOLDOUT
+    refit_pdf = result_dict_in["path_dict"].get("refit_log_pdf")
+    if refit_pdf is not None and len(refit_pdf):
+        refit_day = refit_pdf["retrain_session"].map(get_date)
+        holdout_refit_pdf = refit_pdf[(refit_day >= start_date) & (refit_day <= end_date)].copy()
+    else:
+        holdout_refit_pdf = None
+    refit_report_dict = get_refit_report_dict(holdout_refit_pdf if holdout_refit_pdf is not None else pd.DataFrame(), None)
+    frequency_str = str(getattr(design_module_in, "RETRAIN_FREQUENCY_STR", "") or "")
+    window_list = getattr(design_module_in, "TRAIN_WINDOW_CANDIDATE_LIST", None)
+    window_text = "" if not window_list else ",".join(str(window_str) for window_str in window_list)
     # RETURN THE REPORT
     report_dict = {"total_return": success_dict["strategy_total_return"], "buy_hold_total_return": success_dict["buy_hold_total_return"],
                    "annualized_log_excess": log_excess_dict["annualized_log_excess"], "log_excess_ci_low": log_excess_dict["ci_low"],
@@ -1023,8 +1071,13 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
                    "mde": get_mde_float(float(np.std(month_excess_arr, ddof=1)) if len(month_excess_arr) > 1 else np.nan, len(month_excess_arr)),
                    "primary_pass": success_dict["primary_success"], "secondary_pass": success_dict["secondary_success"],
                    "comparable_pass": success_dict["comparable_return"], "baselines_beaten": success_dict["baselines_beaten"],
-                   "carried_weight": carried_weight_float, "holdout_candidates": json.dumps(candidate_dict)}
-    return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"]}
+                   "carried_weight": carried_weight_float, "holdout_candidates": json.dumps(candidate_dict),
+                   "retrain_frequency": frequency_str, "train_window_candidates": window_text,
+                   "holdout_refit_count": int(len(holdout_refit_pdf)) if holdout_refit_pdf is not None else np.nan,
+                   "average_share_purged": refit_report_dict["mean_share_purged"],
+                   "turnover": turnover_float, "candidate_switches": switch_count}
+    return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"],
+            "refit_log_pdf": holdout_refit_pdf}
 
 # FUNCTION: RUN THE TRUNCATION TEST
 def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in, data_context_in=None):
@@ -1096,8 +1149,10 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     (missing means ["SPY_1MIN"]) writes no daily paths and appends a ledger row with status "invalid_undeclared".
     A failed truncation test writes no daily paths and appends a ledger row with status "invalid_lookahead" (it
     counts against the window budget) plus one trial-log row (stage "test", test_window_touched True, note
-    "invalid_lookahead", no return metrics). A valid run writes the holdout paths under
-    SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends a ledger row with status "valid", and appends one trial-log
+    "invalid_lookahead", no return metrics).     A valid run writes the holdout paths under
+    SO_HOLDOUT_PATH/<window_id>/<design_id>/, and, when the path carried a refit log, refit_log.csv beside them.
+    The ledger row records the retraining frequency, the training-window candidates, the holdout refit count, the
+    average share purged, turnover per year and the candidate-switch count. It appends one trial-log
     row (stage "test", test_window_touched True).
 
     Args:
@@ -1181,6 +1236,9 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     os.makedirs(output_path_str, exist_ok=True)
     report_dict["daily_equity_pdf"].to_csv(os.path.join(output_path_str, "strategy_daily_equity.csv"), index=False)
     report_dict["buy_hold_equity_pdf"].to_csv(os.path.join(output_path_str, "buy_hold_daily_equity.csv"), index=False)
+    # THE REFIT LOG OF THE HOLDOUT SEGMENT, NEXT TO THE DAILY PATHS, AND ONLY UNDER SO_HOLDOUT_PATH
+    if report_dict.get("refit_log_pdf") is not None:
+        report_dict["refit_log_pdf"].to_csv(os.path.join(output_path_str, "refit_log.csv"), index=False)
     # APPEND THE VALID LEDGER ROW AND THE TRIAL-LOG ROW
     report_fields_dict = report_dict["report_dict"]
     row_dict["status"] = "valid"
