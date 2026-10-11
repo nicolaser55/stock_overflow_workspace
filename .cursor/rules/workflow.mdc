@@ -16,8 +16,11 @@ alwaysApply: true
   log.
 - Tests: `venv-main\Scripts\python.exe tests\run_all_tests.py` (a few minutes). Run them after every code change and
   before every commit. All suites must pass; never commit failing tests.
-- The existing files of the data folder are protected by Windows permissions (no delete). An "access denied" on one of
-  them means you tried something the rules forbid: stop that action, do not work around it, and record it.
+- The data folder has **no** Windows protection (Nicolas removed it on 2026-10-06 and keeps a backup): nothing technical
+  stops a delete or an overwrite, so the "File scope" rules of `research-integrity.mdc` are the only protection. Before
+  any command that deletes, moves or overwrites something in the data folder, check that every target is something you
+  created under `store04_experiments\` (never `trial_log.csv`, which is only appended to through `so.core.trial_log`).
+  An "access denied" anywhere in the data folder: stop that action, do not work around it, and record it.
 
 ## Git
 

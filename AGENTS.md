@@ -23,8 +23,8 @@ to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine 
 - Data (never in git): `C:/Users/nico/Desktop/stock_overflow_data/` (`so.paths`, override with `SO_DATA_PATH`).
 - Every experiment run is logged in `store04_experiments/trial_log.csv` (never edit it) and reported in
   `docs/RESULTS_LOG.md` the same day.
-- exp01, exp02 and exp03 are **stopped** (all below buy-and-hold on the honest validation path). The next family is
-  "stay invested, exit rarely" (exp04-exp07 in the roadmap), then VIX, then text.
+- exp01 to exp08, exp12 and exp13 are **stopped** (exp09-exp11 skipped). The VIX line is closed (exp13: E1M1 IS NOT
+  ROBUST). Next is parked for Nicolas: write-up of the negative result, then text data.
 - **You work autonomously** (Nicolas, 2026-10-06): never ask for permission or wait for an answer. Decisions only Nicolas
   can make are parked in §7 of the research state and you continue with the next allowed item.
 - Stay inside the workspace and the data folder; never delete, move or rename the data folder's existing files,

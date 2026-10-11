@@ -12,6 +12,7 @@ are **kept across experiments**: re-running an experiment never requires re-runn
 | 04 | `step04_TSCTX_data_collection.ipynb` | `store02_workzone/step04_TSCTX_data/` (context features, tested for look-ahead) | exp01 |
 | 05 | `step05_TSBAR_data_collection.ipynb` | `store03_goldzone/step05_TSBAR_data/` (barrier targets, 32 SL/TP distances) | exp01 |
 | 06 | `step06_TSDAY_data_collection.ipynb` | `store02_workzone/step06_TSDAY_data/TSDAY_data.csv` (one row per session) | exp02, exp03 (they rebuild it in memory; this file is the record) |
+| 07 | `step07_VIX_data_check.ipynb` | `store04_experiments/vix_data_layer/step07_VIX_data_check/` (coverage, daily vs 1-minute agreement, feature distribution; loads cut at 2026-04-15) | exp08-exp11 (the VIX features are rebuilt in memory by `so.features.vix_features`) |
 
 Steps 00-05 are the notebooks of the previous workspace with only their imports changed (logic unchanged); their caches
 (steps 01-05) were built and corrected on 2026-10-04/05 and are kept as they are. Step 06 is the former step 09 (TSDAY)

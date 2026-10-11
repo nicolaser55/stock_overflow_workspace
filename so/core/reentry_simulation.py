@@ -160,7 +160,10 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
         stop_k_in (float | None): Stop multiplier k (None = no stop)
         reentry_func_in (function | None): Re-entry rule f(session_idx, cash_session_count, episode_dict) (None = never).
             A rule may set episode_dict["exit_block_sessions"] = c before returning True: the exit signal is then
-            ignored for the c decisions after the re-entry (cooling-off; absent = 0, the original behaviour)
+            ignored for the c decisions after the re-entry (cooling-off; absent = 0, the original behaviour).
+            A rule may set episode_dict["require_fresh_exit"] = True before returning True: if the exit signal is on
+            at the re-entry decision, it is then ignored until it has been off on at least one decision (a new exit
+            needs a fresh signal; absent = False, the original behaviour)
         reentry_reason_str_in (str): Label of the rule's re-entries ("model", "delay", "random", "oracle", "rule")
         exit_signal_arr_in (np.ndarray | None): Bool per session position: sell at the decision while invested (trend rule)
         max_cash_sessions_in (int | None): Forced re-entry after this many cash decisions (None = never forced; pass the
@@ -187,7 +190,7 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
     # DEFINE THE STATE
     state_dict = {"cash": float(initial_capital_in), "invested": False, "share_count": 0, "entry_idx": -1, "buy_fill": np.nan,
                   "buy_fee": 0.0, "entry_reason": "", "decision_ts": pd.NaT, "highest_close": -np.inf, "stop": -np.inf,
-                  "cash_session_count": 0, "episode": None, "exit_block_until": -1}
+                  "cash_session_count": 0, "episode": None, "exit_block_until": -1, "fresh_exit_pending": False}
     # LISTS TO HOLD THE TRANSACTIONS AND EPISODES
     transaction_dict_list, episode_dict_list = [], []
 
@@ -205,7 +208,7 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
         # UPDATE THE STATE
         state_dict.update({"invested": True, "share_count": share_count, "entry_idx": int(bar_idx), "buy_fill": fill_price,
                            "buy_fee": buy_fee, "entry_reason": reason_str, "decision_ts": decision_ts,
-                           "highest_close": close_arr[bar_idx], "stop": -np.inf, "cash_session_count": 0})
+                           "highest_close": close_arr[bar_idx], "stop": -np.inf, "cash_session_count": 0, "fresh_exit_pending": False})
         # CLOSE THE OPEN EPISODE
         if state_dict["episode"] is not None:
             state_dict["episode"].update({"reentry_ts": timestamp_index[bar_idx], "reentry_fill_price": fill_price, "reentry_reason": reason_str})
@@ -299,8 +302,12 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
         # IF INVESTED: CHECK THE STOP UP TO THE DECISION BAR
         if state_dict["invested"]:
             check_stop(max(start_idx, state_dict["entry_idx"] + 1), decision_idx, session_idx)
+        # IF A FRESH EXIT SIGNAL IS PENDING AND THE SIGNAL IS OFF: THE NEXT SIGNAL IS FRESH
+        if state_dict["fresh_exit_pending"] and state_dict["invested"] and exit_signal_arr_in is not None and not bool(exit_signal_arr_in[session_idx]):
+            state_dict["fresh_exit_pending"] = False
         # DECISION WHILE INVESTED: EXIT SIGNAL (TREND RULE ONLY)
-        if state_dict["invested"] and exit_signal_arr_in is not None and bool(exit_signal_arr_in[session_idx]) and not is_last_session and int(session_idx) > state_dict["exit_block_until"]:
+        if state_dict["invested"] and exit_signal_arr_in is not None and bool(exit_signal_arr_in[session_idx]) and not is_last_session and int(session_idx) > state_dict["exit_block_until"] \
+                and not state_dict["fresh_exit_pending"]:
             sell(fill_idx, open_arr[fill_idx], "SIGNAL")
         # DECISION WHILE IN CASH
         elif not state_dict["invested"] and state_dict["episode"] is not None:
@@ -317,8 +324,11 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
                 if rule_bool:
                     # READ THE COOLING-OFF REQUESTED BY THE RULE (0 IF ABSENT) AND BLOCK THE EXITS AFTER THE RE-ENTRY
                     block_session_count = int(state_dict["episode"].get("exit_block_sessions", 0))
+                    fresh_exit_bool = bool(state_dict["episode"].get("require_fresh_exit", False))
                     if buy(fill_idx, reentry_reason_str_in, timestamp_index[decision_idx]):
                         state_dict["exit_block_until"] = int(session_idx) + block_session_count
+                        # A FRESH SIGNAL IS NEEDED ONLY IF THE EXIT SIGNAL IS ON AT THE RE-ENTRY DECISION
+                        state_dict["fresh_exit_pending"] = fresh_exit_bool and exit_signal_arr_in is not None and bool(exit_signal_arr_in[session_idx])
                 # IF THE MAXIMUM TIME IN CASH IS REACHED
                 elif max_cash_sessions_in is not None and state_dict["cash_session_count"] >= max_cash_sessions_in:
                     buy(fill_idx, "forced", timestamp_index[decision_idx])
