@@ -1,3 +1,4 @@
+# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
 # IMPORT THE SHARED CONFIGURATION AND THE VIX CONFIGURATION
 from so import config
 from so import vix_config

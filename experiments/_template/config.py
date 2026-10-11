@@ -29,3 +29,12 @@ EMBARGO_TRADING_DAYS = 20
 FIXED_TRAIN_WINDOW_YEARS = 10
 # DEFINE THE NUMBER OF VALIDATION QUARTERS POOLED FOR THE SELECTION
 SELECTION_POOLED_QUARTER_COUNT = 4
+
+"""
+Holdout
+"""
+
+# THE DEVELOPMENT BOUNDARY IS NOT A DATE IN THIS FILE
+# It is the session an embargo before the active holdout start (so.core.holdout.get_development_end_date).
+# Validation folds come from so.core.schedule.get_development_fold_pdf (validation windows only).
+# Holdout evaluation is run only by Nicolas, once per window (design.py and PROTOCOL.md, "Holdout evaluation").

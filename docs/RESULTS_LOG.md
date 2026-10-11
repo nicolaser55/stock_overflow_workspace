@@ -8,6 +8,18 @@ does not support. Failures are results. Test windows touched so far: **none** (a
 `docs/history/RESULTS_LOG_2026-10-05.md`; their 4,089 trials are in `records/legacy/trial_log_legacy_20261005.csv` and
 still count.*
 
+## Methodology note (2026-10-11, Nicolas)
+
+The evaluation design is now a rolling 12-month holdout (`so.core.holdout`). It replaces the per-fold 3-month test
+windows and the fixed untouched window 2026-05-14 → 2026-08-13. The holdout is the last 12 calendar months of the data,
+ending at the latest session present when the window is opened, and it stays frozen after that. Train and validation
+boundaries are derived from that window and the experiment's embargo. Sessions after the window's end are forward data
+and are refused. Each frozen design may be evaluated once per window, at most 10 designs, then the window is retired.
+exp01–exp13 are archived: the entries below are unchanged, and their committed notebook outputs stay the record. No
+window was opened on this date, no design was evaluated, and no trial-log row was added. Test windows touched so far:
+still none. Calibration re-runs of exp05 and exp06 under the new split, as new versions, are proposed and waiting for
+Nicolas.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

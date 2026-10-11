@@ -23,8 +23,15 @@ to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine 
 - Data (never in git): `C:/Users/nico/Desktop/stock_overflow_data/` (`so.paths`, override with `SO_DATA_PATH`).
 - Every experiment run is logged in `store04_experiments/trial_log.csv` (never edit it) and reported in
   `docs/RESULTS_LOG.md` the same day.
-- exp01 to exp08, exp12 and exp13 are **stopped** (exp09-exp11 skipped). The VIX line is closed (exp13: E1M1 IS NOT
-  ROBUST). Next is parked for Nicolas: write-up of the negative result, then text data.
+- exp01 to exp08, exp12 and exp13 are **archived** (exp09-exp11 skipped). The VIX line is closed (exp13: E1M1 IS NOT
+  ROBUST). Their results stay as history, pinned to the old untouched window 2026-05-14.
+- The evaluation design is the rolling 12-month holdout (`so.core.holdout`, `records/holdout_windows.csv`). Rule 1 of
+  `research-integrity.mdc`: never read the registered window for exploration, validation or any decision; never set
+  `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`; never run
+  `scripts/holdout_window.py` or `scripts/holdout_evaluate.py`. Tests under `tests/` may set those variables to
+  temporary values on synthetic data only. If no window is registered, development notebooks must refuse to run.
+- Next is parked for Nicolas: write-up of the negative result, then text data. Calibration re-runs of exp05 and exp06
+  under the new split, as new versions, are proposed and waiting for Nicolas.
 - **You work autonomously** (Nicolas, 2026-10-06): never ask for permission or wait for an answer. Decisions only Nicolas
   can make are parked in §7 of the research state and you continue with the next allowed item.
 - Stay inside the workspace and the data folder; never delete, move or rename the data folder's existing files,
