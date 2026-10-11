@@ -79,6 +79,45 @@ the 15:58 decision. The previous session's close (`vix_level_prev`) is not.
 No experiment was run, no holdout window was opened, and no trial-log row was added. The rolling-retrain module is
 still not built. When it is, it will use `available_ts` and `label_known_ts` from this module.
 
+## Methodology note (2026-10-12): rolling retraining built
+
+*Correction, not a replacement, of the 2026-10-11 note above.* On 2026-10-12 the shared module was built on
+`agent/rolling-retrain`, branched from `main` `62cad32`. That `main` contains `so/core/holdout.py`
+(`get_perturbed_ohlcv_dict`) and `so/core/point_in_time.py` (`DataContext`, `available_ts`, `label_known_ts`).
+Nicolas's decisions of 2026-10-11 are the rules the module implements.
+
+A model-based design is a walk-forward with a rolling training window (`so.core.rolling_retrain`). It refits on a
+pre-registered schedule. The default is weekly: the first session of each calendar week, so a Monday holiday is a
+Tuesday refit, and the first session of the decision span is always a refit. Changing the frequency after a result is
+a new version. One optional pre-registered comparison of weekly against quarterly is allowed. The default
+training-window candidates are 6 months, 2 years and 10 years (`so.config`). The candidate in force for a quarter is
+chosen from the last 4 completed quarters before that quarter, prior-only, as in exp02–exp13. A tie takes the longer
+training window.
+
+A row dated after the retraining day is outside the window. A training row must also have `label_known_ts` strictly
+before that day's decision bar. When the label source is the registered TSBAR source, that clock comes from
+`so.core.point_in_time`. Otherwise a barrier label is knowable at the end of the bar where the target or the stop was
+hit, or at the end of the horizon bar, and a fixed-horizon label is knowable at the decision moment of the session
+that many sessions later. Unfinished labels are dropped and counted as purged. They are never filled with 0 or any
+other value. Features are read through `DataContext` and checked with `check_feature_available_ts`.
+
+`so.core.evaluation` now also reports the path over time: cumulative log excess, rolling 63-session and 252-session
+excess return, the drawdown of the strategy and of buy-and-hold, and a per-quarter table; turnover per year (the sum
+of absolute weight changes, scaled by 252 / session count), the number of trades, and candidate switches per year with
+the share of time each candidate was in force. The refit log reports average rows used, the share purged, and how far
+predictions moved between consecutive refits.
+
+The holdout runner's definition is unchanged. The design's own replay calls the walker, and the runner continues the
+frozen prior-only path through the holdout. A valid run saves the holdout segment of the refit log next to the daily
+paths, under `SO_HOLDOUT_PATH` only. The ledger row adds the retraining frequency, the training-window candidates, the
+number of refits in the holdout, the average share purged, turnover per year, and the number of candidate switches.
+
+The template (`experiments/_template`) is an example, not an experiment: a logistic regression on two daily features,
+a fixed horizon of 20 sessions, weekly refits, candidates 6M/2Y/10Y, pooled selection over 4 quarters. It does not
+pre-register the weekly-versus-quarterly comparison. No experiment was run, no holdout window was opened, and no
+trial-log row was added. Archived experiments exp01–exp13 are unchanged. A daily-feature, weekly-retrained version of
+exp02's re-entry model is a natural first user; proposed, waiting for Nicolas.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

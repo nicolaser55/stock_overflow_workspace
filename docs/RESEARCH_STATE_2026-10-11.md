@@ -13,6 +13,13 @@ replaced by a perturbation of every bar after the decision bar, because shorteni
 15:58 to 15:57. Rolling retraining waits for Nicolas to merge that branch into `main`. Parked in §7. No
 experiment, no window, no trial on the shared log.*
 
+*2026-10-12: the module was built on `agent/rolling-retrain`, from `main` `62cad32` (that commit contains
+`so/core/holdout.py` with `get_perturbed_ohlcv_dict`, and `so/core/point_in_time.py` with `DataContext`,
+`available_ts` and `label_known_ts`). Nicolas's decisions of 2026-10-11 are unchanged and are what the code implements.
+No experiment was run, no holdout window was opened, and no shared trial-log row was added. Archived experiments
+exp01–exp13 were not changed. A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first
+user; proposed, waiting for Nicolas.*
+
 *The handover document for whoever continues the research (Nicolas, an agent, or the assistant). It says where the
 project stands, what has been learned, what data has been seen, and what to do next, in order. Update it at the end of
 every working session (section 8) and write a new dated copy when the roadmap changes materially.*
@@ -357,6 +364,28 @@ contains `get_perturbed_ohlcv_dict`. The rolling-retrain module is still not bui
 `available_ts` and `label_known_ts` from `so.core.point_in_time` (a feature row is usable only when `available_ts` is
 at or before the decision; a training row is usable only when `label_known_ts` is before the training decision).
 
+*Built 2026-10-12 on `agent/rolling-retrain` (from `main` `62cad32`):* `so/core/rolling_retrain.py`. Weekly is the
+default (the first session of each calendar week; a Monday holiday is a Tuesday refit; the first session of the span
+is always a refit). Training windows default to 6 months, 2 years and 10 years. A row is inside the window only when
+its date is on or before the retraining day as well as on or after the window start. `label_known_ts` comes from the
+registered label source when that source is TSBAR; otherwise a barrier label is knowable at the end of the hit or
+horizon bar, and a fixed-horizon label at the decision moment of the session that many sessions later. A training row
+needs `label_known_ts` strictly before the retraining decision. Rows that fail are dropped and counted as purged,
+never filled. Features are checked with `check_feature_available_ts`. The candidate for a quarter is chosen from the
+last 4 completed quarters before it (`get_pooled_selection_pdf`, then the prior-only shift). A tie takes the longer
+window. `so.core.evaluation` reports the path over time (cumulative log excess, rolling 63- and 252-session excess,
+both drawdowns, a quarter table), turnover per year, trades, candidate switches, and, from the refit log, rows used,
+the share purged, and how far the prediction moved. The holdout runner is unchanged in definition: the design's replay
+calls the walker, and the runner continues the frozen prior-only path. A valid run writes `refit_log.csv` next to the
+daily paths, under `SO_HOLDOUT_PATH` only, and the ledger row records the frequency, the windows, the holdout refit
+count, the average share purged, turnover and the switch count. The template design is a logistic regression on
+`intraday_return_pct` and `prev_day_return_pct`, a 20-session label, weekly refits, candidates 6M/2Y/10Y. It does not
+pre-register the optional weekly-versus-quarterly comparison. Synthetic tests only. No experiment, no window, no
+shared trial-log row.
+
+A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first user of this module. Proposed,
+waiting for Nicolas. It was not built.
+
 ### Point-in-time data (Nicolas, 2026-10-11) — infrastructure only; no window opened
 
 Nicolas decided on 2026-10-11 that every value of every dataset has an `available_ts`, the moment it could have been
@@ -392,6 +421,11 @@ an unregistered declaration before any replay and writes no ledger row. If the a
 not in `DATA_SOURCE_LIST`, the evaluation is `invalid_undeclared` (no daily paths). No experiment was run, no holdout
 window was opened, and no trial-log row was added.
 
+### Next model-based user (proposed, not started)
+
+A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first user of `so.core.rolling_retrain`.
+Proposed, waiting for Nicolas. It is not built, and it is not an experiment an agent may start until Nicolas asks.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -412,7 +446,8 @@ window was opened, and no trial-log row was added.
 | 2026-10-09 (Nicolas) | Write-up of the negative result | — | — | **Deferred by Nicolas until after exp13** (exp13_e1m1_robustness, §6) |
 | 2026-10-09 (agent) | Write-up of the negative result (exp13 ended: E1M1 IS NOT ROBUST; VIX line closed; 3,651 workspace trials, 7,740 with the legacy trials) | (a) the agent drafts the write-up in `docs/`: the question, the experiments run (exp01-exp08, exp12, exp13; exp09-exp11 skipped), prior-only vs buy-and-hold, the S/R identity, the robustness failure of E1M1, trial counts, data-dependence of exp06/exp12/exp13, limitations; Nicolas reviews; (b) Nicolas writes it from `docs/RESULTS_LOG.md`; (c) a new roadmap item first | **(a), do it now:** every number is in the results log; drafting adds no trial and reads no new data; the untouched window stays unread and is not proposed | Session ended; no draft written in this session (the write-up is parked for Nicolas, not a roadmap experiment) |
 | 2026-10-11 (agent) | Rolling 12-month holdout infrastructure (Nicolas, 2026-10-11) is blocked: the task says stop unless main contains a commit whose message is "rules: rolling holdout" | (a) Nicolas confirms that `e3e0219` and `11a1322` (both 2026-10-11, subjects "updated research-integrity.mdc document" and "updated new research-integrity.mdc for real this time") are that rules change, and the agent proceeds; (b) Nicolas adds a commit on main whose message is "rules: rolling holdout" | (a): those two commits already replace rules 1 and 3 with the registered rolling holdout (observed in the file on main at `11a1322`) | resolved 2026-10-11 by Nicolas: e3e0219 and 11a1322 are the rules change |
-| 2026-10-11 (agent) | Rolling retraining infrastructure (Nicolas, 2026-10-11) waits until `main` contains `so/core/holdout.py` with the T1–T3 follow-up | (a) Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued; (b) land the same commits on `main` another way, then re-issue the task | (a) | T1-T3 done; waiting for Nicolas to merge agent/holdout-split into main, then the rolling-retrain task is re-issued |
+| 2026-10-11 (agent) | Rolling retraining infrastructure (Nicolas, 2026-10-11) waits until `main` contains `so/core/holdout.py` with the T1–T3 follow-up | (a) Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued; (b) land the same commits on `main` another way, then re-issue the task | (a) | **Resolved 2026-10-12:** `main` `62cad32` contains `so/core/holdout.py` (`get_perturbed_ohlcv_dict`) and `so/core/point_in_time.py`. The module was built on `agent/rolling-retrain`. No experiment, no window, no shared trial-log row |
+| 2026-10-12 (agent) | A daily-feature, weekly-retrained version of exp02's re-entry model, the natural first user of `so.core.rolling_retrain` | (a) Nicolas asks for it as a new experiment version; (b) leave it unbuilt | (b) until Nicolas asks. It is not an allowed experiment until then | Proposed, waiting for Nicolas. Not built |
 
 ### Open items
 
@@ -448,3 +483,4 @@ window was opened, and no trial-log row was added.
 | 2026-10-11 | agent | Audit of `a64c1a9`: the decision-bar truncation moved the decision from 15:58 to 15:57. Replaced by a perturbation of every bar after the decision bar. The whole-session truncation is unchanged. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
 | 2026-10-11 | agent | Point-in-time data on `agent/point-in-time` from `main` `df67c25` (the perturbation check is on main). Registry and `DataContext` for SPY, VIX, VIX3M and the pipeline caches; the runner cuts and perturbs every feature source; labels use `label_known_ts`. Synthetic tests only. No window, no evaluation, no trial-log row. Rolling retraining, still unbuilt, will use these clocks | Rolling-retrain module, using `available_ts` and `label_known_ts` |
 | 2026-10-12 | agent | Audit of `d2788a7`: the evaluation script loads each design's `DATA_SOURCE_LIST` through the window end (`load_source_frame_dict`). An unregistered declaration is refused before any replay. A read outside the list is `invalid_undeclared`. Synthetic tests only. No window, no evaluation, no trial-log row | Rolling-retrain module, using `available_ts` and `label_known_ts` |
+| 2026-10-12 | agent | Rolling retraining built on `agent/rolling-retrain` from `main` `62cad32` (Nicolas, 2026-10-11). Commits `b5c5f4b` (module), `c7e95bb` (holdout ledger and template), `da4efb0` (synthetic tests). 16 test suites passed. No experiment, no window, no shared trial-log row. Archived exp01–exp13 unchanged | A daily-feature, weekly-retrained version of exp02's re-entry model is proposed, waiting for Nicolas |
