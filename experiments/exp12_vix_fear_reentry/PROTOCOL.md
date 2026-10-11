@@ -204,3 +204,4 @@ A notebook is run once; a crash half-way is recorded with the trials it logged, 
 |---|---|---|
 | 1.0 | 2026-10-09 | Initial protocol (agent, autonomous mode, from Nicolas's decision of 2026-10-09), pre-registered before any run (`1e6a2e6`) |
 | 1.0 (result) | 2026-10-09 | Run once (271 trials, as expected). Primary fails (prior-only +119.24% vs +229.74%) → **STOP** by §8; the VIX line is closed definitively. No new version (no defect found). Details: `docs/RESULTS_LOG.md`, exp12 |
+| — (override) | 2026-10-09 | **Nicolas explicitly overrides** this protocol's commitment that exp12 is "the LAST VIX re-entry test: no later version may be motivated by its results" (header and §8), to run `exp13_e1m1_robustness`: a data-dependent robustness study of E1M1, exp12's best candidate after the fact. Decided and attributed to Nicolas; exp12's rules, numbers and verdict (STOP) are unchanged |
