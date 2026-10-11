@@ -59,8 +59,7 @@ it was tuned until it did is a failure of this project, not a success. Negative 
 
 ## Never (park instead)
 
-1. **The untouched window 2026-05-14 → 2026-08-13 and anything after it**: never read for evaluation, never plot, never
-   summarize. Walk-forward notebooks stay in `RUN_MODE_STR = "validation_only"`; never run `latest` or `history`.
+1. The registered holdout window and everything after its start (so.core.holdout, records/holdout_windows.csv): never read it for   exploration, validation or any decision, never plot it, never summarize it. Only scripts/holdout_evaluate.py, run by Nicolas, may read it. Never set SO_HOLDOUT_PATH, SO_HOLDOUT_EVALUATION_TOKEN or SO_ALLOW_LEGACY_REPRODUCTION, and never run scripts/holdout_window.py or scripts/holdout_evaluate.py. If no holdout window is registered, development notebooks must refuse to run; park it.
 2. **New data sources** (dividends, T-bill rates, text, anything not already in the data folder): never download or
    add them. Write the proposal (source, fields, period, how it would be used) as a parked decision.
    **Exception (Nicolas, 2026-10-08):** the VIX and VIX3M files in `store01_rawzone\ibkr_vix_family\` (inventory:
@@ -68,8 +67,7 @@ it was tuned until it did is a failure of this project, not a success. Negative 
    modify, merge or re-download them, never use `ibkr_vix_family_staging\`. Read them only through loaders that refuse
    dates from 2026-05-14 on, and use only values known before the decision (the previous session's daily close, or
    1-minute bars labelled at least one minute before the decision bar).
-3. **Changing any value in `so/config.py`**, or shared code in a way that changes any number of exp01-exp03 (their
-   reproduction checks in `docs/RESULTS_LOG.md` must still hold). Adding new shared code with tests is allowed.
+3. Changing any existing value in so/config.py, or shared code in a way that changes any recorded number of a past experiment. Adding new constants and new shared code with tests is allowed. Past experiments are archived: their committed notebook outputs are the record, and they are re-run only by Nicolas (see rule 1).
 4. **Experiments outside the roadmap** of the latest `docs/RESEARCH_STATE_*.md`. You may write a new idea down as a
    parked decision, with its rationale.
 5. **Claiming that criterion (a) is met.** If a prior-only path beats buy-and-hold and its uninformed baselines, record
