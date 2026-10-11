@@ -58,6 +58,27 @@ decided at 15:57. That check was replaced by a perturbation: every bar strictly 
 is overwritten (price × 1.25 plus seeded noise) and the session structure is left unchanged. The whole-session
 truncation is unchanged. No experiment was run, no window was opened, and the shared trial log was not modified.
 
+## Methodology note (2026-10-11, Nicolas): point-in-time data
+
+Nicolas decided on 2026-10-11 that every value of every dataset has an `available_ts`, the moment it could have been
+known. A decision at `decision_ts` may use only values with `available_ts <= decision_ts`. All data reaches a strategy
+through one point-in-time context (`so.core.point_in_time.DataContext`). In the holdout runner, designs can read data
+only through it, so the whole-session cut and the perturbation check cover every source. Every source must be
+registered, with its timestamp convention, its availability rule (with evidence) and its revision policy, before a
+design can use it. When the evidence is unclear, the later time is the one used. Labels may look forward. A model
+trained at time t uses only rows whose `label_known_ts` is before t.
+
+The IBKR 1-minute label is the bar start. Observed: SPY 2005-01-03 has 390 bars from 09:30 through 15:59, and the half
+day 2005-11-25 has 210 bars from 09:30 through 12:59. `available_ts` is one minute after the label, so the 15:58 bar is
+knowable at 15:59:00. That is the decision moment; the fill is the open of the next bar, as in
+`so.features.daily_features`. VIX 2005-10-03 runs 09:31 through 16:14 and VIX3M 2009-08-12 runs 09:31 through 15:59.
+The inventory says that convention is not proven, so the same later rule is used. VIX-family daily bars are a midnight
+label (observed 2005-10-03) and are knowable at 16:15 New York on that date. A same-day VIX close is therefore after
+the 15:58 decision. The previous session's close (`vix_level_prev`) is not.
+
+No experiment was run, no holdout window was opened, and no trial-log row was added. The rolling-retrain module is
+still not built. When it is, it will use `available_ts` and `label_known_ts` from this module.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log
