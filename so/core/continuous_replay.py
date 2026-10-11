@@ -46,22 +46,29 @@ compounded returns, which compounding stretches).
 Replay Window And Periods
 """
 
-# FUNCTION: CHECK THAT A REPLAY WINDOW STAYS BEFORE THE UNTOUCHED DATA
-def check_replay_window_bool(date2_in, untouched_start_date_str_in):
+# FUNCTION: CHECK THAT A REPLAY WINDOW STAYS BEFORE THE HOLDOUT
+def check_replay_window_bool(date2_in, untouched_start_date_str_in=None):
     """
-    Raises an error if the replay window reaches the untouched data (research-integrity.mdc, "Never" rule 1).
+    Raises if the replay window reaches the holdout (research-integrity.mdc, "Never" rule 1). With no registered window,
+    a passed date keeps the archived behaviour. With a window, the boundary is the earlier of that date and the window
+    start (so.core.holdout.get_replay_boundary_date). SO_ALLOW_LEGACY_REPRODUCTION=1 uses only the pinned 2026-05-14
+    boundary and prints a warning.
 
     Args:
         date2_in (datetime.date | str): Last session of the replay window
-        untouched_start_date_str_in (str): First date that must never be read for evaluation (e.g. "2026-05-14")
+        untouched_start_date_str_in (str | None): Legacy pinned boundary (e.g. "2026-05-14"); None uses the active window
 
     Returns:
         bool: True if the window is allowed
     """
-    # IF THE WINDOW REACHES THE UNTOUCHED DATA
-    if pd.to_datetime(date2_in).date() >= pd.to_datetime(untouched_start_date_str_in).date():
+    # IMPORT THE HOLDOUT BOUNDARY HERE (THIS MODULE IS IMPORTED BY THE HOLDOUT RUNNER)
+    from so.core.holdout import get_replay_boundary_date
+    # COLLECT THE FIRST DATE THE REPLAY MAY NOT REACH
+    boundary_date = get_replay_boundary_date(untouched_start_date_str_in)
+    # IF THE WINDOW REACHES THE BOUNDARY
+    if pd.to_datetime(date2_in).date() >= boundary_date:
         # REFUSE THE WINDOW
-        raise ValueError(f"replay window ends {date2_in}, on or after the untouched data start {untouched_start_date_str_in}")
+        raise ValueError(f"replay window ends {date2_in}, on or after the holdout boundary {boundary_date}")
     # RETURN TRUE
     return True
 

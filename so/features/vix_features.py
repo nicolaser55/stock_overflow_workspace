@@ -52,25 +52,32 @@ uses only values of sessions up to and including t and is NaN when an input is N
 """
 
 # FUNCTION: CHECK A LOADER CUTOFF
-def check_cutoff_date(cutoff_date_str_in, untouched_start_str_in=vix_config.UNTOUCHED_START_DATE_STR):
+def check_cutoff_date(cutoff_date_str_in, untouched_start_str_in=None):
     """
-    Raises unless the cutoff is given and lies strictly before the first day of the untouched window.
+    Raises unless the cutoff is given and lies strictly before the development boundary. The boundary is the earlier of
+    the pinned date (default vix_config.UNTOUCHED_START_DATE_STR, "2026-05-14") and the active holdout start.
+    SO_ALLOW_LEGACY_REPRODUCTION=1 keeps only the pinned boundary and prints a warning.
 
     Args:
         cutoff_date_str_in (str): Last date the caller may load (inclusive)
-        untouched_start_str_in (str): First day of the untouched window
+        untouched_start_str_in (str | None): Pinned boundary (None = "2026-05-14")
 
     Returns:
         datetime.date: The cutoff date
     """
+    # IMPORT THE HOLDOUT BOUNDARY HERE
+    from so.core.holdout import get_replay_boundary_date
     # RAISE WITHOUT A CUTOFF
     if cutoff_date_str_in is None:
         raise ValueError("❌ A VIX loader needs an explicit cutoff date (no default).")
+    # COLLECT THE PINNED DATE AND THE EFFECTIVE BOUNDARY
+    pinned_str = vix_config.UNTOUCHED_START_DATE_STR if untouched_start_str_in is None else untouched_start_str_in
+    boundary_date = get_replay_boundary_date(pinned_str)
     # CONVERT THE CUTOFF
     cutoff_date = pd.Timestamp(cutoff_date_str_in).date()
-    # RAISE IF THE CUTOFF REACHES THE UNTOUCHED WINDOW
-    if cutoff_date >= pd.Timestamp(untouched_start_str_in).date():
-        raise ValueError(f"❌ VIX loader cutoff {cutoff_date} is on or after the untouched window start {untouched_start_str_in}.")
+    # RAISE IF THE CUTOFF REACHES THE BOUNDARY
+    if cutoff_date >= boundary_date:
+        raise ValueError(f"❌ VIX loader cutoff {cutoff_date} is on or after the holdout boundary {boundary_date}.")
     # RETURN THE CUTOFF DATE
     return cutoff_date
 
@@ -161,11 +168,13 @@ def check_vix_bar_pdf(bar_pdf_in, cutoff_date_in, label_str_in):
     Returns:
         None
     """
-    # COLLECT THE UNTOUCHED START
-    untouched_date = pd.Timestamp(vix_config.UNTOUCHED_START_DATE_STR).date()
-    # ASSERT THAT NO ROW IS AFTER THE CUTOFF OR IN THE UNTOUCHED WINDOW
+    # IMPORT THE HOLDOUT BOUNDARY HERE (THE SAME DATE check_cutoff_date USES)
+    from so.core.holdout import get_replay_boundary_date
+    # COLLECT THE FIRST DATE A ROW MAY NOT HAVE
+    boundary_date = get_replay_boundary_date(vix_config.UNTOUCHED_START_DATE_STR)
+    # ASSERT THAT NO ROW IS AFTER THE CUTOFF OR ON OR AFTER THE BOUNDARY
     assert not (bar_pdf_in["ny_date"] > cutoff_date_in).any() and not (bar_pdf_in["date"] > cutoff_date_in).any(), f"❌ {label_str_in}: a row after the cutoff {cutoff_date_in}"
-    assert not (bar_pdf_in["ny_date"] >= untouched_date).any() and not (bar_pdf_in["date"] >= untouched_date).any(), f"❌ {label_str_in}: a row in the untouched window"
+    assert not (bar_pdf_in["ny_date"] >= boundary_date).any() and not (bar_pdf_in["date"] >= boundary_date).any(), f"❌ {label_str_in}: a row on or after the holdout boundary {boundary_date}"
     # RAISE IF A DATE DIFFERS FROM THE NEW YORK DATE OF ITS TIMESTAMP
     mismatch_count = int((bar_pdf_in["date"] != bar_pdf_in["ny_date"]).sum())
     if mismatch_count:
