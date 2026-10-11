@@ -200,6 +200,9 @@ def read_vix_daily_pdf(series_str_in, cutoff_date_str_in, raw_path_str_in=None, 
     Returns:
         pd.DataFrame: timestamp (midnight New York, a label), open, high, low, close, created_ts, date; one row per date
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS VIX THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # CHECK THE CUTOFF
     cutoff_date = check_cutoff_date(cutoff_date_str_in, enforce_holdout_bool_in=enforce_holdout_bool_in)
     # LIST THE YEAR FILES UP TO THE CUTOFF'S YEAR (LATER FILES ARE NEVER OPENED)
@@ -244,6 +247,9 @@ def read_vix_1min_pdf(series_str_in, cutoff_date_str_in, start_date_str_in=None,
     Returns:
         pd.DataFrame: timestamp (New York), open, high, low, close, created_ts, date; sorted by timestamp
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS VIX THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # CHECK THE CUTOFF
     cutoff_date = check_cutoff_date(cutoff_date_str_in, enforce_holdout_bool_in=enforce_holdout_bool_in)
     # COLLECT THE START
@@ -514,6 +520,9 @@ def get_vix_daily_feature_dict(daily_pdf_in, cutoff_date_str_in, variant_str_lis
     Returns:
         dict: {"vix_table_pdf", "feature_pdf" (session_idx, date + the feature columns), "coverage_pdf", "last_date_dict"}
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS VIX THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # CHECK THE CUTOFF AND THE SPY TABLE
     cutoff_date = check_cutoff_date(cutoff_date_str_in, enforce_holdout_bool_in=enforce_holdout_bool_in)
     assert max(daily_pdf_in["date"]) <= cutoff_date, "❌ The SPY table runs past the VIX cutoff"

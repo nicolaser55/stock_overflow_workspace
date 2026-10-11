@@ -110,6 +110,10 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 | records | `records/holdout_evaluations.csv` | `scripts/holdout_evaluate.py` (Nicolas only) | append-only summary metrics; `status` is `valid` or `invalid_lookahead` |
 | holdout results | `SO_HOLDOUT_PATH` (no default) | the holdout evaluation | daily paths; not in git |
 
+A strategy does not read these folders itself. Every series is registered in `so.core.point_in_time` (timestamp
+convention, availability rule, revision policy) and is read through `DataContext`. How to register a source, including
+sources the project may add later, is `docs/DATA_SOURCES.md`.
+
 Deleting an experiment's folder never affects the pipeline or another experiment. `SO_HOLDOUT_PATH` is an environment
 variable with no default: when it is unset, holdout results cannot be written. Agents never set it.
 
@@ -131,7 +135,10 @@ variable with no default: when it is unset, holdout results cannot be written. A
   bar does not move), and it overwrites every bar strictly after that session's decision bar, from the fill bar through
   the end of the data, with price × 1.25 plus seeded noise, leaving the session structure unchanged. Target weights and
   signals through the cut session must match, as must positions, weights and trades strictly before the cut, and the
-  candidate for periods that end before the cut. Fills on the cut session are not compared. A difference is ledger
+  candidate for periods that end before the cut. The same two checks apply to every other registered source through
+  `so.core.point_in_time.DataContext`: rows with `available_ts` after the cut session's last bar are dropped, and feature
+  values with `available_ts` after the decision are perturbed (labels are not). The ledger row lists the sources the
+  design read (`sources_read`). Fills on the cut session are not compared. A difference is ledger
   status `invalid_lookahead` (no daily paths, and the row counts against the budget). Each frozen design may be
   evaluated once per window, at most 10 designs, and only by Nicolas (`scripts/holdout_evaluate.py`). Agents never set
   `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never run those scripts.

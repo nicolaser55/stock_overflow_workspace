@@ -6,11 +6,11 @@ from pathlib import Path
 
 # ADD THE WORKSPACE TO THE PATH
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-# IMPORT THE ARRAY CONVERSION AND THE RAW LOADER
-from so.core.raw_data import get_complete_ohlcv_pdf
+# IMPORT THE ARRAY CONVERSION
 from so.core.trade_execution import get_ohlcv_array_dict
-# IMPORT THE HOLDOUT EVALUATION
+# IMPORT THE HOLDOUT EVALUATION AND THE DECLARED-SOURCE LOADER
 from so.core.holdout import get_active_holdout_window_dict, get_date, run_holdout_evaluation
+from so.core.point_in_time import get_declared_source_name_list, load_source_frame_dict
 
 """
 Holdout Evaluation (Nicolas only)
@@ -52,21 +52,47 @@ def load_design_module(design_folder_str_in):
     # RETURN THE DESIGN
     return design_module
 
-# FUNCTION: LOAD BARS UP TO THE WINDOW END
-def get_evaluation_ohlcv_array_dict():
+# FUNCTION: LOAD DECLARED SOURCES UP TO THE WINDOW END
+def get_evaluation_frame_dict(design_module_in):
     """
-    Reads the raw bars, including the holdout and nothing after the window end (forward data is dropped).
+    Loads each source in DATA_SOURCE_LIST, and SPY_1MIN for the bar arrays, through the active window end.
+    Rows after that date are not in the frames. A design without DATA_SOURCE_LIST loads SPY_1MIN only.
+
+    Args:
+        design_module_in (module): Design
+
+    Returns:
+        dict: source name -> frame stamped with available_ts
+    """
+    # THE WINDOW END IS THE LAST SESSION THE EVALUATION MAY SEE
+    end_date = get_date(get_active_holdout_window_dict()["end"])
+    declared_name_list = get_declared_source_name_list(design_module_in)
+    # SPY IS ALWAYS LOADED FOR THE SIMULATOR ARRAYS; A DESIGN THAT DID NOT DECLARE IT IS NOT HANDED THE FRAME
+    load_name_list = list(dict.fromkeys(["SPY_1MIN"] + declared_name_list))
+    frame_dict = load_source_frame_dict(load_name_list, end_date)
+    # RETURN ONLY WHAT THE DESIGN DECLARED, PLUS SPY WHEN IT DECLARED SPY
+    return {source_name_str: frame_dict[source_name_str] for source_name_str in load_name_list if source_name_str in declared_name_list or source_name_str == "SPY_1MIN"}
+
+# FUNCTION: LOAD BARS UP TO THE WINDOW END
+def get_evaluation_ohlcv_array_dict(design_module_in=None):
+    """
+    SPY bars through the active window end. Forward rows are dropped by the loader, before the arrays are built.
+    design_module_in is accepted so a caller can share one load; None loads SPY_1MIN only.
+
+    Args:
+        design_module_in (module | None): Design, or None
 
     Returns:
         dict: Output of get_ohlcv_array_dict
     """
-    # READ EVERY BAR, THEN DROP FORWARD DATA
-    window_dict = get_active_holdout_window_dict()
-    ohlcv_pdf = get_complete_ohlcv_pdf(enforce_holdout_bool_in=False)
-    end_date = get_date(window_dict["end"])
-    ohlcv_pdf = ohlcv_pdf[ohlcv_pdf["date"] <= end_date].reset_index(drop=True)
+    # LOAD SPY THROUGH THE WINDOW END
+    if design_module_in is None:
+        end_date = get_date(get_active_holdout_window_dict()["end"])
+        frame_dict = load_source_frame_dict(["SPY_1MIN"], end_date)
+    else:
+        frame_dict = get_evaluation_frame_dict(design_module_in)
     # RETURN THE ARRAYS
-    return get_ohlcv_array_dict(ohlcv_pdf)
+    return get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
 
 # PARSE THE COMMAND
 if __name__ == "__main__":
@@ -75,11 +101,14 @@ if __name__ == "__main__":
     parser.add_argument("--design", required=True, help="Experiment folder (contains design.py)")
     parser.add_argument("--token-file", required=True, help="Token file outside the workspace and the data folder")
     arg_dict = parser.parse_args()
-    # LOAD THE DESIGN AND THE BARS, THEN EVALUATE
+    # LOAD THE DESIGN, ITS DECLARED SOURCES THROUGH THE WINDOW END, THEN EVALUATE
     design_module = load_design_module(arg_dict.design)
-    ohlcv_array_dict = get_evaluation_ohlcv_array_dict()
+    frame_dict = get_evaluation_frame_dict(design_module)
+    ohlcv_array_dict = get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
+    declared_name_list = get_declared_source_name_list(design_module)
+    source_frame_dict = {source_name_str: frame_dict[source_name_str] for source_name_str in declared_name_list}
     row_dict = run_holdout_evaluation(design_module, os.path.basename(os.path.abspath(arg_dict.design)), ohlcv_array_dict,
-                                      arg_dict.token_file, design_folder_str_in=arg_dict.design)
+                                      arg_dict.token_file, design_folder_str_in=arg_dict.design, source_frame_dict_in=source_frame_dict)
     # PRINT THE SUMMARY
     print(f"Evaluated {row_dict['design_id']} on {row_dict['window_id']}: status {row_dict['status']}")
     if row_dict["status"] == "valid":

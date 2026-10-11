@@ -116,6 +116,7 @@ the active holdout start.*
   oracle), trend rule, buy-and-hold.
 - `experiments/exp03_ath_exit/rules.py`: exit-signal + buy-back simulation on top of it, random exit / random buy-back.
 - `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation of the frozen prior-only path, with a truncation test and ledger status `valid` / `invalid_lookahead`). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments). Pipeline notebooks turn the holdout guard off because they prepare data and compute no strategy result. Work-zone and gold-zone cache reads are guarded unless that flag is set.
+- `so.core.point_in_time`: the source registry and `DataContext`. Every value has an `available_ts`. A decision may use only rows with `available_ts` at or before `decision_ts`. Labels use `label_known_ts`. A design names its sources in `DATA_SOURCE_LIST` (missing means `["SPY_1MIN"]`). `load_source_frame_dict` loads those sources through an end date. How to register a source is `docs/DATA_SOURCES.md`.
 - `so.core.schedule`: walk-forward folds; `so.core.evaluation`: pooled selection, prior-only path, MDE, baseline
   summaries, chained daily returns, monthly bootstrap, success criteria; `so.core.trial_log`: the shared trial log.
 - `so.features.daily_features`: 16 daily features at the 15:58 decision bar (returns 1-250d, MA50/MA200 distance,
@@ -351,6 +352,46 @@ A daily-feature, weekly-retrained version of exp02's re-entry model is a natural
 waiting for Nicolas. It was not built. T1–T3 are done on this branch; the task is re-issued after Nicolas merges
 `agent/holdout-split` into `main` (see the parked row of 2026-10-11).
 
+*Correction 2026-10-11, point-in-time task:* `main` is `df67c25` ("merge rolling holdout (audited 2026-10-11)") and
+contains `get_perturbed_ohlcv_dict`. The rolling-retrain module is still not built. When it is built it will take
+`available_ts` and `label_known_ts` from `so.core.point_in_time` (a feature row is usable only when `available_ts` is
+at or before the decision; a training row is usable only when `label_known_ts` is before the training decision).
+
+### Point-in-time data (Nicolas, 2026-10-11) — infrastructure only; no window opened
+
+Nicolas decided on 2026-10-11 that every value of every dataset has an `available_ts`, the moment it could have been
+known, and that a decision at `decision_ts` may use only values with `available_ts <= decision_ts`. All data reaches a
+strategy through one point-in-time context (`so.core.point_in_time.DataContext`). In the holdout runner, designs read
+data only through it, so the whole-session cut and the perturbation check cover every registered source. Every source
+is registered with its timestamp convention, its availability rule (with evidence) and its revision policy before a
+design can use it. When the evidence is unclear, the later time is used. Labels may look forward. A model trained at
+time t uses only rows whose `label_known_ts` is before t.
+
+Timestamp convention, from the raw files (not assumed). SPY 1-minute, 2005-01-03: 390 bars, first label 09:30, last
+15:59. A regular session is 09:30–16:00, 390 minutes; an end label would run 09:31–16:00. SPY 1-minute, 2005-11-25
+(half day, early close 13:00): 210 bars, first 09:30, last 12:59. An end label would finish at 13:00. The label is the
+bar start. `available_ts` is one minute later. The decision moment is the end of the 15:58 bar, 15:59:00, which is the
+decision bar in `so.features.daily_features`; the fill is the open of the next bar. VIX 1-minute, 2005-10-03: 404 bars,
+09:31 through 16:14. VIX3M 1-minute, 2009-08-12: 389 bars, 09:31 through 15:59. The inventory says that label is not
+proven, so the same later rule is used (`available_ts` = label + 1 minute). VIX and VIX3M daily timestamps are midnight
+New York (observed 2005-10-03 00:00:00−04:00). The daily close is knowable at 16:15 New York that date, after the 15:58
+decision. Derived caches take the latest `available_ts` of the bars the row is computed from. A swing stored on its own
+bar waits `PA_EXTREMA_ORDER` bars (3) because `add_minima_col` needs that many bars after the swing; the step-01
+snapshot only shows it once those bars exist. TSBAR is a label: `label_known_ts` is the end of the hit bar or the end
+of the horizon. TSDAY forward-return columns are not served on the feature path.
+
+No experiment was run, no holdout window was opened, and no trial-log row was added. Archived experiments exp01–exp13
+are unchanged. Existing loaders return the same frames when the runner flag is off.
+
+*Audit 2026-10-12 (Nicolas), of `d2788a7`:* `scripts/holdout_evaluate.py` loaded only SPY, so a real evaluation of a
+design that reads VIX or a cache would have failed before any decision. Designs now declare `DATA_SOURCE_LIST`
+(registry names; a design without it is `["SPY_1MIN"]`). `load_source_frame_dict` loads each declared source through
+its registry loader, keeps rows through the end date (the window end in the evaluation script, the development end
+in the template's `get_development_data_context`), and stamps `available_ts` / `label_known_ts`. The runner refuses
+an unregistered declaration before any replay and writes no ledger row. If the access log contains a source that is
+not in `DATA_SOURCE_LIST`, the evaluation is `invalid_undeclared` (no daily paths). No experiment was run, no holdout
+window was opened, and no trial-log row was added.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -405,3 +446,5 @@ waiting for Nicolas. It was not built. T1–T3 are done on this branch; the task
 | 2026-10-11 | agent | Rolling retraining (Nicolas, 2026-10-11) recorded and parked: `main` `11a1322` has no `so/core/holdout.py` and no intraday truncation cut. No branch, no code, no window, no trials | Unblocked only after the T1–T3 intraday cut is on `main`; then the shared rolling-retrain module |
 | 2026-10-11 | agent | T1–T3 on `agent/holdout-split`: intraday truncation at the decision bar, scan of where the holdout guard may be turned off, trial-log row on invalid_lookahead. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
 | 2026-10-11 | agent | Audit of `a64c1a9`: the decision-bar truncation moved the decision from 15:58 to 15:57. Replaced by a perturbation of every bar after the decision bar. The whole-session truncation is unchanged. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
+| 2026-10-11 | agent | Point-in-time data on `agent/point-in-time` from `main` `df67c25` (the perturbation check is on main). Registry and `DataContext` for SPY, VIX, VIX3M and the pipeline caches; the runner cuts and perturbs every feature source; labels use `label_known_ts`. Synthetic tests only. No window, no evaluation, no trial-log row. Rolling retraining, still unbuilt, will use these clocks | Rolling-retrain module, using `available_ts` and `label_known_ts` |
+| 2026-10-12 | agent | Audit of `d2788a7`: the evaluation script loads each design's `DATA_SOURCE_LIST` through the window end (`load_source_frame_dict`). An unregistered declaration is refused before any replay. A read outside the list is `invalid_undeclared`. Synthetic tests only. No window, no evaluation, no trial-log row | Rolling-retrain module, using `available_ts` and `label_known_ts` |

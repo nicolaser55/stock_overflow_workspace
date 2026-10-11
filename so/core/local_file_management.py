@@ -333,6 +333,9 @@ def read_csv_files_from_path(file_path_str_in, enforce_holdout_bool_in=True):
     Returns:
         Combined DataFrame from all CSV files in directory
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS CACHES THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # CHECK IF THE END OF THE FILE PATH IS A SLASH
     if not file_path_str_in.endswith("/"):
         # RAISE AN ERROR
@@ -403,6 +406,9 @@ def read_date_range_csv_files_from_path(file_path_str_in, date1_str_in=None, dat
     Returns:
         pd.DataFrame: Combined DataFrame (empty DataFrame if no files match)
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS CACHES THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # CHECK IF THE END OF THE FILE PATH IS A SLASH
     if not file_path_str_in.endswith("/"):
         # RAISE AN ERROR

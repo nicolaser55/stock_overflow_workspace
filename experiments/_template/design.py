@@ -29,6 +29,70 @@ WEIGHT_DICT = {"constant": 1.0}
 # COPY THE NAME AND THE PROTOCOL VERSION (THE TRIAL LOG AND THE DESIGN HASH READ THEM)
 EXPERIMENT_NAME = exp_config.EXPERIMENT_NAME
 PROTOCOL_VERSION = exp_config.PROTOCOL_VERSION
+# EVERY INPUT IS READ THROUGH THE POINT-IN-TIME CONTEXT (SPY BARS, AND VIX WHEN THE RUNNER LOADED IT)
+DATA_SOURCE_LIST = ["SPY_1MIN", "VIX_DAILY"]
+
+# FUNCTION: PREVIOUS SESSION'S VIX CLOSE, KNOWABLE BEFORE TODAY'S DECISION
+def get_vix_level_prev_arr(ohlcv_array_dict_in, data_context_in):
+    """
+    vix_level_prev: the VIX daily close of the latest session strictly before this one. That close is available at
+    16:15 New York on its own date, which is before the next session's 15:58 decision. The same session's close is not
+    used. The constant candidate does not trade on this value; the read is the pattern a design copies.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        data_context_in (DataContext | None): Point-in-time context
+
+    Returns:
+        np.ndarray: One value per session (NaN when VIX was not loaded)
+    """
+    # IMPORT THE DECISION CLOCK HERE
+    from so.core.point_in_time import get_decision_ts
+    from so.features.daily_features import get_session_decision_idx_dict
+    # ONE VALUE PER SESSION
+    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+    value_arr = np.full(len(session_date_list), np.nan)
+    if data_context_in is None or not data_context_in.has_source_bool("VIX_DAILY"):
+        return value_arr
+    # READ VIX AS OF THE LAST DECISION IN THIS BAR SET, THEN KEEP ONLY EARLIER DATES PER SESSION
+    decision_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"]
+    decision_ts = get_decision_ts(ohlcv_array_dict_in["timestamp_index"][int(decision_idx_arr[-1])])
+    data_context_in.set_decision_ts(decision_ts)
+    vix_pdf = data_context_in.get("VIX_DAILY", decision_ts)
+    data_context_in.set_decision_ts(None)
+    # THE PREVIOUS SESSION'S CLOSE ONLY
+    vix_date_list = [pd.Timestamp(day).date() for day in vix_pdf["date"]]
+    vix_close_arr = vix_pdf["close"].to_numpy(dtype=float)
+    for session_idx, session_date in enumerate(session_date_list):
+        prior_idx_list = [idx for idx, vix_date in enumerate(vix_date_list) if vix_date < session_date]
+        if prior_idx_list:
+            value_arr[session_idx] = float(vix_close_arr[prior_idx_list[-1]])
+    return value_arr
+
+# FUNCTION: READ SPY AND VIX THROUGH THE CONTEXT WITHOUT CHANGING THE CONSTANT WEIGHT
+def read_context_inputs(ohlcv_array_dict_in, data_context_in):
+    """
+    Reads SPY_1MIN and, when it was loaded, VIX_DAILY. The returned VIX feature is not a target weight.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        data_context_in (DataContext | None): Point-in-time context
+
+    Returns:
+        np.ndarray: vix_level_prev per session
+    """
+    # VIX THROUGH THE CONTEXT (EMPTY WHEN THE RUNNER DID NOT LOAD IT)
+    vix_arr = get_vix_level_prev_arr(ohlcv_array_dict_in, data_context_in)
+    # SPY THROUGH THE SAME DOOR, AS OF THE LAST DECISION BAR IN THIS BAR SET
+    if data_context_in is not None and data_context_in.has_source_bool("SPY_1MIN") and len(ohlcv_array_dict_in["session_date_list"]):
+        from so.core.point_in_time import get_decision_ts
+        from so.features.daily_features import get_session_decision_idx_dict
+        decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][-1])
+        decision_ts = get_decision_ts(ohlcv_array_dict_in["timestamp_index"][decision_idx])
+        data_context_in.set_decision_ts(decision_ts)
+        data_context_in.get("SPY_1MIN", decision_ts, columns_in=["timestamp", "close", "available_ts"])
+        data_context_in.set_decision_ts(None)
+    return vix_arr
 
 # FUNCTION: BUILD THE TARGET WEIGHT OF EVERY SESSION
 def get_target_weight_arr(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in):
@@ -55,7 +119,7 @@ def get_target_weight_arr(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in):
     return target_arr
 
 # FUNCTION: REPLAY ONE CANDIDATE OVER ONE PERIOD
-def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in):
+def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in, data_context_in=None):
     """
     The same replay the experiment uses in development, for one candidate and one period. This template holds a
     constant weight. The returned daily equity starts at the initial capital (a fresh window).
@@ -69,18 +133,21 @@ def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Period bounds
         candidate_in (str): Candidate name
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
         dict: daily_equity_pdf, trade_pdf, metric_dict (the fractional-exposure replay)
     """
     # IMPORT THE SIMULATOR HERE
     from so.core.fractional_exposure import simulate_fractional_exposure_dict
+    # READ INPUTS THROUGH THE CONTEXT; THE CONSTANT WEIGHT DOES NOT USE THEM
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
     # HOLD THE CANDIDATE'S WEIGHT ON EVERY SESSION AND REPLAY THE PERIOD
     target_arr = np.full(len(ohlcv_array_dict_in["session_date_list"]), float(WEIGHT_DICT[candidate_in]))
     return simulate_fractional_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, target_arr, DEAD_BAND, float(WEIGHT_DICT[candidate_in]))
 
 # FUNCTION: REPLAY THE CONTINUOUS PRIOR-ONLY PATH
-def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in):
+def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in=None):
     """
     One fractional-exposure replay from the first period through the last, with the candidate in force switching as
     selection_pdf_in says. The position and the cash carry across the holdout start. An exit-family design calls
@@ -90,12 +157,15 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
         ohlcv_array_dict_in (dict): Bars
         period_pdf_in (pd.DataFrame): Periods
         selection_pdf_in (pd.DataFrame): Candidate in force per period
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
-        dict: daily_equity_pdf, trade_pdf, target_weight_arr, decision_session_list
+        dict: daily_equity_pdf, trade_pdf, target_weight_arr, decision_session_list, vix_level_prev_arr
     """
     # IMPORT THE SIMULATOR HERE
     from so.core.fractional_exposure import simulate_fractional_exposure_dict
+    # READ SPY AND THE PREVIOUS VIX CLOSE THROUGH THE CONTEXT
+    vix_arr = read_context_inputs(ohlcv_array_dict_in, data_context_in)
     # BUILD THE TARGETS AND REPLAY ONCE SO THE POSITION CARRIES ACROSS PERIODS
     target_arr = get_target_weight_arr(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in)
     date1 = period_pdf_in["period_start"].iloc[0]
@@ -108,6 +178,7 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     path_idx_list = [idx for idx, session_date in enumerate(session_date_list) if pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()]
     simulation_dict["target_weight_arr"] = target_arr[path_idx_list]
     simulation_dict["decision_session_list"] = [session_date_list[idx] for idx in path_idx_list]
+    simulation_dict["vix_level_prev_arr"] = vix_arr[path_idx_list]
     return simulation_dict
 
 # FUNCTION: GET THE UNINFORMED BASELINES OVER A SPAN
@@ -129,3 +200,23 @@ def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
     target_arr = np.full(len(ohlcv_array_dict_in["session_date_list"]), weight_float)
     simulation_dict = simulate_fractional_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, target_arr, 0.0, weight_float)
     return {"constant_exposure": simulation_dict["metric_dict"]["total_return"]}
+
+# FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
+def get_development_data_context(session_date_list_in):
+    """
+    Loads DATA_SOURCE_LIST through the development end (embargo sessions before the active window start) and returns
+    a development DataContext. The holdout evaluation script loads the same list through the window end instead
+    (so.core.point_in_time.load_source_frame_dict). The runner does not call this function; it passes its own context.
+
+    Args:
+        session_date_list_in (list): Session dates that include the window start
+
+    Returns:
+        DataContext: Development context
+    """
+    # THE DEVELOPMENT END IS BEFORE THE WINDOW; THE EVALUATION SCRIPT USES THE WINDOW END
+    from so.core.holdout import get_development_end_date
+    from so.core.point_in_time import DataContext, load_source_frame_dict
+    end_date = get_development_end_date(int(PERIOD_RULE["embargo_sessions"]), session_date_list_in)
+    frame_dict = load_source_frame_dict(list(DATA_SOURCE_LIST), end_date)
+    return DataContext("development", frame_dict_in=frame_dict, declared_name_list_in=list(DATA_SOURCE_LIST))
