@@ -52,6 +52,12 @@ appear only in the pipeline, `scripts/check_spy_rename.py`, `scripts/holdout_eva
 `so/core/holdout.py` and `tests/`. Synthetic tests only. The shared trial log was not modified, no window was opened,
 and `main` still does not contain the holdout module. Rolling retraining waits for Nicolas to merge that branch.
 
+*Correction later the same day (audit of `a64c1a9`):* cutting the session at the decision bar moved the decision.
+`get_session_decision_idx_dict` sets it to `session_end_idx` minus one bar, so a session that ended at 15:58 was
+decided at 15:57. That check was replaced by a perturbation: every bar strictly after the cut session's decision bar
+is overwritten (price × 1.25 plus seeded noise) and the session structure is left unchanged. The whole-session
+truncation is unchanged. No experiment was run, no window was opened, and the shared trial log was not modified.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

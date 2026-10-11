@@ -35,7 +35,8 @@ from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, roll_holdout_window_dict,
                              get_active_holdout_window_dict, get_development_end_date, get_latest_session_date,
                              check_development_date, get_replay_boundary_date, read_holdout_evaluation_pdf,
-                             run_holdout_evaluation, get_design_hash_str, get_prior_only_result_dict, NO_WINDOW_MESSAGE_STR)
+                             run_holdout_evaluation, get_design_hash_str, get_prior_only_result_dict,
+                             get_perturbed_ohlcv_dict, get_truncation_cut_date_list, NO_WINDOW_MESSAGE_STR)
 from so.core.local_file_management import read_csv_files_from_path, read_date_range_csv_files_from_path
 from so.core.fractional_exposure import simulate_fractional_exposure_dict
 from so.features.daily_features import get_session_decision_idx_dict
@@ -636,41 +637,89 @@ def get_leak_design():
     design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
     return design_module
 
-# FUNCTION: BUILD A DESIGN THAT READS THE SAME SESSION'S LAST BAR
-def get_same_session_close_leak_design():
+# FUNCTION: BUILD A DESIGN THAT USES THE DECISION-BAR CLOSE
+def get_decision_average_design():
     """
-    The target is 1 when the session's last bar is 15:59 and 0 otherwise. A decision at 15:58 that reads 15:59 changes
-    when that bar is removed.
+    The target and the signal are 1 when the decision-bar close is above its 20-session average of decision-bar closes.
 
     Returns:
         module: Design
     """
     # BUILD THE MODULE
-    design_module = types.ModuleType("close_leak_design")
-    design_module.EXPERIMENT_NAME = "exp_holdout_close_leak"
+    design_module = types.ModuleType("decision_average_design")
+    design_module.EXPERIMENT_NAME = "exp_holdout_decision_average"
     design_module.PROTOCOL_VERSION = "1.0"
     design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
-    design_module.CANDIDATE_LIST = ["close_leak"]
+    design_module.CANDIDATE_LIST = ["decision_average"]
     design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
-    # THE PERIOD SCORE DOES NOT LEAK (THE PATH DOES)
+    # THE PERIOD SCORE DOES NOT READ PRICES
     def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
         return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.0), "trade_pdf": pd.DataFrame()}
-    # READ THE LAST BAR OF THE SAME SESSION
+    # COMPARE EACH DECISION CLOSE WITH THE MEAN OF THE LAST 20 DECISION CLOSES
     def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
-        end_idx_arr = ohlcv_array_dict["session_end_idx_arr"]
+        decision_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict)["decision_idx_arr"]
+        decision_close_arr = ohlcv_array_dict["close_arr"][decision_idx_arr]
         session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
         date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
-        row_dict_list, target_list, decision_list = [], [], []
+        row_dict_list, target_list, signal_list, decision_list = [], [], [], []
         for session_idx, session_date in enumerate(session_date_list):
             if not (pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()):
                 continue
-            end_ts = ohlcv_array_dict["timestamp_index"][int(end_idx_arr[session_idx])]
-            weight_float = 1.0 if end_ts.hour == 15 and end_ts.minute == 59 else 0.0
-            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": weight_float > 0, "weight": weight_float})
-            target_list.append(weight_float)
+            mean_float = float(np.mean(decision_close_arr[max(0, session_idx - 19):session_idx + 1]))
+            signal_float = 1.0 if decision_close_arr[session_idx] > mean_float else 0.0
+            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": signal_float > 0, "weight": signal_float})
+            target_list.append(signal_float)
+            signal_list.append(signal_float)
             decision_list.append(session_date)
         return {"daily_equity_pdf": pd.DataFrame(row_dict_list), "trade_pdf": pd.DataFrame(),
-                "target_weight_arr": np.array(target_list, dtype=float), "decision_session_list": decision_list}
+                "target_weight_arr": np.array(target_list, dtype=float), "signal_arr": np.array(signal_list, dtype=float),
+                "decision_session_list": decision_list}
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
+    return design_module
+
+# FUNCTION: BUILD A DESIGN THAT READS A BAR AFTER THE DECISION
+def get_later_bar_design(bar_kind_str_in):
+    """
+    The target and the signal are the close of a bar after the decision. "fill" is the next bar (15:59 on a full day).
+    "session_close" is the session's last bar.
+
+    Args:
+        bar_kind_str_in (str): "fill" or "session_close"
+
+    Returns:
+        module: Design
+    """
+    # BUILD THE MODULE
+    design_module = types.ModuleType(f"{bar_kind_str_in}_leak_design")
+    design_module.EXPERIMENT_NAME = f"exp_holdout_{bar_kind_str_in}_leak"
+    design_module.PROTOCOL_VERSION = "1.0"
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = [bar_kind_str_in]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+    # THE PERIOD SCORE DOES NOT READ PRICES
+    def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.0), "trade_pdf": pd.DataFrame()}
+    # READ THE FILL BAR OR THE SESSION CLOSE
+    def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
+        idx_dict = get_session_decision_idx_dict(ohlcv_array_dict)
+        price_idx_arr = idx_dict["fill_idx_arr"] if bar_kind_str_in == "fill" else ohlcv_array_dict["session_end_idx_arr"]
+        close_arr = ohlcv_array_dict["close_arr"]
+        session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+        date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
+        row_dict_list, target_list, signal_list, decision_list = [], [], [], []
+        for session_idx, session_date in enumerate(session_date_list):
+            if not (pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()):
+                continue
+            close_float = float(close_arr[int(price_idx_arr[session_idx])])
+            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": True, "weight": 1.0})
+            target_list.append(close_float)
+            signal_list.append(close_float)
+            decision_list.append(session_date)
+        return {"daily_equity_pdf": pd.DataFrame(row_dict_list), "trade_pdf": pd.DataFrame(),
+                "target_weight_arr": np.array(target_list, dtype=float), "signal_arr": np.array(signal_list, dtype=float),
+                "decision_session_list": decision_list}
     design_module.run_candidate_replay_dict = run_candidate_replay_dict
     design_module.run_prior_only_path_dict = run_prior_only_path_dict
     design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
@@ -835,25 +884,40 @@ def test_evaluation():
     trial_pdf = pd.read_csv(path_dict["trial_log_path_str"])
     assert len(trial_pdf) == 3 and set(trial_pdf["stage"]) == {"test"}
     assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
-    # A DESIGN THAT READS 15:59 AT THE 15:58 DECISION IS CAUGHT BY THE INTRADAY CUT; THE TEMPLATE ALREADY PASSED
-    close_module = get_same_session_close_leak_design()
-    close_ledger_str = os.path.join(TEMP_ROOT_STR, "close_evaluations.csv")
-    close_stdout_file = StringIO()
-    sys.stdout = close_stdout_file
-    try:
-        close_row = run_holdout_evaluation(close_module, "close_leak", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
-                                           ledger_path_str_in=close_ledger_str, trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "close_trial_log.csv"))
-    finally:
-        sys.stdout = saved_stdout
-    assert close_row["status"] == "invalid_lookahead"
-    assert "decision bar" in close_stdout_file.getvalue()
-    assert not os.path.isfile(os.path.join(path_dict["results_path_str"], close_row["window_id"], "close_leak", "strategy_daily_equity.csv"))
-    close_trial_pdf = pd.read_csv(os.path.join(TEMP_ROOT_STR, "close_trial_log.csv"))
-    assert len(close_trial_pdf) == 1 and close_trial_pdf["note"].iloc[0] == "invalid_lookahead"
-    assert "total_return" not in str(close_trial_pdf["metric_json"].iloc[0])
+    # THE PERTURBATION KEEPS THE DECISION BAR AND CHANGES THE FILL BAR
+    cut_date = get_truncation_cut_date_list(ohlcv_array_dict["session_date_list"], window_dict)[0]
+    perturbed_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict, cut_date)
+    full_idx_dict = get_session_decision_idx_dict(ohlcv_array_dict)
+    perturbed_idx_dict = get_session_decision_idx_dict(perturbed_dict)
+    cut_day = pd.Timestamp(cut_date).date()
+    cut_session_idx = next(idx for idx, session_date in enumerate(ohlcv_array_dict["session_date_list"]) if pd.Timestamp(session_date).date() == cut_day)
+    decision_idx = int(full_idx_dict["decision_idx_arr"][cut_session_idx])
+    assert np.array_equal(full_idx_dict["decision_idx_arr"], perturbed_idx_dict["decision_idx_arr"])
+    assert perturbed_dict["close_arr"][decision_idx] == ohlcv_array_dict["close_arr"][decision_idx]
+    assert perturbed_dict["close_arr"][decision_idx + 1] != ohlcv_array_dict["close_arr"][decision_idx + 1]
+    # AN HONEST DECISION-BAR RULE PASSES BOTH CHECKS; THE TEMPLATE ALREADY PASSED
+    honest_ledger_str = os.path.join(TEMP_ROOT_STR, "honest_evaluations.csv")
+    honest_row = run_holdout_evaluation(get_decision_average_design(), "decision_average", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                        ledger_path_str_in=honest_ledger_str, trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "honest_trial_log.csv"))
+    assert honest_row["status"] == "valid"
+    # THE 15:59 FILL AND THE SESSION CLOSE ARE BOTH CAUGHT, AND THE MESSAGE NAMES THE DECISION BAR
+    leak_status_dict = {}
+    for bar_kind_str in ["fill", "session_close"]:
+        leak_stdout_file = StringIO()
+        sys.stdout = leak_stdout_file
+        try:
+            later_row = run_holdout_evaluation(get_later_bar_design(bar_kind_str), bar_kind_str, ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                               ledger_path_str_in=os.path.join(TEMP_ROOT_STR, f"{bar_kind_str}_evaluations.csv"),
+                                               trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, f"{bar_kind_str}_trial_log.csv"))
+        finally:
+            sys.stdout = saved_stdout
+        leak_status_dict[bar_kind_str] = later_row["status"]
+        assert later_row["status"] == "invalid_lookahead"
+        assert "decision bar" in leak_stdout_file.getvalue()
+        assert not os.path.isfile(os.path.join(path_dict["results_path_str"], later_row["window_id"], bar_kind_str, "strategy_daily_equity.csv"))
     assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
     passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
-    passed("intraday truncation (15:59 at the decision is invalid_lookahead; template passed)")
+    passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']}; template {template_row['status']})")
 
 # FUNCTION: TEST WHERE THE HOLDOUT GUARD MAY BE TURNED OFF
 def test_holdout_flag_scan():

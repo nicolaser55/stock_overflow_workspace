@@ -8,8 +8,9 @@ are archived. The rules change is commits `e3e0219` and `11a1322` on main (the t
 *2026-10-11 (later the same day): Nicolas decided that model-based designs use walk-forward analysis with a rolling
 training window (recorded below and in `docs/RESULTS_LOG.md`). The shared module was not built. The task stops unless
 `main` contains `so/core/holdout.py` with the T1–T3 follow-up (an intraday truncation cut). `main` is `11a1322` and
-does not contain that file. T1–T3 (intraday truncation, the guard-off scan, the invalid-lookahead trial row) are done on
-`agent/holdout-split`. Rolling retraining waits for Nicolas to merge that branch into `main`. Parked in §7. No
+does not contain that file. T1–T3 are done on `agent/holdout-split`. The decision-bar truncation of `a64c1a9` was
+replaced by a perturbation of every bar after the decision bar, because shortening the session moved the decision from
+15:58 to 15:57. Rolling retraining waits for Nicolas to merge that branch into `main`. Parked in §7. No
 experiment, no window, no trial on the shared log.*
 
 *The handover document for whoever continues the research (Nicolas, an agent, or the assistant). It says where the
@@ -317,6 +318,17 @@ evaluation, no trial-log rows.
 - **H1.** The design hash is the sha256 of `git rev-parse HEAD:<design folder>`, `git rev-parse HEAD:so`, and the config
   hash. An unrelated commit does not change it.
 
+Audit of `a64c1a9` (Nicolas, 2026-10-11). The decision-bar truncation shifted the decision bar.
+`get_session_decision_idx_dict` sets the decision to `session_end_idx - DECISION_BAR_OFFSET_FROM_END`, so a cut session
+that ended at its 15:58 bar was decided at 15:57. An honest design that uses the 15:58 close would have been
+`invalid_lookahead` and would have used a holdout-budget slot. Replaced by a perturbation test. For each month-end the
+whole-session truncation is unchanged (the cut session stays whole). Separately, every bar strictly after that
+session's decision bar, from the fill bar through the end of the data, is overwritten with price × 1.25 plus seeded
+noise. Timestamps and session bounds stay. The perturbed path must match the full path on target weights and signals
+through the cut session, on positions, weights and trades strictly before the cut, and on the candidate for periods
+that end before the cut. Fills and share counts on the cut session are not compared. Synthetic tests only. No window
+opened, no evaluation, no shared trial-log row.
+
 **Calibration re-runs of exp05 and exp06 under the new split, as new versions: proposed, waiting for Nicolas.**
 
 ### Rolling retraining (Nicolas, 2026-10-11) — recorded; implementation parked
@@ -392,3 +404,4 @@ waiting for Nicolas. It was not built. T1–T3 are done on this branch; the task
 | 2026-10-11 | agent | Audit of `3540f65` (B1, L1, R1–R3, H1): pipeline and cache reads run with a window open; the runner replays the frozen prior-only path and truncation-tests it; design hash is content-addressed. Synthetic tests only. No window opened, no evaluation, no trial-log rows | Same next step: Nicolas downloads, re-runs the pipeline, then opens the window |
 | 2026-10-11 | agent | Rolling retraining (Nicolas, 2026-10-11) recorded and parked: `main` `11a1322` has no `so/core/holdout.py` and no intraday truncation cut. No branch, no code, no window, no trials | Unblocked only after the T1–T3 intraday cut is on `main`; then the shared rolling-retrain module |
 | 2026-10-11 | agent | T1–T3 on `agent/holdout-split`: intraday truncation at the decision bar, scan of where the holdout guard may be turned off, trial-log row on invalid_lookahead. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
+| 2026-10-11 | agent | Audit of `a64c1a9`: the decision-bar truncation moved the decision from 15:58 to 15:57. Replaced by a perturbation of every bar after the decision bar. The whole-session truncation is unchanged. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |

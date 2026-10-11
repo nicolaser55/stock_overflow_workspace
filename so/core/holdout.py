@@ -18,6 +18,10 @@ through the holdout window: same code, same decision bar (15:58) and fill (15:59
 rules, same candidate periods and selection rule, selection history and position carried over from development. Only
 the holdout sessions are reported. Every decision uses only information available at its decision bar.
 
+The truncation test checks that. For each month-end in the window it drops the sessions after the cut, and, separately,
+overwrites every bar strictly after that session's decision bar (the fill bar through the end of the data) while leaving
+the session structure unchanged. The second check does not move the decision bar.
+
 The holdout is the last HOLDOUT_WINDOW_MONTHS calendar months of the data, ending at the latest session present when
 the window is opened. It replaces the per-fold 3-month test windows and the fixed untouched window 2026-05-14 ->
 2026-08-13.
@@ -758,40 +762,68 @@ def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dic
     return {"period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
 
 # FUNCTION: DROP BARS AFTER A CUT DATE
-def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in, through_decision_bar_bool_in=False):
+def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     """
     The same arrays with every session after cut_date_in removed. Kept sessions stay a prefix, so their bar indexes
-    and session positions do not move. With through_decision_bar_bool_in, the cut session itself stops at its decision
-    bar (so.features.daily_features.get_session_decision_idx_dict: 15:58 on a full day, the second-to-last bar on half
-    days), so a decision cannot read that session's last bar.
+    and session positions do not move. The cut session is kept in full, so its decision bar does not move.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         cut_date_in (datetime.date): Last session kept
-        through_decision_bar_bool_in (bool): Stop the cut session at its decision bar
 
     Returns:
         dict: Truncated arrays
     """
-    # FIND THE LAST KEPT SESSION
+    # FIND THE LAST KEPT SESSION AND ITS LAST BAR
     session_date_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
     last_idx = max(idx for idx, session_date in enumerate(session_date_list) if session_date <= get_date(cut_date_in))
-    # STOP AT THE DECISION BAR OR AT THE SESSION CLOSE
-    if through_decision_bar_bool_in:
-        from so.features.daily_features import get_session_decision_idx_dict
-        end_bar_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][last_idx]) + 1
-    else:
-        end_bar_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx]) + 1
-    # COPY THE PREFIX AND POINT THE CUT SESSION'S END AT THE LAST KEPT BAR
+    end_bar_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx]) + 1
+    # COPY THE PREFIX
     truncated_dict = {key_str: ohlcv_array_dict_in[key_str][:end_bar_idx] for key_str in ["open_arr", "high_arr", "low_arr", "close_arr", "bar_session_idx_arr"]}
     truncated_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"][:end_bar_idx]
     truncated_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"][:last_idx + 1])
     truncated_dict["session_start_idx_arr"] = ohlcv_array_dict_in["session_start_idx_arr"][:last_idx + 1]
-    session_end_idx_arr = np.asarray(ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1], dtype=int).copy()
-    session_end_idx_arr[-1] = end_bar_idx - 1
-    truncated_dict["session_end_idx_arr"] = session_end_idx_arr
+    truncated_dict["session_end_idx_arr"] = ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1]
     truncated_dict["date_session_idx_dict"] = {get_date(session_date): idx for idx, session_date in enumerate(truncated_dict["session_date_list"])}
     return truncated_dict
+
+# FUNCTION: PERTURB EVERY BAR AFTER A DECISION BAR
+def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
+    """
+    A copy of the bars. Every open, high, low and close strictly after the cut session's decision bar (from its fill
+    bar through the end of the data) is replaced by price x 1.25 plus seeded noise. High stays at least the larger of
+    open and close; low stays at most the smaller. Timestamps, session bounds and bar indexes are unchanged, so the
+    decision bar stays the decision bar.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        cut_date_in (datetime.date): Session whose decision bar is the last unperturbed bar
+
+    Returns:
+        dict: Perturbed arrays
+    """
+    # IMPORT THE DECISION INDEX HERE
+    from so.features.daily_features import get_session_decision_idx_dict
+    # FIND THE CUT SESSION AND THE FIRST BAR AFTER ITS DECISION
+    session_date_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
+    last_idx = max(idx for idx, session_date in enumerate(session_date_list) if session_date <= get_date(cut_date_in))
+    start_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][last_idx]) + 1
+    # COPY THE STRUCTURE AND THE PRICES
+    perturbed_dict = {key_str: np.array(ohlcv_array_dict_in[key_str], copy=True) for key_str in ["open_arr", "high_arr", "low_arr", "close_arr", "bar_session_idx_arr", "session_start_idx_arr", "session_end_idx_arr"]}
+    perturbed_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"].copy()
+    perturbed_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"])
+    perturbed_dict["date_session_idx_dict"] = dict(ohlcv_array_dict_in["date_session_idx_dict"])
+    # OVERWRITE THE BARS AFTER THE DECISION BAR
+    bar_count = len(perturbed_dict["close_arr"]) - start_idx
+    if bar_count > 0:
+        noise_arr = np.random.default_rng(int(get_date(cut_date_in).strftime("%Y%m%d"))).normal(0.0, 0.01, bar_count)
+        for key_str in ["open_arr", "high_arr", "low_arr", "close_arr"]:
+            perturbed_dict[key_str][start_idx:] = perturbed_dict[key_str][start_idx:] * 1.25 + noise_arr
+        body_max_arr = np.maximum(perturbed_dict["open_arr"][start_idx:], perturbed_dict["close_arr"][start_idx:])
+        body_min_arr = np.minimum(perturbed_dict["open_arr"][start_idx:], perturbed_dict["close_arr"][start_idx:])
+        perturbed_dict["high_arr"][start_idx:] = np.maximum(perturbed_dict["high_arr"][start_idx:], body_max_arr)
+        perturbed_dict["low_arr"][start_idx:] = np.minimum(perturbed_dict["low_arr"][start_idx:], body_min_arr)
+    return perturbed_dict
 
 # FUNCTION: LIST THE CUT DATES OF THE TRUNCATION TEST
 def get_truncation_cut_date_list(session_date_list_in, window_dict_in):
@@ -881,66 +913,34 @@ def get_lookahead_difference_str(full_result_dict_in, short_result_dict_in, cut_
         return f"trade before {cut_date_in}"
     return None
 
-# FUNCTION: COMPARE THE CUT SESSION'S DECISION
-def get_cut_session_decision_difference_str(full_result_dict_in, short_result_dict_in, cut_date_in):
+# FUNCTION: COMPARE SIGNALS THROUGH THE CUT SESSION
+def get_signal_difference_str(full_result_dict_in, short_result_dict_in, cut_date_in):
     """
-    None when the cut session's target weight and its position change match the full run. The position change is the
-    step in target weight from the previous session. A path with no target weights uses the step in in_position, and a
-    forced end-of-window sale on the cut session is undone first (that sale is not a strategy decision).
+    None when every signal on a session up to and including the cut matches. A path with no signal array is unchanged.
+    Fills and share counts on the cut session are not read here.
 
     Args:
-        full_result_dict_in (dict): Replay on all bars
-        short_result_dict_in (dict): Replay on the truncated bars
+        full_result_dict_in (dict): Replay on the original bars
+        short_result_dict_in (dict): Replay on the perturbed bars
         cut_date_in (datetime.date): Cut date
 
     Returns:
-        str | None: The decision that differed, or None
+        str | None: The signal that differed, or None
     """
-    # COMPARE TARGET WEIGHTS AND THE STEP FROM THE PREVIOUS SESSION
-    cut_date = get_date(cut_date_in)
+    # SKIP PATHS THAT DO NOT CARRY A SIGNAL
     full_path_dict, short_path_dict = full_result_dict_in["path_dict"], short_result_dict_in["path_dict"]
-    if "target_weight_arr" in full_path_dict and "target_weight_arr" in short_path_dict:
-        def get_weight_dict(path_dict_in):
-            # MAP EACH DECISION SESSION TO ITS TARGET
-            return {get_date(session_date): float(path_dict_in["target_weight_arr"][idx])
-                    for idx, session_date in enumerate(path_dict_in["decision_session_list"])}
-        full_weight_dict, short_weight_dict = get_weight_dict(full_path_dict), get_weight_dict(short_path_dict)
-        if cut_date not in full_weight_dict or cut_date not in short_weight_dict:
-            return f"target weight missing on {cut_date}"
-        if abs(full_weight_dict[cut_date] - short_weight_dict[cut_date]) > 1e-12:
-            return f"target weight on {cut_date}"
-        previous_list = [session_date for session_date in full_weight_dict if session_date < cut_date and session_date in short_weight_dict]
-        if previous_list:
-            previous_date = max(previous_list)
-            full_change_float = full_weight_dict[cut_date] - full_weight_dict[previous_date]
-            short_change_float = short_weight_dict[cut_date] - short_weight_dict[previous_date]
-            if abs(full_change_float - short_change_float) > 1e-12:
-                return f"position change on {cut_date}"
+    if "signal_arr" not in full_path_dict and "signal_arr" not in short_path_dict:
         return None
-    # COMPARE THE STEP IN POSITION, UNDOING A FORCED SALE ON THE CUT SESSION
-    def get_position_change_float(path_dict_in):
-        # READ THE MARKED POSITION
-        equity_pdf = path_dict_in["daily_equity_pdf"].copy()
-        if "in_position" not in equity_pdf.columns:
-            return None
-        equity_pdf["date"] = equity_pdf["date"].map(get_date)
-        cut_pdf = equity_pdf[equity_pdf["date"] == cut_date]
-        if cut_pdf.empty:
-            return None
-        in_position_bool = bool(cut_pdf["in_position"].iloc[0])
-        trade_pdf = path_dict_in.get("trade_pdf")
-        if trade_pdf is not None and len(trade_pdf) > 0 and "reason" in trade_pdf.columns:
-            trade_session_arr = pd.to_datetime(trade_pdf["trade_ts"]).dt.tz_convert("America/New_York").dt.date
-            if ((trade_session_arr == cut_date) & (trade_pdf["reason"].to_numpy() == "END")).any():
-                in_position_bool = True
-        prior_pdf = equity_pdf[equity_pdf["date"] < cut_date]
-        prior_bool = bool(prior_pdf["in_position"].iloc[-1]) if len(prior_pdf) else False
-        return float(in_position_bool) - float(prior_bool)
-    full_change_float, short_change_float = get_position_change_float(full_path_dict), get_position_change_float(short_path_dict)
-    if full_change_float is None or short_change_float is None:
-        return f"position change missing on {cut_date}"
-    if abs(full_change_float - short_change_float) > 1e-12:
-        return f"position change on {cut_date}"
+    if "signal_arr" not in full_path_dict or "signal_arr" not in short_path_dict:
+        return f"signal missing at {cut_date_in}"
+    # COMPARE THE SIGNAL ON EVERY SESSION UP TO THE CUT
+    short_signal_dict = {get_date(session_date): float(short_path_dict["signal_arr"][idx])
+                         for idx, session_date in enumerate(short_path_dict["decision_session_list"])}
+    for idx, session_date in enumerate(full_path_dict["decision_session_list"]):
+        session_day = get_date(session_date)
+        if session_day <= get_date(cut_date_in) and session_day in short_signal_dict:
+            if abs(float(full_path_dict["signal_arr"][idx]) - short_signal_dict[session_day]) > 1e-12:
+                return f"signal on {session_day}"
     return None
 
 # FUNCTION: REBASE THE HOLDOUT SEGMENT AND BUILD THE REPORT
@@ -1003,9 +1003,11 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
 # FUNCTION: RUN THE TRUNCATION TEST
 def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in):
     """
-    Re-runs the prior-only path on bars truncated after each month-end inside the window, once through the session
-    close and once through the decision bar of that session. Returns the first difference. The decision-bar cut also
-    requires the cut session's target weight and position change to match the full run.
+    Re-runs the prior-only path at each month-end inside the window. First the sessions after the cut are dropped
+    (the cut session stays whole, so its decision bar does not move). Then every bar strictly after that session's
+    decision bar is perturbed and the path is run again. The perturbation must leave target weights and signals
+    unchanged through the cut session, positions, weights and trades unchanged strictly before it, and the candidate
+    unchanged for periods that end before it. Fills and share counts on the cut session itself are not compared.
 
     Args:
         design_module_in (module): Design
@@ -1016,19 +1018,19 @@ def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict
     Returns:
         str | None: The cut and the decision that differed, or None
     """
-    # CHECK EACH MONTH END AT THE SESSION CLOSE, THEN AT THE DECISION BAR
+    # CHECK EACH MONTH END BY DROPPING LATER SESSIONS, THEN BY PERTURBING BARS AFTER THE DECISION
     for cut_date in get_truncation_cut_date_list(ohlcv_array_dict_in["session_date_list"], window_dict_in):
         short_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
         difference_str = get_lookahead_difference_str(full_result_dict_in, short_result_dict, cut_date)
         if difference_str is not None:
             return f"{cut_date}: {difference_str}"
-        intraday_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date, True), window_dict_in)
-        intraday_difference_str = get_lookahead_difference_str(full_result_dict_in, intraday_result_dict, cut_date)
-        if intraday_difference_str is not None:
-            return f"{cut_date} decision bar: {intraday_difference_str}"
-        cut_difference_str = get_cut_session_decision_difference_str(full_result_dict_in, intraday_result_dict, cut_date)
-        if cut_difference_str is not None:
-            return f"{cut_date} decision bar: {cut_difference_str}"
+        perturbed_result_dict = get_prior_only_result_dict(design_module_in, get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
+        perturbed_difference_str = get_lookahead_difference_str(full_result_dict_in, perturbed_result_dict, cut_date)
+        if perturbed_difference_str is not None:
+            return f"{cut_date} decision bar: {perturbed_difference_str}"
+        signal_difference_str = get_signal_difference_str(full_result_dict_in, perturbed_result_dict, cut_date)
+        if signal_difference_str is not None:
+            return f"{cut_date} decision bar: {signal_difference_str}"
     return None
 
 # FUNCTION: APPEND ONE LEDGER ROW

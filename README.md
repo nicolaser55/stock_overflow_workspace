@@ -126,10 +126,14 @@ variable with no default: when it is unset, holdout results cannot be written. A
   (`scripts/holdout_window.py`). Once opened it is frozen. Sessions after its end are forward data and are refused.
   The result is the design's frozen prior-only path from its development start, continued through the window: same
   code, same 15:58 decision and 15:59 fill, same costs, dead band and selection rule, with selection history and
-  position carried over. Only the holdout sessions are reported. Before a result is written, the runner repeats that
-  path on bars cut after each of 12 month-ends in the window; a difference is ledger status `invalid_lookahead` (no
-  daily paths, and the row counts against the budget). Each frozen design may be evaluated once per window, at most
-  10 designs, and only by Nicolas (`scripts/holdout_evaluate.py`). Agents never read the holdout, never set
+  position carried over. Only the holdout sessions are reported. Before a result is written, the runner checks each of
+  12 month-ends in the window twice: it drops the sessions after the cut (the cut session stays whole, so its decision
+  bar does not move), and it overwrites every bar strictly after that session's decision bar, from the fill bar through
+  the end of the data, with price × 1.25 plus seeded noise, leaving the session structure unchanged. Target weights and
+  signals through the cut session must match, as must positions, weights and trades strictly before the cut, and the
+  candidate for periods that end before the cut. Fills on the cut session are not compared. A difference is ledger
+  status `invalid_lookahead` (no daily paths, and the row counts against the budget). Each frozen design may be
+  evaluated once per window, at most 10 designs, and only by Nicolas (`scripts/holdout_evaluate.py`). Agents never set
   `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never run those scripts.
 - **Archived experiments** (exp01–exp13) keep their recorded numbers and stay pinned to the old boundary 2026-05-14.
   Nicolas re-runs them only with `SO_ALLOW_LEGACY_REPRODUCTION=1`, which cannot extend past that date.
