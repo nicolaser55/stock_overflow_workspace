@@ -758,28 +758,38 @@ def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dic
     return {"period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
 
 # FUNCTION: DROP BARS AFTER A CUT DATE
-def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
+def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in, through_decision_bar_bool_in=False):
     """
     The same arrays with every session after cut_date_in removed. Kept sessions stay a prefix, so their bar indexes
-    and session positions do not move.
+    and session positions do not move. With through_decision_bar_bool_in, the cut session itself stops at its decision
+    bar (so.features.daily_features.get_session_decision_idx_dict: 15:58 on a full day, the second-to-last bar on half
+    days), so a decision cannot read that session's last bar.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         cut_date_in (datetime.date): Last session kept
+        through_decision_bar_bool_in (bool): Stop the cut session at its decision bar
 
     Returns:
         dict: Truncated arrays
     """
-    # FIND THE LAST KEPT SESSION AND ITS LAST BAR
+    # FIND THE LAST KEPT SESSION
     session_date_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
     last_idx = max(idx for idx, session_date in enumerate(session_date_list) if session_date <= get_date(cut_date_in))
-    end_bar_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx]) + 1
-    # COPY THE PREFIX
+    # STOP AT THE DECISION BAR OR AT THE SESSION CLOSE
+    if through_decision_bar_bool_in:
+        from so.features.daily_features import get_session_decision_idx_dict
+        end_bar_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][last_idx]) + 1
+    else:
+        end_bar_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx]) + 1
+    # COPY THE PREFIX AND POINT THE CUT SESSION'S END AT THE LAST KEPT BAR
     truncated_dict = {key_str: ohlcv_array_dict_in[key_str][:end_bar_idx] for key_str in ["open_arr", "high_arr", "low_arr", "close_arr", "bar_session_idx_arr"]}
     truncated_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"][:end_bar_idx]
     truncated_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"][:last_idx + 1])
     truncated_dict["session_start_idx_arr"] = ohlcv_array_dict_in["session_start_idx_arr"][:last_idx + 1]
-    truncated_dict["session_end_idx_arr"] = ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1]
+    session_end_idx_arr = np.asarray(ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1], dtype=int).copy()
+    session_end_idx_arr[-1] = end_bar_idx - 1
+    truncated_dict["session_end_idx_arr"] = session_end_idx_arr
     truncated_dict["date_session_idx_dict"] = {get_date(session_date): idx for idx, session_date in enumerate(truncated_dict["session_date_list"])}
     return truncated_dict
 
@@ -871,6 +881,68 @@ def get_lookahead_difference_str(full_result_dict_in, short_result_dict_in, cut_
         return f"trade before {cut_date_in}"
     return None
 
+# FUNCTION: COMPARE THE CUT SESSION'S DECISION
+def get_cut_session_decision_difference_str(full_result_dict_in, short_result_dict_in, cut_date_in):
+    """
+    None when the cut session's target weight and its position change match the full run. The position change is the
+    step in target weight from the previous session. A path with no target weights uses the step in in_position, and a
+    forced end-of-window sale on the cut session is undone first (that sale is not a strategy decision).
+
+    Args:
+        full_result_dict_in (dict): Replay on all bars
+        short_result_dict_in (dict): Replay on the truncated bars
+        cut_date_in (datetime.date): Cut date
+
+    Returns:
+        str | None: The decision that differed, or None
+    """
+    # COMPARE TARGET WEIGHTS AND THE STEP FROM THE PREVIOUS SESSION
+    cut_date = get_date(cut_date_in)
+    full_path_dict, short_path_dict = full_result_dict_in["path_dict"], short_result_dict_in["path_dict"]
+    if "target_weight_arr" in full_path_dict and "target_weight_arr" in short_path_dict:
+        def get_weight_dict(path_dict_in):
+            # MAP EACH DECISION SESSION TO ITS TARGET
+            return {get_date(session_date): float(path_dict_in["target_weight_arr"][idx])
+                    for idx, session_date in enumerate(path_dict_in["decision_session_list"])}
+        full_weight_dict, short_weight_dict = get_weight_dict(full_path_dict), get_weight_dict(short_path_dict)
+        if cut_date not in full_weight_dict or cut_date not in short_weight_dict:
+            return f"target weight missing on {cut_date}"
+        if abs(full_weight_dict[cut_date] - short_weight_dict[cut_date]) > 1e-12:
+            return f"target weight on {cut_date}"
+        previous_list = [session_date for session_date in full_weight_dict if session_date < cut_date and session_date in short_weight_dict]
+        if previous_list:
+            previous_date = max(previous_list)
+            full_change_float = full_weight_dict[cut_date] - full_weight_dict[previous_date]
+            short_change_float = short_weight_dict[cut_date] - short_weight_dict[previous_date]
+            if abs(full_change_float - short_change_float) > 1e-12:
+                return f"position change on {cut_date}"
+        return None
+    # COMPARE THE STEP IN POSITION, UNDOING A FORCED SALE ON THE CUT SESSION
+    def get_position_change_float(path_dict_in):
+        # READ THE MARKED POSITION
+        equity_pdf = path_dict_in["daily_equity_pdf"].copy()
+        if "in_position" not in equity_pdf.columns:
+            return None
+        equity_pdf["date"] = equity_pdf["date"].map(get_date)
+        cut_pdf = equity_pdf[equity_pdf["date"] == cut_date]
+        if cut_pdf.empty:
+            return None
+        in_position_bool = bool(cut_pdf["in_position"].iloc[0])
+        trade_pdf = path_dict_in.get("trade_pdf")
+        if trade_pdf is not None and len(trade_pdf) > 0 and "reason" in trade_pdf.columns:
+            trade_session_arr = pd.to_datetime(trade_pdf["trade_ts"]).dt.tz_convert("America/New_York").dt.date
+            if ((trade_session_arr == cut_date) & (trade_pdf["reason"].to_numpy() == "END")).any():
+                in_position_bool = True
+        prior_pdf = equity_pdf[equity_pdf["date"] < cut_date]
+        prior_bool = bool(prior_pdf["in_position"].iloc[-1]) if len(prior_pdf) else False
+        return float(in_position_bool) - float(prior_bool)
+    full_change_float, short_change_float = get_position_change_float(full_path_dict), get_position_change_float(short_path_dict)
+    if full_change_float is None or short_change_float is None:
+        return f"position change missing on {cut_date}"
+    if abs(full_change_float - short_change_float) > 1e-12:
+        return f"position change on {cut_date}"
+    return None
+
 # FUNCTION: REBASE THE HOLDOUT SEGMENT AND BUILD THE REPORT
 def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, result_dict_in):
     """
@@ -931,7 +1003,9 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
 # FUNCTION: RUN THE TRUNCATION TEST
 def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in):
     """
-    Re-runs the prior-only path on bars truncated after each month-end inside the window. Returns the first difference.
+    Re-runs the prior-only path on bars truncated after each month-end inside the window, once through the session
+    close and once through the decision bar of that session. Returns the first difference. The decision-bar cut also
+    requires the cut session's target weight and position change to match the full run.
 
     Args:
         design_module_in (module): Design
@@ -942,12 +1016,19 @@ def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict
     Returns:
         str | None: The cut and the decision that differed, or None
     """
-    # CHECK EACH MONTH END
+    # CHECK EACH MONTH END AT THE SESSION CLOSE, THEN AT THE DECISION BAR
     for cut_date in get_truncation_cut_date_list(ohlcv_array_dict_in["session_date_list"], window_dict_in):
         short_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
         difference_str = get_lookahead_difference_str(full_result_dict_in, short_result_dict, cut_date)
         if difference_str is not None:
             return f"{cut_date}: {difference_str}"
+        intraday_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date, True), window_dict_in)
+        intraday_difference_str = get_lookahead_difference_str(full_result_dict_in, intraday_result_dict, cut_date)
+        if intraday_difference_str is not None:
+            return f"{cut_date} decision bar: {intraday_difference_str}"
+        cut_difference_str = get_cut_session_decision_difference_str(full_result_dict_in, intraday_result_dict, cut_date)
+        if cut_difference_str is not None:
+            return f"{cut_date} decision bar: {cut_difference_str}"
     return None
 
 # FUNCTION: APPEND ONE LEDGER ROW
@@ -973,7 +1054,8 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     """
     Nicolas only. Checks the preconditions, replays the frozen prior-only path from the development start through the
     window end, runs the truncation test, and only then writes a result. A failed truncation test writes no daily
-    paths and appends a ledger row with status "invalid_lookahead" (it counts against the window budget). A valid
+    paths and appends a ledger row with status "invalid_lookahead" (it counts against the window budget) plus one
+    trial-log row (stage "test", test_window_touched True, note "invalid_lookahead", no return metrics). A valid
     run writes the holdout paths under SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends a ledger row with status
     "valid", and appends one trial-log row (stage "test", test_window_touched True).
 
@@ -1013,6 +1095,10 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         print(f"invalid_lookahead: {failure_str}")
         row_dict["status"] = "invalid_lookahead"
         append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+        from so.core.trial_log import log_trial_dict
+        log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
+                       {}, True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
+                       note_str_in="invalid_lookahead", file_path_str_in=trial_log_path_str_in, alert_in=False)
         return row_dict
     # WRITE THE HOLDOUT PATHS ONLY UNDER SO_HOLDOUT_PATH
     results_path_str = os.environ["SO_HOLDOUT_PATH"]

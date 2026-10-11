@@ -44,6 +44,14 @@ every bar of the cut session through `session_end_idx` (the session close). That
 No experiment was run, no holdout window was opened, and no trial-log row was added. Archived experiments exp01–exp13
 are unchanged.
 
+*Correction later on 2026-10-11:* T1–T3 were implemented on `agent/holdout-split`. The truncation test also cuts each
+month-end at the decision bar (15:58 on a full day, the second-to-last bar on a half day) and requires that session's
+target weight and position change to match the full run. An `invalid_lookahead` evaluation appends one trial-log row
+(stage `test`, `test_window_touched` True, note `invalid_lookahead`, no return metrics). The guard-off argument may
+appear only in the pipeline, `scripts/check_spy_rename.py`, `scripts/holdout_evaluate.py`, `scripts/smoke_notebook.py`,
+`so/core/holdout.py` and `tests/`. Synthetic tests only. The shared trial log was not modified, no window was opened,
+and `main` still does not contain the holdout module. Rolling retraining waits for Nicolas to merge that branch.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

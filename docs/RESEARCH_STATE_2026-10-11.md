@@ -8,7 +8,9 @@ are archived. The rules change is commits `e3e0219` and `11a1322` on main (the t
 *2026-10-11 (later the same day): Nicolas decided that model-based designs use walk-forward analysis with a rolling
 training window (recorded below and in `docs/RESULTS_LOG.md`). The shared module was not built. The task stops unless
 `main` contains `so/core/holdout.py` with the T1–T3 follow-up (an intraday truncation cut). `main` is `11a1322` and
-does not contain that file. Parked in §7. No branch `agent/rolling-retrain`, no experiment, no window, no trial.*
+does not contain that file. T1–T3 (intraday truncation, the guard-off scan, the invalid-lookahead trial row) are done on
+`agent/holdout-split`. Rolling retraining waits for Nicolas to merge that branch into `main`. Parked in §7. No
+experiment, no window, no trial on the shared log.*
 
 *The handover document for whoever continues the research (Nicolas, an agent, or the assistant). It says where the
 project stands, what has been learned, what data has been seen, and what to do next, in order. Update it at the end of
@@ -112,7 +114,7 @@ the active holdout start.*
   forced buy-back after `max_cash_sessions_in`), trailing stops, re-entry rule builders (model, fixed delay, random,
   oracle), trend rule, buy-and-hold.
 - `experiments/exp03_ath_exit/rules.py`: exit-signal + buy-back simulation on top of it, random exit / random buy-back.
-- `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation of the frozen prior-only path, with a truncation test and ledger status `valid` / `invalid_lookahead`). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments). Pipeline notebooks pass `enforce_holdout_bool_in=False` because they prepare data and compute no strategy result. Work-zone and gold-zone cache reads are guarded unless that flag is set.
+- `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation of the frozen prior-only path, with a truncation test and ledger status `valid` / `invalid_lookahead`). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments). Pipeline notebooks turn the holdout guard off because they prepare data and compute no strategy result. Work-zone and gold-zone cache reads are guarded unless that flag is set.
 - `so.core.schedule`: walk-forward folds; `so.core.evaluation`: pooled selection, prior-only path, MDE, baseline
   summaries, chained daily returns, monthly bootstrap, success criteria; `so.core.trial_log`: the shared trial log.
 - `so.features.daily_features`: 16 daily features at the 15:58 decision bar (returns 1-250d, MA50/MA200 distance,
@@ -298,7 +300,7 @@ Audit of `agent/holdout-split` at `3540f65` (Nicolas, 2026-10-11), fixed on the 
 evaluation, no trial-log rows.
 
 - **B1.** The pipeline prepares data and computes no strategy result, so it must run with or without a registered
-  window. `pipeline/step06` and `step07` call `get_complete_ohlcv_pdf(..., enforce_holdout_bool_in=False)`. step07 keeps
+  window. `pipeline/step06` and `step07` call `get_complete_ohlcv_pdf` with the holdout guard turned off. step07 keeps
   its cutoff `2026-04-15`. The same flag is passed through the VIX loaders, because an active window that starts before
   that cutoff would otherwise reject step07's own cutoff. `scripts/check_spy_rename.py` is a data check (it counts
   sessions, then applies its own cut) and gets the same flag. Steps 00 and 01 read the raw folder directly. Steps 02–05
@@ -334,7 +336,8 @@ and in the holdout.
   use only information available at or before the decision bar.
 
 A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first user of that design. Proposed,
-waiting for Nicolas. It was not built: the implementation gate failed (see the parked row of 2026-10-11).
+waiting for Nicolas. It was not built. T1–T3 are done on this branch; the task is re-issued after Nicolas merges
+`agent/holdout-split` into `main` (see the parked row of 2026-10-11).
 
 ### Then: text / qualitative data (new data, needs Nicolas)
 
@@ -356,7 +359,7 @@ waiting for Nicolas. It was not built: the implementation gate failed (see the p
 | 2026-10-09 (Nicolas) | Write-up of the negative result | — | — | **Deferred by Nicolas until after exp13** (exp13_e1m1_robustness, §6) |
 | 2026-10-09 (agent) | Write-up of the negative result (exp13 ended: E1M1 IS NOT ROBUST; VIX line closed; 3,651 workspace trials, 7,740 with the legacy trials) | (a) the agent drafts the write-up in `docs/`: the question, the experiments run (exp01-exp08, exp12, exp13; exp09-exp11 skipped), prior-only vs buy-and-hold, the S/R identity, the robustness failure of E1M1, trial counts, data-dependence of exp06/exp12/exp13, limitations; Nicolas reviews; (b) Nicolas writes it from `docs/RESULTS_LOG.md`; (c) a new roadmap item first | **(a), do it now:** every number is in the results log; drafting adds no trial and reads no new data; the untouched window stays unread and is not proposed | Session ended; no draft written in this session (the write-up is parked for Nicolas, not a roadmap experiment) |
 | 2026-10-11 (agent) | Rolling 12-month holdout infrastructure (Nicolas, 2026-10-11) is blocked: the task says stop unless main contains a commit whose message is "rules: rolling holdout" | (a) Nicolas confirms that `e3e0219` and `11a1322` (both 2026-10-11, subjects "updated research-integrity.mdc document" and "updated new research-integrity.mdc for real this time") are that rules change, and the agent proceeds; (b) Nicolas adds a commit on main whose message is "rules: rolling holdout" | (a): those two commits already replace rules 1 and 3 with the registered rolling holdout (observed in the file on main at `11a1322`) | resolved 2026-10-11 by Nicolas: e3e0219 and 11a1322 are the rules change |
-| 2026-10-11 (agent) | Rolling retraining infrastructure (Nicolas, 2026-10-11) is blocked: the task says stop unless `main` contains `so/core/holdout.py` with the T1–T3 follow-up (an intraday truncation cut) | (a) merge `agent/holdout-split` (`80c67a3`) to `main` and add an intraday cut (the truncation keeps bars through `session_end_idx` of the cut session, the session close, not the decision bar), then re-issue the task; (b) land that intraday cut on `main` some other way and re-issue the task | (a): `origin/main` is `11a1322` and has no `so/core/holdout.py`; the module exists only on `agent/holdout-split`, and even there the cut is the session close | Stopped. Decisions recorded in §6. No branch `agent/rolling-retrain`, no module, no tests, no window, no trial-log rows |
+| 2026-10-11 (agent) | Rolling retraining infrastructure (Nicolas, 2026-10-11) waits until `main` contains `so/core/holdout.py` with the T1–T3 follow-up | (a) Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued; (b) land the same commits on `main` another way, then re-issue the task | (a) | T1-T3 done; waiting for Nicolas to merge agent/holdout-split into main, then the rolling-retrain task is re-issued |
 
 ### Open items
 
@@ -388,3 +391,4 @@ waiting for Nicolas. It was not built: the implementation gate failed (see the p
 | 2026-10-11 | agent | Nicolas confirmed `e3e0219` and `11a1322` are the rules change. Rolling-holdout infrastructure on `agent/holdout-split`: `so.core.holdout`, guards, development schedule, Nicolas-only scripts, archive notes on exp01–exp13, tests. No window opened, no evaluation, no trial-log rows | Nicolas: download SPY through the latest session, re-run pipeline 00-06, then `scripts/holdout_window.py open`. Calibration re-runs of exp05 and exp06 are proposed and waiting |
 | 2026-10-11 | agent | Audit of `3540f65` (B1, L1, R1–R3, H1): pipeline and cache reads run with a window open; the runner replays the frozen prior-only path and truncation-tests it; design hash is content-addressed. Synthetic tests only. No window opened, no evaluation, no trial-log rows | Same next step: Nicolas downloads, re-runs the pipeline, then opens the window |
 | 2026-10-11 | agent | Rolling retraining (Nicolas, 2026-10-11) recorded and parked: `main` `11a1322` has no `so/core/holdout.py` and no intraday truncation cut. No branch, no code, no window, no trials | Unblocked only after the T1–T3 intraday cut is on `main`; then the shared rolling-retrain module |
+| 2026-10-11 | agent | T1–T3 on `agent/holdout-split`: intraday truncation at the decision bar, scan of where the holdout guard may be turned off, trial-log row on invalid_lookahead. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |

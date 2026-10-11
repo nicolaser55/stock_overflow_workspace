@@ -252,8 +252,8 @@ def get_cache_holdout_boundary_date(file_path_str_in, enforce_holdout_bool_in):
     The first date a pipeline-cache file may not have, or None when the guard does not apply.
 
     The guard applies only inside the work zone and the gold zone. store04_experiments is unaffected.
-    With no registered window the guard raises, as the raw loader does. enforce_holdout_bool_in=False
-    is the pipeline itself (it prepares data and computes no strategy result).
+    With no registered window the guard raises, as the raw loader does. A false guard argument is the pipeline
+    itself (it prepares data and computes no strategy result).
 
     Args:
         file_path_str_in (str): Directory being read

@@ -44,8 +44,8 @@ def get_complete_ohlcv_pdf(raw_path_str_in=None, cutoff_date_str_in=None, enforc
     """
     Reads the raw bars and formats them for the pipeline and the simulators (timestamp, open, high, low, close, volume,
     date), sorted by timestamp. By default the series is cut strictly before the development boundary
-    (so.core.holdout.get_replay_boundary_date) and a cutoff on or after that boundary raises. Pass
-    enforce_holdout_bool_in=False only to locate the latest session, including forward data.
+    (so.core.holdout.get_replay_boundary_date) and a cutoff on or after that boundary raises. Pass the guard argument
+    as false only to locate the latest session, including forward data.
 
     Args:
         raw_path_str_in (str | None): Raw folder (None = paths.LOCAL_OHLCV_DATA_FILE_PATH_STR)

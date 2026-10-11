@@ -636,6 +636,46 @@ def get_leak_design():
     design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
     return design_module
 
+# FUNCTION: BUILD A DESIGN THAT READS THE SAME SESSION'S LAST BAR
+def get_same_session_close_leak_design():
+    """
+    The target is 1 when the session's last bar is 15:59 and 0 otherwise. A decision at 15:58 that reads 15:59 changes
+    when that bar is removed.
+
+    Returns:
+        module: Design
+    """
+    # BUILD THE MODULE
+    design_module = types.ModuleType("close_leak_design")
+    design_module.EXPERIMENT_NAME = "exp_holdout_close_leak"
+    design_module.PROTOCOL_VERSION = "1.0"
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = ["close_leak"]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+    # THE PERIOD SCORE DOES NOT LEAK (THE PATH DOES)
+    def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.0), "trade_pdf": pd.DataFrame()}
+    # READ THE LAST BAR OF THE SAME SESSION
+    def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
+        end_idx_arr = ohlcv_array_dict["session_end_idx_arr"]
+        session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+        date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
+        row_dict_list, target_list, decision_list = [], [], []
+        for session_idx, session_date in enumerate(session_date_list):
+            if not (pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()):
+                continue
+            end_ts = ohlcv_array_dict["timestamp_index"][int(end_idx_arr[session_idx])]
+            weight_float = 1.0 if end_ts.hour == 15 and end_ts.minute == 59 else 0.0
+            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": weight_float > 0, "weight": weight_float})
+            target_list.append(weight_float)
+            decision_list.append(session_date)
+        return {"daily_equity_pdf": pd.DataFrame(row_dict_list), "trade_pdf": pd.DataFrame(),
+                "target_weight_arr": np.array(target_list, dtype=float), "decision_session_list": decision_list}
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
+    return design_module
+
 # FUNCTION: PREPARE THE TOKEN AND THE RESULTS FOLDER
 def get_evaluation_path_dict():
     """
@@ -767,7 +807,12 @@ def test_evaluation():
     assert leak_row["status"] == "invalid_lookahead"
     assert "invalid_lookahead" in stdout_file.getvalue()
     assert not os.path.isfile(os.path.join(path_dict["results_path_str"], leak_row["window_id"], "leak", "strategy_daily_equity.csv"))
-    assert not os.path.isfile(os.path.join(TEMP_ROOT_STR, "leak_trial_log.csv"))
+    leak_trial_pdf = pd.read_csv(os.path.join(TEMP_ROOT_STR, "leak_trial_log.csv"))
+    assert len(leak_trial_pdf) == 1
+    assert leak_trial_pdf["stage"].iloc[0] == "test"
+    assert str(leak_trial_pdf["test_window_touched"].iloc[0]) == "True"
+    assert leak_trial_pdf["note"].iloc[0] == "invalid_lookahead"
+    assert "total_return" not in str(leak_trial_pdf["metric_json"].iloc[0])
     assert len(read_holdout_evaluation_pdf(leak_ledger_str)) == 1
     try:
         run_holdout_evaluation(leak_module, "leak_again", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
@@ -790,7 +835,53 @@ def test_evaluation():
     trial_pdf = pd.read_csv(path_dict["trial_log_path_str"])
     assert len(trial_pdf) == 3 and set(trial_pdf["stage"]) == {"test"}
     assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
+    # A DESIGN THAT READS 15:59 AT THE 15:58 DECISION IS CAUGHT BY THE INTRADAY CUT; THE TEMPLATE ALREADY PASSED
+    close_module = get_same_session_close_leak_design()
+    close_ledger_str = os.path.join(TEMP_ROOT_STR, "close_evaluations.csv")
+    close_stdout_file = StringIO()
+    sys.stdout = close_stdout_file
+    try:
+        close_row = run_holdout_evaluation(close_module, "close_leak", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                           ledger_path_str_in=close_ledger_str, trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "close_trial_log.csv"))
+    finally:
+        sys.stdout = saved_stdout
+    assert close_row["status"] == "invalid_lookahead"
+    assert "decision bar" in close_stdout_file.getvalue()
+    assert not os.path.isfile(os.path.join(path_dict["results_path_str"], close_row["window_id"], "close_leak", "strategy_daily_equity.csv"))
+    close_trial_pdf = pd.read_csv(os.path.join(TEMP_ROOT_STR, "close_trial_log.csv"))
+    assert len(close_trial_pdf) == 1 and close_trial_pdf["note"].iloc[0] == "invalid_lookahead"
+    assert "total_return" not in str(close_trial_pdf["metric_json"].iloc[0])
+    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
     passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
+    passed("intraday truncation (15:59 at the decision is invalid_lookahead; template passed)")
+
+# FUNCTION: TEST WHERE THE HOLDOUT GUARD MAY BE TURNED OFF
+def test_holdout_flag_scan():
+    """
+    The guard-off argument may appear only in the pipeline, four named files, and the tests.
+
+    Returns:
+        None
+    """
+    # SCAN SOURCE FILES OUTSIDE THE ALLOWED PLACES
+    allowed_file_set = {"scripts/check_spy_rename.py", "scripts/holdout_evaluate.py", "scripts/smoke_notebook.py", "so/core/holdout.py"}
+    needle_str = "enforce_holdout_bool_in=False"
+    offender_list = []
+    for root_str, dir_list, file_list in os.walk(WORKSPACE_PATH_STR):
+        dir_list[:] = [dir_name for dir_name in dir_list if dir_name not in {".git", "venv-main", "__pycache__", "logs"}]
+        for file_name in file_list:
+            if not file_name.endswith((".py", ".ipynb", ".md", ".mdc")):
+                continue
+            full_str = os.path.join(root_str, file_name)
+            rel_str = os.path.relpath(full_str, WORKSPACE_PATH_STR).replace("\\", "/")
+            if rel_str.startswith("pipeline/") or rel_str.startswith("tests/") or rel_str in allowed_file_set:
+                continue
+            text = open(full_str, encoding="utf-8").read()
+            if needle_str in text:
+                offender_list.append(rel_str)
+    # FAIL WHEN THE ARGUMENT APPEARS ANYWHERE ELSE
+    assert offender_list == []
+    passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests")
 
 
 
@@ -827,6 +918,7 @@ if __name__ == "__main__":
         test_cache_guard()
         test_design_hash()
         test_evaluation()
+        test_holdout_flag_scan()
         test_walk_forward_unchanged()
         assert not os.path.isfile(REAL_WINDOWS_PATH_STR)
         print("\nAll holdout tests passed ✅")
