@@ -85,10 +85,11 @@ it was tuned until it did is a failure of this project, not a success. Negative 
 6. Git: never rewrite history, never force-push, never delete branches.
 7. Runs whose trial count would exceed the protocol's trial budget or about 1,000 trials: reduce the grid in the
    protocol before pre-registering instead.
-8. Data outside the point-in-time layer. Every dataset a strategy uses must be registered in so.core.point_in_time with an 
-   availability rule (when each value became knowable) and a revision policy, and designs read data only through the 
-   point-in-time data context. Never feed a strategy a value whose available_ts is after its decision timestamp. Labels
-   may look forward, but a model trained at time t uses only labels whose label_known_ts is before t.
+8. **Data outside the point-in-time layer.** Every dataset a strategy uses must be registered in
+   `so.core.point_in_time` with an availability rule (when each value became knowable) and a revision policy, and
+   designs read data only through the point-in-time data context (`DataContext`). Never feed a strategy a value whose
+   `available_ts` is after its decision timestamp. Labels may look forward, but a model trained at time t uses only
+   labels whose `label_known_ts` is before t.
 
 ## Parked decisions
 
