@@ -309,3 +309,163 @@ def get_success_criteria_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, ba
             "primary_success": bool(primary_bool), "comparable_return": bool(comparable_bool), "comparable_floor": comparable_floor,
             "secondary_sharpe": bool(sharpe_bool), "secondary_drawdown": bool(drawdown_bool), "secondary_success": bool(secondary_bool),
             "baselines_beaten": beaten_dict, "all_baselines_beaten": bool(all(beaten_dict.values())) if beaten_dict else None}
+
+
+"""
+Performance Over Time (Nicolas, 2026-10-11; shared by development notebooks and the holdout report)
+"""
+
+# FUNCTION: ROLLING EXCESS RETURN OF ONE WINDOW LENGTH
+def get_rolling_excess_return_arr(strategy_return_arr_in, buy_hold_return_arr_in, window_int_in):
+    """
+    Strategy total return minus buy-and-hold total return over each block of window_int_in sessions. Shorter prefixes
+    are NaN.
+
+    Args:
+        strategy_return_arr_in (np.ndarray): Strategy daily returns
+        buy_hold_return_arr_in (np.ndarray): Buy-and-hold daily returns
+        window_int_in (int): Block length in sessions
+
+    Returns:
+        np.ndarray: One excess return per session
+    """
+    # EMPTY UNTIL A FULL BLOCK EXISTS
+    excess_arr = np.full(len(strategy_return_arr_in), np.nan)
+    window_int = int(window_int_in)
+    for end_idx in range(window_int - 1, len(strategy_return_arr_in)):
+        start_idx = end_idx - window_int + 1
+        strategy_total = float(np.prod(1.0 + strategy_return_arr_in[start_idx:end_idx + 1]) - 1.0)
+        buy_hold_total = float(np.prod(1.0 + buy_hold_return_arr_in[start_idx:end_idx + 1]) - 1.0)
+        excess_arr[end_idx] = strategy_total - buy_hold_total
+    return excess_arr
+
+# FUNCTION: CUMULATIVE LOG EXCESS, ROLLING EXCESS AND DRAWDOWNS
+def get_performance_over_time_pdf(strategy_daily_return_pdf_in, buy_hold_daily_return_pdf_in):
+    """
+    One row per session: the cumulative log excess (sum of log strategy return minus log buy-and-hold return), the
+    rolling 63-session and 252-session excess return, and the drawdown of each equity curve. The quarter table is
+    get_performance_quarter_pdf.
+
+    Args:
+        strategy_daily_return_pdf_in (pd.DataFrame): date, daily_return
+        buy_hold_daily_return_pdf_in (pd.DataFrame): date, daily_return, same dates
+
+    Returns:
+        pd.DataFrame: One row per session
+    """
+    # ALIGN THE TWO SERIES ON THE DATE
+    merged_pdf = strategy_daily_return_pdf_in.merge(buy_hold_daily_return_pdf_in, on="date", suffixes=("_strategy", "_buy_hold"))
+    if len(merged_pdf) != len(strategy_daily_return_pdf_in) or len(merged_pdf) != len(buy_hold_daily_return_pdf_in):
+        raise ValueError("strategy and buy-and-hold dates differ.")
+    merged_pdf = merged_pdf.sort_values("date").reset_index(drop=True)
+    strategy_arr = merged_pdf["daily_return_strategy"].to_numpy(dtype=float)
+    buy_hold_arr = merged_pdf["daily_return_buy_hold"].to_numpy(dtype=float)
+    # CUMULATIVE LOG EXCESS AND THE TWO EQUITY CURVES
+    log_excess_arr = np.cumsum(np.log1p(strategy_arr) - np.log1p(buy_hold_arr))
+    strategy_equity_arr = np.cumprod(1.0 + strategy_arr)
+    buy_hold_equity_arr = np.cumprod(1.0 + buy_hold_arr)
+    # RETURN THE SESSION TABLE
+    return pd.DataFrame({
+        "date": merged_pdf["date"].to_numpy(),
+        "strategy_daily_return": strategy_arr,
+        "buy_hold_daily_return": buy_hold_arr,
+        "cumulative_log_excess": log_excess_arr,
+        "rolling_63_excess_return": get_rolling_excess_return_arr(strategy_arr, buy_hold_arr, 63),
+        "rolling_252_excess_return": get_rolling_excess_return_arr(strategy_arr, buy_hold_arr, 252),
+        "strategy_drawdown": strategy_equity_arr / np.maximum.accumulate(strategy_equity_arr) - 1.0,
+        "buy_hold_drawdown": buy_hold_equity_arr / np.maximum.accumulate(buy_hold_equity_arr) - 1.0,
+    })
+
+# FUNCTION: THE SAME PATH SUMMED BY CALENDAR QUARTER
+def get_performance_quarter_pdf(strategy_daily_return_pdf_in, buy_hold_daily_return_pdf_in):
+    """
+    One row per calendar quarter: strategy return, buy-and-hold return, their difference, and the cumulative log
+    excess at the quarter's last session.
+
+    Args:
+        strategy_daily_return_pdf_in (pd.DataFrame): date, daily_return
+        buy_hold_daily_return_pdf_in (pd.DataFrame): date, daily_return
+
+    Returns:
+        pd.DataFrame: One row per quarter
+    """
+    # THE SESSION PATH, THEN THE QUARTER OF EACH DATE
+    session_pdf = get_performance_over_time_pdf(strategy_daily_return_pdf_in, buy_hold_daily_return_pdf_in)
+    session_pdf["quarter"] = pd.to_datetime(session_pdf["date"]).dt.to_period("Q").astype(str)
+    row_dict_list = []
+    for quarter_str, group_pdf in session_pdf.groupby("quarter", sort=True):
+        strategy_return = float(np.prod(1.0 + group_pdf["strategy_daily_return"].to_numpy(dtype=float)) - 1.0)
+        buy_hold_return = float(np.prod(1.0 + group_pdf["buy_hold_daily_return"].to_numpy(dtype=float)) - 1.0)
+        row_dict_list.append({"quarter": quarter_str, "strategy_return": strategy_return, "buy_hold_return": buy_hold_return,
+                              "excess_return": strategy_return - buy_hold_return,
+                              "cumulative_log_excess": float(group_pdf["cumulative_log_excess"].iloc[-1])})
+    return pd.DataFrame(row_dict_list)
+
+# FUNCTION: TURNOVER, TRADES AND CANDIDATE SWITCHES
+def get_turnover_switch_dict(weight_arr_in, trade_count_int_in, candidate_list_in):
+    """
+    Turnover per year is the sum of absolute weight changes, scaled by 252 / session count. A candidate switch is a
+    change between two consecutive entries of candidate_list_in (one entry per session). The time share is the fraction
+    of those entries each candidate occupies.
+
+    Args:
+        weight_arr_in (array-like): Weight at each session
+        trade_count_int_in (int): Number of trades
+        candidate_list_in (list): Candidate in force at each session
+
+    Returns:
+        dict: turnover_per_year, trade_count, candidate_switch_count, candidate_switches_per_year, candidate_time_share_dict
+    """
+    # THE WEIGHT CHANGES THAT ARE FINITE
+    weight_arr = np.asarray(weight_arr_in, dtype=float)
+    session_count = int(len(weight_arr))
+    change_arr = np.diff(weight_arr) if session_count > 1 else np.array([])
+    finite_change_arr = change_arr[np.isfinite(change_arr)] if len(change_arr) else change_arr
+    turnover_sum = float(np.abs(finite_change_arr).sum()) if len(finite_change_arr) else 0.0
+    year_scale = config.TRADING_DAYS_PER_YEAR / session_count if session_count else np.nan
+    # SWITCHES ALONG THE CANDIDATE SEQUENCE
+    candidate_list = list(candidate_list_in)
+    switch_count = int(sum(candidate_list[idx] != candidate_list[idx - 1] for idx in range(1, len(candidate_list))))
+    share_dict = {}
+    for candidate in candidate_list:
+        share_dict[candidate] = share_dict.get(candidate, 0) + 1
+    if candidate_list:
+        share_dict = {candidate: count / len(candidate_list) for candidate, count in share_dict.items()}
+    # RETURN THE COUNTS
+    return {"turnover_per_year": turnover_sum * year_scale if session_count else np.nan, "trade_count": int(trade_count_int_in),
+            "candidate_switch_count": switch_count,
+            "candidate_switches_per_year": switch_count * year_scale if session_count else np.nan,
+            "candidate_time_share_dict": share_dict}
+
+# FUNCTION: ROWS USED, SHARE PURGED, AND HOW FAR PREDICTIONS MOVED
+def get_refit_report_dict(refit_log_pdf_in, prediction_pdf_in=None):
+    """
+    Average rows used, the average share of window rows purged for an unfinished label, and the average absolute move
+    in the prediction between consecutive refits. prediction_move on the refit log is that move on the refit session's
+    own features. When the column is absent, the move is the jump in prediction_pdf at each model change.
+
+    Args:
+        refit_log_pdf_in (pd.DataFrame): Refit log (rows_used, rows_purged, and optionally prediction_move)
+        prediction_pdf_in (pd.DataFrame | None): session, prediction, model_id
+
+    Returns:
+        dict: mean_rows_used, mean_share_purged, mean_prediction_move
+    """
+    # AN EMPTY LOG HAS NOTHING TO AVERAGE
+    if refit_log_pdf_in is None or len(refit_log_pdf_in) == 0:
+        return {"mean_rows_used": np.nan, "mean_share_purged": np.nan, "mean_prediction_move": np.nan}
+    used_arr = refit_log_pdf_in["rows_used"].to_numpy(dtype=float)
+    purged_arr = refit_log_pdf_in["rows_purged"].to_numpy(dtype=float)
+    denom_arr = used_arr + purged_arr
+    share_arr = np.divide(purged_arr, denom_arr, out=np.full(len(denom_arr), np.nan), where=denom_arr > 0)
+    # THE MOVE COLUMN WINS; OTHERWISE THE JUMP IN THE PREDICTION SERIES
+    if "prediction_move" in refit_log_pdf_in.columns and np.isfinite(refit_log_pdf_in["prediction_move"].to_numpy(dtype=float)).any():
+        move_float = float(np.nanmean(refit_log_pdf_in["prediction_move"].to_numpy(dtype=float)))
+    elif prediction_pdf_in is not None and len(prediction_pdf_in) > 1 and "model_id" in prediction_pdf_in.columns:
+        prediction_arr = prediction_pdf_in["prediction"].to_numpy(dtype=float)
+        model_arr = prediction_pdf_in["model_id"].to_numpy()
+        jump_list = [abs(float(prediction_arr[idx] - prediction_arr[idx - 1])) for idx in range(1, len(model_arr)) if model_arr[idx] != model_arr[idx - 1]]
+        move_float = float(np.mean(jump_list)) if jump_list else np.nan
+    else:
+        move_float = np.nan
+    return {"mean_rows_used": float(np.mean(used_arr)), "mean_share_purged": float(np.nanmean(share_arr)), "mean_prediction_move": move_float}
