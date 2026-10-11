@@ -15,6 +15,18 @@ statistical support (`so/core/evaluation.py`). State the minimum detectable effe
 Instrument, period, adjustments, cleaning, which pipeline steps are used, any new data source (with its timing: when is a
 value known relative to the 15:58 decision?).
 
+## 3.1 Data sources
+Mandatory. Every source the design reads, and only registered sources (`so.core.point_in_time`, `docs/DATA_SOURCES.md`).
+One row per source: registry name, timestamp convention, availability rule, revision policy, role (feature or label).
+A source that is not in this table is not used. When the evidence for a clock is unclear, the later time is the one written here.
+
+| Source | Convention | Availability | Revision | Role |
+|---|---|---|---|---|
+| `SPY_1MIN` | bar start | label + 1 minute | not revised (stored IBKR bars) | feature |
+| `VIX_DAILY` | midnight date label | that date at 16:15 America/New_York | not revised (stored print) | feature |
+
+The VIX feature in the template is `vix_level_prev`: the daily close of the previous session, read through `DataContext.get` as of the decision. The same session's 16:15 close is not used.
+
 ## 4. Rules / target / features / model
 Exactly as implemented (file and function names). For every feature: what it uses up to the decision bar.
 

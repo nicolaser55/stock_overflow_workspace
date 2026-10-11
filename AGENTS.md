@@ -25,6 +25,9 @@ to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine 
   `docs/RESULTS_LOG.md` the same day.
 - exp01 to exp08, exp12 and exp13 are **archived** (exp09-exp11 skipped). The VIX line is closed (exp13: E1M1 IS NOT
   ROBUST). Their results stay as history, pinned to the old untouched window 2026-05-14.
+- Every series a strategy reads is registered in `so.core.point_in_time` and read through `DataContext`
+  (`docs/DATA_SOURCES.md`). A value may be used at a decision only when its `available_ts` is at or before that decision.
+  Labels may look forward; a model trained at time t uses only rows whose `label_known_ts` is before t.
 - The evaluation design is the rolling 12-month holdout (`so.core.holdout`, `records/holdout_windows.csv`). Rule 1 of
   `research-integrity.mdc`: never read the registered window for exploration, validation or any decision; never set
   `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`; never run
