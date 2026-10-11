@@ -27,6 +27,8 @@ A source that is not in this table is not used. When the evidence for a clock is
 
 The VIX feature in the template is `vix_level_prev`: the daily close of the previous session, read through `DataContext.get` as of the decision. The same session's 16:15 close is not used.
 
+A development replay loads this list with `get_development_data_context` (through the development end). The evaluation script loads the same names with `load_source_frame_dict` through the window end. A design that omits `DATA_SOURCE_LIST` is treated as `["SPY_1MIN"]`.
+
 ## 4. Rules / target / features / model
 Exactly as implemented (file and function names). For every feature: what it uses up to the decision bar.
 

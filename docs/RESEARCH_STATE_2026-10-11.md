@@ -116,7 +116,7 @@ the active holdout start.*
   oracle), trend rule, buy-and-hold.
 - `experiments/exp03_ath_exit/rules.py`: exit-signal + buy-back simulation on top of it, random exit / random buy-back.
 - `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation of the frozen prior-only path, with a truncation test and ledger status `valid` / `invalid_lookahead`). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments). Pipeline notebooks turn the holdout guard off because they prepare data and compute no strategy result. Work-zone and gold-zone cache reads are guarded unless that flag is set.
-- `so.core.point_in_time`: the source registry and `DataContext`. Every value has an `available_ts`. A decision may use only rows with `available_ts` at or before `decision_ts`. Labels use `label_known_ts`. How to register a source is `docs/DATA_SOURCES.md`.
+- `so.core.point_in_time`: the source registry and `DataContext`. Every value has an `available_ts`. A decision may use only rows with `available_ts` at or before `decision_ts`. Labels use `label_known_ts`. A design names its sources in `DATA_SOURCE_LIST` (missing means `["SPY_1MIN"]`). `load_source_frame_dict` loads those sources through an end date. How to register a source is `docs/DATA_SOURCES.md`.
 - `so.core.schedule`: walk-forward folds; `so.core.evaluation`: pooled selection, prior-only path, MDE, baseline
   summaries, chained daily returns, monthly bootstrap, success criteria; `so.core.trial_log`: the shared trial log.
 - `so.features.daily_features`: 16 daily features at the 15:58 decision bar (returns 1-250d, MA50/MA200 distance,
@@ -383,6 +383,15 @@ of the horizon. TSDAY forward-return columns are not served on the feature path.
 No experiment was run, no holdout window was opened, and no trial-log row was added. Archived experiments exp01–exp13
 are unchanged. Existing loaders return the same frames when the runner flag is off.
 
+*Audit 2026-10-12 (Nicolas), of `d2788a7`:* `scripts/holdout_evaluate.py` loaded only SPY, so a real evaluation of a
+design that reads VIX or a cache would have failed before any decision. Designs now declare `DATA_SOURCE_LIST`
+(registry names; a design without it is `["SPY_1MIN"]`). `load_source_frame_dict` loads each declared source through
+its registry loader, keeps rows through the end date (the window end in the evaluation script, the development end
+in the template's `get_development_data_context`), and stamps `available_ts` / `label_known_ts`. The runner refuses
+an unregistered declaration before any replay and writes no ledger row. If the access log contains a source that is
+not in `DATA_SOURCE_LIST`, the evaluation is `invalid_undeclared` (no daily paths). No experiment was run, no holdout
+window was opened, and no trial-log row was added.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -438,3 +447,4 @@ are unchanged. Existing loaders return the same frames when the runner flag is o
 | 2026-10-11 | agent | T1–T3 on `agent/holdout-split`: intraday truncation at the decision bar, scan of where the holdout guard may be turned off, trial-log row on invalid_lookahead. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
 | 2026-10-11 | agent | Audit of `a64c1a9`: the decision-bar truncation moved the decision from 15:58 to 15:57. Replaced by a perturbation of every bar after the decision bar. The whole-session truncation is unchanged. Synthetic tests only. No window, no evaluation, no shared trial-log row | Nicolas merges `agent/holdout-split` into `main`, then the rolling-retrain task is re-issued |
 | 2026-10-11 | agent | Point-in-time data on `agent/point-in-time` from `main` `df67c25` (the perturbation check is on main). Registry and `DataContext` for SPY, VIX, VIX3M and the pipeline caches; the runner cuts and perturbs every feature source; labels use `label_known_ts`. Synthetic tests only. No window, no evaluation, no trial-log row. Rolling retraining, still unbuilt, will use these clocks | Rolling-retrain module, using `available_ts` and `label_known_ts` |
+| 2026-10-12 | agent | Audit of `d2788a7`: the evaluation script loads each design's `DATA_SOURCE_LIST` through the window end (`load_source_frame_dict`). An unregistered declaration is refused before any replay. A read outside the list is `invalid_undeclared`. Synthetic tests only. No window, no evaluation, no trial-log row | Rolling-retrain module, using `available_ts` and `label_known_ts` |

@@ -207,7 +207,7 @@ def test_unregistered():
     passed("unregistered source raises")
 
 # FUNCTION: BUILD A ONE-CANDIDATE DESIGN MODULE
-def get_design_module(name_str_in, candidate_func_in, path_func_in):
+def get_design_module(name_str_in, candidate_func_in, path_func_in, source_name_list_in=None):
     """
     A design module the runner can hash and call.
 
@@ -215,6 +215,7 @@ def get_design_module(name_str_in, candidate_func_in, path_func_in):
         name_str_in (str): Experiment name
         candidate_func_in (callable): run_candidate_replay_dict
         path_func_in (callable): run_prior_only_path_dict
+        source_name_list_in (list | None): DATA_SOURCE_LIST (None = the attribute is absent)
 
     Returns:
         module: Design
@@ -229,6 +230,8 @@ def get_design_module(name_str_in, candidate_func_in, path_func_in):
     design_module.run_candidate_replay_dict = candidate_func_in
     design_module.run_prior_only_path_dict = path_func_in
     design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
+    if source_name_list_in is not None:
+        design_module.DATA_SOURCE_LIST = list(source_name_list_in)
     return design_module
 
 # FUNCTION: A FLAT PATH WHOSE TARGET IS WHATEVER THE CALLER COMPUTED
@@ -403,7 +406,7 @@ def test_runner():
         close_dict = {pd.Timestamp(day).date(): float(close) for day, close in zip(known_pdf["date"], known_pdf["close"])}
         target_arr = np.array([close_dict.get(session_date, 0.0) for session_date in session_date_list])
         return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, target_arr)
-    leak_module = get_design_module("exp_pit_vix_leak", run_dummy_candidate_replay_dict, run_same_day_path_dict)
+    leak_module = get_design_module("exp_pit_vix_leak", run_dummy_candidate_replay_dict, run_same_day_path_dict, ["SPY_1MIN", "VIX_DAILY"])
     leak_row = run_one_evaluation(leak_module, "vix_leak", world_dict, {"VIX_DAILY": vix_pdf})
     assert leak_row["status"] == "invalid_lookahead"
     # THE PERTURBATION CHECK, ON ITS OWN, ALSO CHANGES THAT CLOSE
@@ -433,7 +436,7 @@ def test_runner():
             prior_idx_list = [idx for idx, vix_date in enumerate(vix_date_list) if vix_date < session_date]
             target_arr[session_idx] = float(vix_close_arr[prior_idx_list[-1]]) if prior_idx_list else 0.0
         return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, target_arr)
-    prev_module = get_design_module("exp_pit_vix_prev", run_dummy_candidate_replay_dict, run_prev_path_dict)
+    prev_module = get_design_module("exp_pit_vix_prev", run_dummy_candidate_replay_dict, run_prev_path_dict, ["SPY_1MIN", "VIX_DAILY"])
     prev_row = run_one_evaluation(prev_module, "vix_prev", world_dict, {"VIX_DAILY": vix_pdf})
     assert prev_row["status"] == "valid"
     passed("VIX leak (same-day close invalid_lookahead; perturbation differs; vix_level_prev valid)")
@@ -446,7 +449,7 @@ def test_runner():
         value_dict = {pd.Timestamp(label): float(value) for label, value in zip(known_pdf["timestamp"], known_pdf["value"])}
         target_arr = np.array([value_dict.get(pd.Timestamp(ohlcv_array_dict_in["timestamp_index"][int(fill_idx)]), 0.0) for fill_idx in fill_idx_arr])
         return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, target_arr)
-    cache_module = get_design_module("exp_pit_cache", run_dummy_candidate_replay_dict, run_cache_path_dict)
+    cache_module = get_design_module("exp_pit_cache", run_dummy_candidate_replay_dict, run_cache_path_dict, ["SPY_1MIN", "TSCTX"])
     cache_row = run_one_evaluation(cache_module, "cache", world_dict, {"TSCTX": cache_pdf})
     assert cache_row["status"] == "invalid_lookahead"
     passed("cache leak (TSCTX row after the decision is invalid_lookahead)")
@@ -458,7 +461,7 @@ def test_runner():
         data_context_in.get("VIX_DAILY", decision_ts)
         data_context_in.set_decision_ts(None)
         return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, np.ones(len(ohlcv_array_dict_in["session_date_list"])))
-    logged_module = get_design_module("exp_pit_log", run_dummy_candidate_replay_dict, run_logged_path_dict)
+    logged_module = get_design_module("exp_pit_log", run_dummy_candidate_replay_dict, run_logged_path_dict, ["SPY_1MIN", "VIX_DAILY"])
     logged_row = run_one_evaluation(logged_module, "log", world_dict, {"VIX_DAILY": vix_pdf})
     assert logged_row["status"] == "valid"
     assert logged_row["sources_read"] == "SPY_1MIN,VIX_DAILY"
@@ -488,6 +491,195 @@ def test_vix_regression():
     assert float(loaded_pdf["close"].iloc[0]) == 17.25 and float(again_pdf["close"].iloc[0]) == 17.25
     passed("VIX regression (previous close and the loaded close match the file)")
 
+# FUNCTION: WRITE ONE RAW SPY FILE, INCLUDING A BAR AFTER THE WINDOW
+def write_spy_file_with_forward_bar(ohlcv_pdf_in, forward_date_in):
+    """
+    Writes the synthetic bars plus one bar on forward_date_in into the temporary raw folder.
+
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic minute bars
+        forward_date_in (datetime.date): A session after the window end
+
+    Returns:
+        None
+    """
+    # ONE BAR ON THE FORWARD DATE, THEN UTC STRINGS THE RAW LOADER PARSES
+    forward_ts = pd.Timestamp(year=forward_date_in.year, month=forward_date_in.month, day=forward_date_in.day, hour=14, minute=30, tz="UTC")
+    extra_pdf = pd.DataFrame({"timestamp": [forward_ts], "open": [100.0], "high": [101.0], "low": [99.0], "close": [100.0], "volume": [1000], "date": [forward_date_in]})
+    full_pdf = pd.concat([ohlcv_pdf_in, extra_pdf], ignore_index=True)
+    raw_pdf = pd.DataFrame({"timestamp": pd.to_datetime(full_pdf["timestamp"], utc=True).dt.strftime("%Y-%m-%d %H:%M:%S+00:00"),
+                            "open": full_pdf["open"], "high": full_pdf["high"], "low": full_pdf["low"], "close": full_pdf["close"], "volume": full_pdf["volume"]})
+    os.makedirs(paths.LOCAL_OHLCV_DATA_FILE_PATH_STR, exist_ok=True)
+    raw_pdf.to_csv(paths.LOCAL_OHLCV_DATA_FILE_PATH_STR + "ohlcv_data_synthetic.csv", index=False)
+
+# FUNCTION: WRITE VIX DAILY YEAR FILES, INCLUDING A CLOSE AFTER THE WINDOW
+def write_vix_files_with_forward_row(session_date_list_in, forward_date_in):
+    """
+    One daily row per session (close 10 + index) and one row on forward_date_in with close 999, in the year files.
+
+    Args:
+        session_date_list_in (list): Session dates inside the series used to open the window
+        forward_date_in (datetime.date): A date after the window end
+
+    Returns:
+        None
+    """
+    # MIDNIGHT NEW YORK, STORED AS UTC, WHICH IS WHAT THE DAILY LOADER REQUIRES
+    row_list = []
+    for session_idx, session_date in enumerate(list(session_date_list_in) + [forward_date_in]):
+        stamp_ts = pd.Timestamp(session_date).tz_localize(NY).tz_convert("UTC")
+        close_float = 999.0 if session_date == forward_date_in else float(session_idx) + 10.0
+        row_list.append({"timestamp": stamp_ts.strftime("%Y-%m-%d %H:%M:%S+00:00"), "open": close_float, "high": close_float + 1.0,
+                         "low": close_float - 1.0, "close": close_float, "volume": 0,
+                         "created_ts": stamp_ts.strftime("%Y-%m-%d %H:%M:%S+00:00"), "date": str(session_date)})
+    raw_pdf = pd.DataFrame(row_list)
+    os.makedirs(paths.LOCAL_VIX_DAILY_DATA_FILE_PATH_STR, exist_ok=True)
+    for year_str, year_pdf in raw_pdf.groupby(raw_pdf["date"].str.slice(0, 4)):
+        year_pdf.to_csv(paths.LOCAL_VIX_DAILY_DATA_FILE_PATH_STR + f"ohlcv_data_{year_str}.csv", index=False)
+
+# FUNCTION: LOAD THE EVALUATION SCRIPT WITHOUT RUNNING IT
+def get_evaluate_script_module():
+    """
+    Imports scripts/holdout_evaluate.py so the test can call its loaders. The script's __main__ is not executed.
+
+    Returns:
+        module: The evaluation script
+    """
+    # LOAD BY PATH (scripts/ IS NOT A PACKAGE)
+    import importlib.util
+    script_path_str = os.path.join(WORKSPACE_PATH_STR, "scripts", "holdout_evaluate.py")
+    script_spec = importlib.util.spec_from_file_location("holdout_evaluate_e2e", script_path_str)
+    script_module = importlib.util.module_from_spec(script_spec)
+    script_spec.loader.exec_module(script_module)
+    return script_module
+
+# FUNCTION: TEST DECLARED SOURCES ON A SYNTHETIC EVALUATION
+def test_declared_load():
+    """
+    Fake SPY and VIX files, a temporary window, a token and injected git. vix_level_prev is valid. The same-session
+    close is invalid_lookahead. An undeclared read is invalid_undeclared. An unregistered declaration raises and
+    writes no ledger row. A row after the window end never reaches the loaded frame or the context.
+
+    Returns:
+        None
+    """
+    # A SEPARATE REGISTRY SO THE EARLIER RUNNER WINDOW STAYS WHERE IT IS
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    registry_path_str = os.path.join(TEMP_ROOT_STR, "e2e_windows.csv")
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = registry_path_str
+    try:
+        # BARS THROUGH MID-2025, THEN THE WINDOW THEY IMPLY (THE FORWARD BAR IS NOT PART OF THIS CALENDAR)
+        ohlcv_pdf = get_synthetic_ohlcv_pdf("2022-01-03", "2025-06-30", minute_vol_in=0.0004, seed_in=12)
+        session_date_list = sorted({pd.Timestamp(session_date).date() for session_date in ohlcv_pdf["date"]})
+        proposed_dict = compute_holdout_window_dict(session_date_list)
+        open_holdout_window_dict(session_date_list, f"OPEN {proposed_dict['start']} {proposed_dict['end']}", file_path_str_in=registry_path_str)
+        from so.core.holdout import get_active_holdout_window_dict, get_date, get_runner_active_bool
+        end_date = get_date(get_active_holdout_window_dict()["end"])
+        forward_date = (pd.Timestamp(end_date) + pd.Timedelta(days=14)).date()
+        assert forward_date > end_date and forward_date.year == end_date.year
+        # WRITE THE FILES, INCLUDING THE FORWARD SPY BAR AND THE FORWARD VIX CLOSE OF 999
+        write_spy_file_with_forward_bar(ohlcv_pdf, forward_date)
+        write_vix_files_with_forward_row(session_date_list, forward_date)
+        token_path_str = os.path.join(tempfile.mkdtemp(prefix="so_pit_e2e_token_"), "token.txt")
+        with open(token_path_str, "w", encoding="utf-8") as token_file:
+            token_file.write("holdout-token\n")
+        os.environ["SO_HOLDOUT_PATH"] = tempfile.mkdtemp(prefix="so_pit_e2e_results_")
+        os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+        git_dict = {"clean_bool": True, "on_main_bool": True, "preregister_bool": True, "commit_str": "abc123",
+                    "design_tree_str": "e2e-design-tree", "so_tree_str": "e2e-so-tree"}
+        # THE PREVIOUS SESSION'S CLOSE, READ THROUGH THE CONTEXT
+        def run_prev_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in=None):
+            session_dates = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+            decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][-1])
+            decision_ts = get_decision_ts(ohlcv_array_dict_in["timestamp_index"][decision_idx])
+            data_context_in.set_decision_ts(decision_ts)
+            known_pdf = data_context_in.get("VIX_DAILY", decision_ts)
+            data_context_in.set_decision_ts(None)
+            vix_date_list = [pd.Timestamp(day).date() for day in known_pdf["date"]]
+            vix_close_arr = known_pdf["close"].to_numpy(dtype=float)
+            target_arr = np.zeros(len(session_dates))
+            for session_idx, session_date in enumerate(session_dates):
+                prior_idx_list = [idx for idx, vix_date in enumerate(vix_date_list) if vix_date < session_date]
+                target_arr[session_idx] = float(vix_close_arr[prior_idx_list[-1]]) if prior_idx_list else 0.0
+            return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, target_arr)
+        # THE SAME SESSION'S CLOSE, TAKEN AT 20:00
+        def run_same_day_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in=None):
+            session_dates = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+            last_date = session_dates[-1]
+            as_of_ts = pd.Timestamp(year=last_date.year, month=last_date.month, day=last_date.day, hour=20, tz=NY)
+            known_pdf = data_context_in.get("VIX_DAILY", as_of_ts)
+            close_dict = {pd.Timestamp(day).date(): float(close) for day, close in zip(known_pdf["date"], known_pdf["close"])}
+            target_arr = np.array([close_dict.get(session_date, 0.0) for session_date in session_dates])
+            return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, target_arr)
+        # A READ OF VIX BY A DESIGN THAT DECLARED ONLY SPY
+        def run_undeclared_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in=None):
+            decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][0])
+            decision_ts = get_decision_ts(ohlcv_array_dict_in["timestamp_index"][decision_idx])
+            data_context_in.get("VIX_DAILY", decision_ts)
+            return get_flat_path_dict(ohlcv_array_dict_in, period_pdf_in, np.ones(len(ohlcv_array_dict_in["session_date_list"])))
+        prev_module = get_design_module("exp_pit_e2e_prev", run_dummy_candidate_replay_dict, run_prev_path_dict, ["SPY_1MIN", "VIX_DAILY"])
+        leak_module = get_design_module("exp_pit_e2e_leak", run_dummy_candidate_replay_dict, run_same_day_path_dict, ["SPY_1MIN", "VIX_DAILY"])
+        undeclared_module = get_design_module("exp_pit_e2e_undeclared", run_dummy_candidate_replay_dict, run_undeclared_path_dict, ["SPY_1MIN"])
+        bad_module = get_design_module("exp_pit_e2e_bad", run_dummy_candidate_replay_dict, run_undeclared_path_dict, ["NOT_A_SOURCE"])
+        # THE SCRIPT LOADS THE DECLARED SOURCES; ITS __main__ IS NOT RUN
+        evaluate_module = get_evaluate_script_module()
+        frame_dict = evaluate_module.get_evaluation_frame_dict(prev_module)
+        ohlcv_array_dict = get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
+        assert get_runner_active_bool() is False
+        # THE FORWARD VIX CLOSE AND THE FORWARD SPY BAR ARE NOT IN THE FRAMES
+        vix_date_list = [pd.Timestamp(day).date() for day in frame_dict["VIX_DAILY"]["date"]]
+        spy_date_list = [pd.Timestamp(day).date() for day in ohlcv_array_dict["session_date_list"]]
+        assert forward_date not in vix_date_list and forward_date not in spy_date_list
+        assert 999.0 not in set(frame_dict["VIX_DAILY"]["close"].astype(float))
+        assert max(vix_date_list) <= end_date and max(spy_date_list) <= end_date
+        # THE SAME ABSENCE INSIDE A CONTEXT BUILT FROM THOSE FRAMES
+        from so.core.point_in_time import get_runner_context, get_minute_bar_available_ts
+        limit_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][-1])
+        context = get_runner_context(ohlcv_array_dict, {"VIX_DAILY": frame_dict["VIX_DAILY"]}, limit_ts, ["SPY_1MIN", "VIX_DAILY"])
+        visible_pdf = context.get("VIX_DAILY", pd.Timestamp("2099-01-01", tz=NY))
+        visible_date_list = [pd.Timestamp(day).date() for day in visible_pdf["date"]]
+        assert forward_date not in visible_date_list and 999.0 not in set(visible_pdf["close"].astype(float))
+        passed("forward data after the window end never reaches the context")
+        # AN UNREGISTERED NAME RAISES BEFORE THE REPLAY AND WRITES NO LEDGER ROW
+        bad_ledger_str = os.path.join(TEMP_ROOT_STR, "e2e_bad_ledger.csv")
+        try:
+            run_holdout_evaluation(bad_module, "e2e_bad", ohlcv_array_dict, token_path_str, git_dict,
+                                   ledger_path_str_in=bad_ledger_str, trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_bad_trials.csv"),
+                                   source_frame_dict_in={"VIX_DAILY": frame_dict["VIX_DAILY"]})
+            raise AssertionError("an unregistered source was accepted")
+        except ValueError as error:
+            assert "Unregistered" in str(error)
+        assert not os.path.isfile(bad_ledger_str)
+        passed("unregistered DATA_SOURCE_LIST refused (no ledger row)")
+        # A DESIGN THAT READS VIX WITHOUT DECLARING IT IS NOT VALID AND WRITES NO PATH
+        undeclared_row = run_holdout_evaluation(undeclared_module, "e2e_undeclared", ohlcv_array_dict, token_path_str, git_dict,
+                                                ledger_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_undeclared_ledger.csv"),
+                                                trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_undeclared_trials.csv"),
+                                                source_frame_dict_in={"VIX_DAILY": frame_dict["VIX_DAILY"]})
+        assert undeclared_row["status"] == "invalid_undeclared"
+        assert "VIX_DAILY" in undeclared_row["sources_read"]
+        equity_path_str = os.path.join(os.environ["SO_HOLDOUT_PATH"], undeclared_row["window_id"], "e2e_undeclared", "strategy_daily_equity.csv")
+        assert not os.path.isfile(equity_path_str)
+        passed("undeclared source refused (invalid_undeclared, no daily path)")
+        # THE SAME-SESSION CLOSE, LOADED FROM THE FILE, IS A LEAK
+        leak_row = run_holdout_evaluation(leak_module, "e2e_leak", ohlcv_array_dict, token_path_str, git_dict,
+                                          ledger_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_leak_ledger.csv"),
+                                          trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_leak_trials.csv"),
+                                          source_frame_dict_in={"SPY_1MIN": frame_dict["SPY_1MIN"], "VIX_DAILY": frame_dict["VIX_DAILY"]})
+        assert leak_row["status"] == "invalid_lookahead"
+        passed("same-session VIX close is invalid_lookahead")
+        # THE PREVIOUS CLOSE, LOADED FROM THE FILE, IS VALID
+        prev_row = run_holdout_evaluation(prev_module, "e2e_prev", ohlcv_array_dict, token_path_str, git_dict,
+                                          ledger_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_prev_ledger.csv"),
+                                          trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "e2e_prev_trials.csv"),
+                                          source_frame_dict_in={"SPY_1MIN": frame_dict["SPY_1MIN"], "VIX_DAILY": frame_dict["VIX_DAILY"]})
+        assert prev_row["status"] == "valid"
+        assert "VIX_DAILY" in prev_row["sources_read"]
+        passed("vix_level_prev loaded through the evaluation script is valid")
+    finally:
+        # PUT THE EARLIER REGISTRY BACK
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY FOLDERS
@@ -499,6 +691,7 @@ if __name__ == "__main__":
         test_unregistered()
         test_vix_regression()
         test_runner()
+        test_declared_load()
         assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_SIZE_INT
         assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
         if REAL_WINDOWS_EXISTS_BOOL:

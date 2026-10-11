@@ -200,3 +200,23 @@ def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
     target_arr = np.full(len(ohlcv_array_dict_in["session_date_list"]), weight_float)
     simulation_dict = simulate_fractional_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, target_arr, 0.0, weight_float)
     return {"constant_exposure": simulation_dict["metric_dict"]["total_return"]}
+
+# FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
+def get_development_data_context(session_date_list_in):
+    """
+    Loads DATA_SOURCE_LIST through the development end (embargo sessions before the active window start) and returns
+    a development DataContext. The holdout evaluation script loads the same list through the window end instead
+    (so.core.point_in_time.load_source_frame_dict). The runner does not call this function; it passes its own context.
+
+    Args:
+        session_date_list_in (list): Session dates that include the window start
+
+    Returns:
+        DataContext: Development context
+    """
+    # THE DEVELOPMENT END IS BEFORE THE WINDOW; THE EVALUATION SCRIPT USES THE WINDOW END
+    from so.core.holdout import get_development_end_date
+    from so.core.point_in_time import DataContext, load_source_frame_dict
+    end_date = get_development_end_date(int(PERIOD_RULE["embargo_sessions"]), session_date_list_in)
+    frame_dict = load_source_frame_dict(list(DATA_SOURCE_LIST), end_date)
+    return DataContext("development", frame_dict_in=frame_dict, declared_name_list_in=list(DATA_SOURCE_LIST))

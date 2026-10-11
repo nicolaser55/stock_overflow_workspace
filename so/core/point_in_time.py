@@ -636,7 +636,7 @@ class DataContext:
     """
 
     # FUNCTION: STORE THE FRAMES THE RUNNER ALREADY LOADED
-    def __init__(self, mode_str_in, as_of_limit_ts_in=None, perturbation_in=None, frame_dict_in=None, access_sink_list_in=None):
+    def __init__(self, mode_str_in, as_of_limit_ts_in=None, perturbation_in=None, frame_dict_in=None, access_sink_list_in=None, declared_name_list_in=None):
         """
         Args:
             mode_str_in (str): "development" or "runner"
@@ -644,6 +644,7 @@ class DataContext:
             perturbation_in (dict | None): {"decision_ts", "seed_int"} applied to feature sources on read
             frame_dict_in (dict | None): source name -> frame already loaded
             access_sink_list_in (list | None): Shared access log
+            declared_name_list_in (list | None): Sources the design named in DATA_SOURCE_LIST (None = not checked)
         """
         # KEEP THE MODE, THE LIMIT AND THE FRAMES
         self.mode_str = mode_str_in
@@ -652,6 +653,7 @@ class DataContext:
         self.frame_dict = {} if frame_dict_in is None else frame_dict_in
         self.decision_ts = None
         self.access_sink_list = [] if access_sink_list_in is None else access_sink_list_in
+        self.declared_name_list = None if declared_name_list_in is None else list(declared_name_list_in)
 
     # FUNCTION: WHETHER THE RUNNER LOADED THIS SOURCE
     def has_source_bool(self, source_name_str_in):
@@ -694,6 +696,24 @@ class DataContext:
         """
         # THE SHARED SINK
         return list(self.access_sink_list)
+
+    # FUNCTION: REFUSE A READ THE DESIGN DID NOT DECLARE
+    def _refuse_undeclared_source(self, source_name_str_in):
+        """
+        When the runner set DATA_SOURCE_LIST, a read of any other source is recorded and then refused. No row is returned.
+
+        Args:
+            source_name_str_in (str): Source name
+
+        Returns:
+            None
+        """
+        # NO LIST MEANS THE CALLER IS NOT THE RUNNER
+        if self.declared_name_list is None or source_name_str_in in self.declared_name_list:
+            return
+        # THE ACCESS LOG SHOWS THE READ, THEN THE READ STOPS
+        self._record_access(source_name_str_in)
+        raise ValueError(f"undeclared source {source_name_str_in}")
 
     # FUNCTION: RECORD ONE READ
     def _record_access(self, source_name_str_in):
@@ -748,6 +768,8 @@ class DataContext:
         as_of_ts = get_ny_timestamp(as_of_ts_in)
         if self.decision_ts is not None and as_of_ts > self.decision_ts:
             raise ValueError(f"{source_name_str_in} as_of_ts is later than the decision currently being made.")
+        # A SOURCE THE DESIGN DID NOT DECLARE IS REFUSED BEFORE ANY ROW IS RETURNED
+        self._refuse_undeclared_source(source_name_str_in)
         # STAMP, DROP ANY LABEL COLUMNS ON A FEATURE SOURCE, THEN THE OPTIONAL PERTURBATION
         stamped_pdf = get_feature_column_pdf(source_name_str_in, self._get_stamped_pdf(source_name_str_in), columns_in)
         if self.perturbation_dict is not None:
@@ -773,6 +795,8 @@ class DataContext:
         spec_dict = get_source_spec_dict(source_name_str_in)
         if spec_dict["role"] != "label":
             raise ValueError(f"{source_name_str_in} is a feature. Read it through get.")
+        # A SOURCE THE DESIGN DID NOT DECLARE IS REFUSED BEFORE ANY ROW IS RETURNED
+        self._refuse_undeclared_source(source_name_str_in)
         # STRICTLY BEFORE THE TRAINING MOMENT
         stamped_pdf = self._get_stamped_pdf(source_name_str_in)
         cutoff_ts = get_ny_timestamp(known_before_ts_in)
@@ -811,7 +835,7 @@ class DataContext:
             child_dict[source_name_str] = stamped_pdf.loc[available_series <= session_end_ts].copy()
         # SPY IS THE RUNNER'S TRUNCATED ARRAYS
         child_dict["SPY_1MIN"] = get_spy_frame_pdf(spy_array_dict_in)
-        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list)
+        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list, self.declared_name_list)
 
     # FUNCTION: A CONTEXT WHOSE LATER FEATURE VALUES ARE PERTURBED
     def get_perturbed_context(self, decision_ts_in, seed_int_in, spy_array_dict_in):
@@ -839,7 +863,7 @@ class DataContext:
                 child_dict[source_name_str] = stamped_pdf
         # SPY IS THE RUNNER'S PERTURBED ARRAYS, NOT A SECOND PERTURBATION
         child_dict["SPY_1MIN"] = get_spy_frame_pdf(spy_array_dict_in)
-        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list)
+        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list, self.declared_name_list)
 
 # FUNCTION: DROP TSDAY COLUMNS THAT LOOK FORWARD
 def get_feature_column_pdf(source_name_str_in, feature_pdf_in, columns_in):
@@ -863,7 +887,7 @@ def get_feature_column_pdf(source_name_str_in, feature_pdf_in, columns_in):
     return feature_pdf_in.drop(columns=label_column_list)
 
 # FUNCTION: BUILD THE RUNNER'S CONTEXT FROM ARRAYS AND ANY EXTRA FRAMES
-def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_limit_ts_in=None):
+def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_limit_ts_in=None, declared_name_list_in=None):
     """
     SPY_1MIN from the bar arrays, plus any other frames the caller already loaded. Nothing is read from disk here.
 
@@ -871,6 +895,7 @@ def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_lim
         ohlcv_array_dict_in (dict): SPY bar arrays
         source_frame_dict_in (dict | None): Other source name -> frame
         as_of_limit_ts_in (datetime-like | None): Window end (last bar end)
+        declared_name_list_in (list | None): DATA_SOURCE_LIST (None = not checked)
 
     Returns:
         DataContext: Runner context
@@ -881,4 +906,120 @@ def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_lim
         for source_name_str, frame_pdf in source_frame_dict_in.items():
             get_source_spec_dict(source_name_str)
             frame_dict[source_name_str] = frame_pdf
-    return DataContext("runner", as_of_limit_ts_in, None, frame_dict, [])
+    return DataContext("runner", as_of_limit_ts_in, None, frame_dict, [], declared_name_list_in)
+
+# FUNCTION: THE SOURCES A DESIGN DECLARED
+def get_declared_source_name_list(design_module_in):
+    """
+    DATA_SOURCE_LIST when the design defines it. A design without the attribute is treated as ["SPY_1MIN"].
+
+    Args:
+        design_module_in (module): Design
+
+    Returns:
+        list[str]: Registry names
+    """
+    # MISSING MEANS THE OLD SPY-ONLY CONTRACT
+    if not hasattr(design_module_in, "DATA_SOURCE_LIST"):
+        return ["SPY_1MIN"]
+    # AN EXPLICIT LIST IS KEPT, INCLUDING AN EMPTY ONE
+    return [str(source_name_str) for source_name_str in design_module_in.DATA_SOURCE_LIST]
+
+# FUNCTION: DROP ROWS DATED AFTER THE END
+def get_frame_through_end_date_pdf(frame_pdf_in, end_date_in):
+    """
+    Keeps rows whose session date is on or before end_date_in. A row with no date or timestamp is kept.
+
+    Args:
+        frame_pdf_in (pd.DataFrame): Loaded rows
+        end_date_in (datetime.date): Last date kept
+
+    Returns:
+        pd.DataFrame: Rows through the end date
+    """
+    # NOTHING TO CUT
+    if frame_pdf_in is None or len(frame_pdf_in) == 0:
+        return frame_pdf_in
+    end_date = pd.Timestamp(end_date_in).date()
+    # THE DATE COLUMN IS THE SESSION; OTHERWISE THE TIMESTAMP'S NEW YORK DATE
+    if "date" in frame_pdf_in.columns:
+        day_series = pd.to_datetime(frame_pdf_in["date"])
+    elif "timestamp" in frame_pdf_in.columns:
+        day_series = pd.to_datetime(frame_pdf_in["timestamp"])
+    else:
+        return frame_pdf_in
+    if getattr(day_series.dt, "tz", None) is not None:
+        day_series = day_series.dt.tz_convert(NY_TZ_STR)
+    return frame_pdf_in.loc[day_series.dt.date <= end_date].reset_index(drop=True)
+
+# FUNCTION: CALL ONE REGISTRY LOADER UP TO AN END DATE
+def get_registry_frame_pdf(source_name_str_in, end_date_in):
+    """
+    Reads one built-in source through its registry loader. The cutoff is end_date_in. The holdout guard stays on.
+
+    Args:
+        source_name_str_in (str): Registered source
+        end_date_in (datetime.date): Last session kept
+
+    Returns:
+        pd.DataFrame: Loader rows
+    """
+    # THE CUTOFF STRING THE LOADERS ALREADY ACCEPT
+    end_str = str(pd.Timestamp(end_date_in).date())
+    if source_name_str_in == "SPY_1MIN":
+        from so.core.raw_data import get_complete_ohlcv_pdf
+        return get_complete_ohlcv_pdf(cutoff_date_str_in=end_str, enforce_holdout_bool_in=True)
+    if source_name_str_in in ("VIX_DAILY", "VIX3M_DAILY", "VIX_1MIN", "VIX3M_1MIN"):
+        series_str = "vix3m" if source_name_str_in.startswith("VIX3M") else "vix"
+        if source_name_str_in.endswith("DAILY"):
+            from so.features.vix_features import read_vix_daily_pdf
+            return read_vix_daily_pdf(series_str, end_str, enforce_holdout_bool_in=True)
+        from so.features.vix_features import read_vix_1min_pdf
+        return read_vix_1min_pdf(series_str, end_str, enforce_holdout_bool_in=True)
+    # CACHE FOLDERS (DATE-STAMPED FILES, EXCEPT THE DAILY TABLE)
+    from so import paths
+    from so.core.local_file_management import read_csv_files_from_path, read_date_range_csv_files_from_path
+    folder_dict = {"TSIND": paths.LOCAL_TSIND_DATA_FILE_PATH_STR, "TSSEG": paths.LOCAL_TSSEG_DATA_FILE_PATH_STR,
+                   "TSCTX": paths.LOCAL_TSCTX_DATA_FILE_PATH_STR, "TSBAR": paths.LOCAL_TSBAR_DATA_FILE_PATH_STR}
+    if source_name_str_in in folder_dict:
+        return read_date_range_csv_files_from_path(folder_dict[source_name_str_in], None, end_str, enforce_holdout_bool_in=True)
+    if source_name_str_in == "TSDAY":
+        return read_csv_files_from_path(paths.LOCAL_TSDAY_DATA_FILE_PATH_STR, enforce_holdout_bool_in=True)
+    raise ValueError(f"{source_name_str_in} is registered but has no disk loader.")
+
+# FUNCTION: LOAD DECLARED SOURCES THROUGH AN END DATE
+def load_source_frame_dict(source_name_list_in, end_date_in):
+    """
+    Loads each declared source through its registry loader and stamps available_ts (and label_known_ts for a label).
+    Rows after end_date_in are dropped. end_date_in is the window end for the evaluation script and the development
+    boundary for a development replay. A load whose end is on or after the window start is a holdout load: the runner
+    flag is set for the call so the loaders allow the window and still refuse the day after it. The direct-read block
+    stays off, because this load happens before a replay starts.
+
+    Args:
+        source_name_list_in (list[str]): Registry names
+        end_date_in (datetime.date | str): Last session kept
+
+    Returns:
+        dict: source name -> stamped frame
+    """
+    # THE HOLDOUT MODULE OWNS THE RUNNER FLAG THE LOADERS ALREADY CONSULT
+    import so.core.holdout as holdout_module
+    end_date = pd.Timestamp(end_date_in).date()
+    window_dict = holdout_module.get_active_holdout_window_dict(missing_ok_bool_in=True)
+    holdout_load_bool = window_dict is not None and end_date >= holdout_module.get_date(window_dict["start"])
+    previous_bool = holdout_module._RUNNER_ACTIVE_BOOL
+    # A WINDOW-END LOAD MAY READ THE WINDOW; A DEVELOPMENT LOAD STOPS AT THE WINDOW START
+    if holdout_load_bool:
+        holdout_module._RUNNER_ACTIVE_BOOL = True
+    try:
+        frame_dict = {}
+        for source_name_str in source_name_list_in:
+            # AN UNREGISTERED NAME RAISES BEFORE ANY FILE IS USED FOR THAT NAME
+            get_source_spec_dict(source_name_str)
+            loaded_pdf = get_frame_through_end_date_pdf(get_registry_frame_pdf(source_name_str, end_date), end_date)
+            frame_dict[source_name_str] = add_available_ts_pdf(source_name_str, loaded_pdf) if len(loaded_pdf) else loaded_pdf
+        return frame_dict
+    finally:
+        # RESTORE THE FLAG THE CALLER HAD
+        holdout_module._RUNNER_ACTIVE_BOOL = previous_bool

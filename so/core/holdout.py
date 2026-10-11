@@ -48,7 +48,7 @@ EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "ev
                           "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates", "sources_read"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
-# DEFINE THE RUNNER FLAG (SET ONLY INSIDE run_holdout_evaluation)
+# DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE A WINDOW-END LOAD IS IN PROGRESS)
 _RUNNER_ACTIVE_BOOL = False
 
 """
@@ -1091,11 +1091,14 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
                            design_folder_str_in=".", ledger_path_str_in=None, trial_log_path_str_in=None, source_frame_dict_in=None):
     """
     Nicolas only. Checks the preconditions, replays the frozen prior-only path from the development start through the
-    window end, runs the truncation test, and only then writes a result. A failed truncation test writes no daily
-    paths and appends a ledger row with status "invalid_lookahead" (it counts against the window budget) plus one
-    trial-log row (stage "test", test_window_touched True, note "invalid_lookahead", no return metrics). A valid
-    run writes the holdout paths under SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends a ledger row with status
-    "valid", and appends one trial-log row (stage "test", test_window_touched True).
+    window end, runs the truncation test, and only then writes a result. A design that declares an unregistered
+    source raises before any replay and writes no ledger row. A read of a source that is not in DATA_SOURCE_LIST
+    (missing means ["SPY_1MIN"]) writes no daily paths and appends a ledger row with status "invalid_undeclared".
+    A failed truncation test writes no daily paths and appends a ledger row with status "invalid_lookahead" (it
+    counts against the window budget) plus one trial-log row (stage "test", test_window_touched True, note
+    "invalid_lookahead", no return metrics). A valid run writes the holdout paths under
+    SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends a ledger row with status "valid", and appends one trial-log
+    row (stage "test", test_window_touched True).
 
     Args:
         design_module_in (module): Design
@@ -1112,24 +1115,37 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         dict: The ledger row
     """
     # IMPORT THE POINT-IN-TIME DOOR HERE
-    from so.core.point_in_time import get_minute_bar_available_ts, get_runner_context, set_direct_read_blocked_bool
+    from so.core.point_in_time import (get_declared_source_name_list, get_minute_bar_available_ts, get_runner_context,
+                                       get_source_spec_dict, set_direct_read_blocked_bool)
     # CHECK EVERY PRECONDITION BEFORE READING THE WINDOW FOR A RESULT
     precondition_dict = check_evaluation_precondition_dict(design_module_in, design_id_str_in, token_file_path_str_in,
                                                            git_precondition_dict_in, design_folder_str_in, ledger_path_str_in)
     window_dict = precondition_dict["window_dict"]
+    # AN UNREGISTERED DECLARATION STOPS HERE: NO REPLAY, NO LEDGER ROW
+    declared_name_list = get_declared_source_name_list(design_module_in)
+    for source_name_str in declared_name_list:
+        get_source_spec_dict(source_name_str)
     # THE RUNNER LOADS FIRST, THEN HANDS EVERY SOURCE THROUGH THE CONTEXT
     limit_ts = get_minute_bar_available_ts(ohlcv_array_dict_in["timestamp_index"][-1])
-    data_context = get_runner_context(ohlcv_array_dict_in, source_frame_dict_in, limit_ts)
+    data_context = get_runner_context(ohlcv_array_dict_in, source_frame_dict_in, limit_ts, declared_name_list)
     # SET THE RUNNER FLAG SO THE WINDOW ITSELF IS READABLE AND THE DAY AFTER IT IS NOT
     global _RUNNER_ACTIVE_BOOL
     _RUNNER_ACTIVE_BOOL = True
     # BLOCK DIRECT LOADS WHILE THE DESIGN RUNS; THE RUNNER ALREADY HOLDS THE FRAMES
     set_direct_read_blocked_bool(True)
+    undeclared_error = None
     try:
         # REPLAY THE PATH, THEN THE TRUNCATION TEST, BEFORE ANY RESULT IS WRITTEN
         full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict, data_context)
         failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
         report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
+    except ValueError as error:
+        # A READ OUTSIDE DATA_SOURCE_LIST IS INVALID; ANY OTHER ERROR STILL PROPAGATES
+        if "undeclared source" not in str(error):
+            raise
+        undeclared_error = error
+        failure_str = None
+        report_dict = None
     finally:
         # CLEAR BOTH FLAGS EVEN IF THE REPLAY RAISES
         _RUNNER_ACTIVE_BOOL = False
@@ -1138,6 +1154,17 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
                 "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
                 "sources_read": ",".join(data_context.get_access_name_list())}
+    # A SOURCE IN THE ACCESS LOG THAT THE DESIGN DID NOT DECLARE IS NOT A VALID RESULT
+    undeclared_name_list = [source_name_str for source_name_str in data_context.get_access_name_list() if source_name_str not in declared_name_list]
+    if undeclared_error is not None or undeclared_name_list:
+        print(f"invalid_undeclared: {undeclared_error or undeclared_name_list}")
+        row_dict["status"] = "invalid_undeclared"
+        append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+        from so.core.trial_log import log_trial_dict
+        log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
+                       {}, True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
+                       note_str_in="invalid_undeclared", file_path_str_in=trial_log_path_str_in, alert_in=False)
+        return row_dict
     # A LEAK COUNTS AGAINST THE BUDGET AND WRITES NO PATH
     if failure_str:
         print(f"invalid_lookahead: {failure_str}")
