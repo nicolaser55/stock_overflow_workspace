@@ -20,7 +20,9 @@ the holdout sessions are reported. Every decision uses only information availabl
 
 The truncation test checks that. For each month-end in the window it drops the sessions after the cut, and, separately,
 overwrites every bar strictly after that session's decision bar (the fill bar through the end of the data) while leaving
-the session structure unchanged. The second check does not move the decision bar.
+the session structure unchanged. The second check does not move the decision bar. Every other registered source is cut
+and perturbed the same way through so.core.point_in_time.DataContext: rows with available_ts after the cut session's
+last bar are dropped, and feature values with available_ts after the decision are perturbed. Labels are not perturbed.
 
 The holdout is the last HOLDOUT_WINDOW_MONTHS calendar months of the data, ending at the latest session present when
 the window is opened. It replaces the per-fold 3-month test windows and the fixed untouched window 2026-05-14 ->
@@ -43,7 +45,7 @@ WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "m
 EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
-                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates"]
+                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates", "sources_read"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
 # DEFINE THE RUNNER FLAG (SET ONLY INSIDE run_holdout_evaluation)
@@ -682,8 +684,29 @@ def get_equity_total_return_float(daily_equity_pdf_in):
         return 0.0
     return float(daily_equity_pdf_in["equity"].iloc[-1]) / config.INITIAL_CAPITAL - 1.0
 
+# FUNCTION: CALL A DESIGN REPLAY, PASSING THE CONTEXT ONLY IF THE FUNCTION ACCEPTS IT
+def call_design_replay(func_in, positional_list_in, data_context_in):
+    """
+    Calls a design function. data_context_in is passed only when the function has that parameter, so an older design
+    keeps the call it had before the point-in-time door existed.
+
+    Args:
+        func_in (callable): Design function
+        positional_list_in (list): Positional arguments
+        data_context_in (DataContext | None): Point-in-time context
+
+    Returns:
+        The function's return value
+    """
+    # IMPORT INSPECT HERE
+    import inspect
+    # PASS THE CONTEXT ONLY TO A DESIGN THAT DECLARES IT
+    if data_context_in is not None and "data_context_in" in inspect.signature(func_in).parameters:
+        return func_in(*positional_list_in, data_context_in=data_context_in)
+    return func_in(*positional_list_in)
+
 # FUNCTION: SCORE EVERY CANDIDATE ON EVERY PERIOD
-def get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf_in):
+def get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in=None):
     """
     Period score = the candidate's period return minus buy-and-hold over the same period. Development periods and
     holdout periods are both scored. Each call is the design's own replay of that period.
@@ -692,6 +715,7 @@ def get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf_in
         design_module_in (module): Design (CANDIDATE_LIST, run_candidate_replay_dict)
         ohlcv_array_dict_in (dict): Bars
         period_pdf_in (pd.DataFrame): Periods
+        data_context_in (DataContext | None): Point-in-time context (None keeps the previous call)
 
     Returns:
         pd.DataFrame: fold_id, candidate, excess_return
@@ -703,7 +727,8 @@ def get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf_in
     for period_row in period_pdf_in.itertuples(index=False):
         buy_hold_float = get_buy_and_hold_result_dict(ohlcv_array_dict_in, period_row.period_start, period_row.period_end)["metric_dict"]["total_return"]
         for candidate in design_module_in.CANDIDATE_LIST:
-            replay_dict = design_module_in.run_candidate_replay_dict(ohlcv_array_dict_in, period_row.period_start, period_row.period_end, candidate)
+            replay_dict = call_design_replay(design_module_in.run_candidate_replay_dict,
+                                             [ohlcv_array_dict_in, period_row.period_start, period_row.period_end, candidate], data_context_in)
             row_dict_list.append({"fold_id": int(period_row.period_id), "candidate": candidate,
                                   "excess_return": get_equity_total_return_float(replay_dict["daily_equity_pdf"]) - buy_hold_float})
     return pd.DataFrame(row_dict_list)
@@ -742,7 +767,7 @@ def get_governing_selection_pdf(design_module_in, score_pdf_in, period_pdf_in):
     return pd.DataFrame(row_dict_list)
 
 # FUNCTION: RUN THE PRIOR-ONLY PATH ON ONE BAR SET
-def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict_in):
+def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, data_context_in=None):
     """
     Periods, scores, the candidate in force, and the design's continuous path.
 
@@ -750,15 +775,16 @@ def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dic
         design_module_in (module): Design
         ohlcv_array_dict_in (dict): Bars
         window_dict_in (dict): Active window
+        data_context_in (DataContext | None): Point-in-time context (None keeps the previous call)
 
     Returns:
         dict: period_pdf, score_pdf, selection_pdf, path_dict
     """
     # BUILD THE PERIODS, THE SCORES AND THE PATH
     period_pdf = get_holdout_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"], window_dict_in)
-    score_pdf = get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf)
+    score_pdf = get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf, data_context_in)
     selection_pdf = get_governing_selection_pdf(design_module_in, score_pdf, period_pdf)
-    path_dict = design_module_in.run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf, selection_pdf)
+    path_dict = call_design_replay(design_module_in.run_prior_only_path_dict, [ohlcv_array_dict_in, period_pdf, selection_pdf], data_context_in)
     return {"period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
 
 # FUNCTION: DROP BARS AFTER A CUT DATE
@@ -1001,30 +1027,40 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
     return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"]}
 
 # FUNCTION: RUN THE TRUNCATION TEST
-def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in):
+def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in, data_context_in=None):
     """
     Re-runs the prior-only path at each month-end inside the window. First the sessions after the cut are dropped
-    (the cut session stays whole, so its decision bar does not move). Then every bar strictly after that session's
-    decision bar is perturbed and the path is run again. The perturbation must leave target weights and signals
-    unchanged through the cut session, positions, weights and trades unchanged strictly before it, and the candidate
-    unchanged for periods that end before it. Fills and share counts on the cut session itself are not compared.
+    (the cut session stays whole, so its decision bar does not move), and every other source keeps only rows with
+    available_ts at or before the end of the cut session. Then every SPY bar strictly after that session's decision
+    bar is perturbed, and every feature value with available_ts after the decision is perturbed. Labels are not.
+    The perturbation must leave target weights and signals unchanged through the cut session, positions, weights and
+    trades unchanged strictly before it, and the candidate unchanged for periods that end before it. Fills and share
+    counts on the cut session itself are not compared.
 
     Args:
         design_module_in (module): Design
         ohlcv_array_dict_in (dict): Bars through the window end
         window_dict_in (dict): Active window
         full_result_dict_in (dict): The full replay
+        data_context_in (DataContext | None): Point-in-time context (None keeps the SPY-only checks)
 
     Returns:
         str | None: The cut and the decision that differed, or None
     """
-    # CHECK EACH MONTH END BY DROPPING LATER SESSIONS, THEN BY PERTURBING BARS AFTER THE DECISION
+    # IMPORT THE CONTEXT CLOCK HERE
+    from so.core.point_in_time import get_cut_clock_dict
+    # CHECK EACH MONTH END BY DROPPING LATER SESSIONS, THEN BY PERTURBING VALUES AFTER THE DECISION
     for cut_date in get_truncation_cut_date_list(ohlcv_array_dict_in["session_date_list"], window_dict_in):
-        short_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
+        truncated_array_dict = get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date)
+        clock_dict = get_cut_clock_dict(ohlcv_array_dict_in, cut_date)
+        truncated_context = None if data_context_in is None else data_context_in.get_truncated_context(clock_dict["session_end_ts"], truncated_array_dict)
+        short_result_dict = get_prior_only_result_dict(design_module_in, truncated_array_dict, window_dict_in, truncated_context)
         difference_str = get_lookahead_difference_str(full_result_dict_in, short_result_dict, cut_date)
         if difference_str is not None:
             return f"{cut_date}: {difference_str}"
-        perturbed_result_dict = get_prior_only_result_dict(design_module_in, get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
+        perturbed_array_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date)
+        perturbed_context = None if data_context_in is None else data_context_in.get_perturbed_context(clock_dict["decision_ts"], int(pd.Timestamp(cut_date).strftime("%Y%m%d")), perturbed_array_dict)
+        perturbed_result_dict = get_prior_only_result_dict(design_module_in, perturbed_array_dict, window_dict_in, perturbed_context)
         perturbed_difference_str = get_lookahead_difference_str(full_result_dict_in, perturbed_result_dict, cut_date)
         if perturbed_difference_str is not None:
             return f"{cut_date} decision bar: {perturbed_difference_str}"
@@ -1052,7 +1088,7 @@ def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
 
 # FUNCTION: EVALUATE ONE FROZEN DESIGN ON THE ACTIVE WINDOW
 def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_in, token_file_path_str_in, git_precondition_dict_in=None,
-                           design_folder_str_in=".", ledger_path_str_in=None, trial_log_path_str_in=None):
+                           design_folder_str_in=".", ledger_path_str_in=None, trial_log_path_str_in=None, source_frame_dict_in=None):
     """
     Nicolas only. Checks the preconditions, replays the frozen prior-only path from the development start through the
     window end, runs the truncation test, and only then writes a result. A failed truncation test writes no daily
@@ -1070,28 +1106,38 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         design_folder_str_in (str): Design folder for the git probe and the design-tree hash
         ledger_path_str_in (str | None): Ledger CSV
         trial_log_path_str_in (str | None): Trial log CSV (None = the shared trial log)
+        source_frame_dict_in (dict | None): Other registered sources already loaded (SPY comes from the bar arrays)
 
     Returns:
         dict: The ledger row
     """
+    # IMPORT THE POINT-IN-TIME DOOR HERE
+    from so.core.point_in_time import get_minute_bar_available_ts, get_runner_context, set_direct_read_blocked_bool
     # CHECK EVERY PRECONDITION BEFORE READING THE WINDOW FOR A RESULT
     precondition_dict = check_evaluation_precondition_dict(design_module_in, design_id_str_in, token_file_path_str_in,
                                                            git_precondition_dict_in, design_folder_str_in, ledger_path_str_in)
     window_dict = precondition_dict["window_dict"]
+    # THE RUNNER LOADS FIRST, THEN HANDS EVERY SOURCE THROUGH THE CONTEXT
+    limit_ts = get_minute_bar_available_ts(ohlcv_array_dict_in["timestamp_index"][-1])
+    data_context = get_runner_context(ohlcv_array_dict_in, source_frame_dict_in, limit_ts)
     # SET THE RUNNER FLAG SO THE WINDOW ITSELF IS READABLE AND THE DAY AFTER IT IS NOT
     global _RUNNER_ACTIVE_BOOL
     _RUNNER_ACTIVE_BOOL = True
+    # BLOCK DIRECT LOADS WHILE THE DESIGN RUNS; THE RUNNER ALREADY HOLDS THE FRAMES
+    set_direct_read_blocked_bool(True)
     try:
         # REPLAY THE PATH, THEN THE TRUNCATION TEST, BEFORE ANY RESULT IS WRITTEN
-        full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict)
-        failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
+        full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict, data_context)
+        failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
         report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
     finally:
-        # CLEAR THE FLAG EVEN IF THE REPLAY RAISES
+        # CLEAR BOTH FLAGS EVEN IF THE REPLAY RAISES
         _RUNNER_ACTIVE_BOOL = False
-    # BUILD THE LEDGER ROW
+        set_direct_read_blocked_bool(False)
+    # BUILD THE LEDGER ROW, INCLUDING THE SOURCES THE DESIGN READ
     row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
-                "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds")}
+                "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
+                "sources_read": ",".join(data_context.get_access_name_list())}
     # A LEAK COUNTS AGAINST THE BUDGET AND WRITES NO PATH
     if failure_str:
         print(f"invalid_lookahead: {failure_str}")

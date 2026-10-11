@@ -55,6 +55,9 @@ def get_complete_ohlcv_pdf(raw_path_str_in=None, cutoff_date_str_in=None, enforc
     Returns:
         pd.DataFrame: Complete minute bars
     """
+    # A DESIGN INSIDE THE HOLDOUT RUNNER READS BARS THROUGH THE DATA CONTEXT
+    from so.core.point_in_time import raise_if_direct_read_blocked
+    raise_if_direct_read_blocked()
     # READ THE RAW BARS
     raw_ohlcv_pdf = read_raw_ohlcv_pdf(raw_path_str_in)
     # IF THE HOLDOUT BOUNDARY IS ENFORCED
