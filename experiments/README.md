@@ -67,23 +67,34 @@ statistically supported".*
 
 ## Holdout evaluation (new experiments)
 
+The holdout result is the design's frozen prior-only path from its development start, continued without interruption
+through the holdout window: same code, same decision bar (15:58) and fill (15:59), same costs, dead band and cash
+rules, same candidate periods and selection rule, selection history and position carried over from development. Only
+the holdout sessions are reported. Every decision uses only information available at its decision bar.
+
 The holdout is the registered 12-month window (`so.core.holdout`, `records/holdout_windows.csv`). Development stops an
 embargo before its start. Validation uses `get_development_fold_pdf` (validation windows only; the archived
 `get_walk_forward_fold_pdf` is unchanged). Only Nicolas runs `scripts/holdout_evaluate.py`, once per frozen design per
 window. Agents never set `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never
 run `scripts/holdout_window.py` or `scripts/holdout_evaluate.py`.
 
-`design.py` exposes:
+`design.py` (it imports the experiment's own code) exposes:
 
-- `DESIGN_REFIT_RULE`, for example `{"every_sessions": 1, "train_window": "6M"}` (refit every session on a trailing 6 months).
-- `fit(frame, exclusive_date)` → model state. The frame holds only sessions strictly before the decision session, inside the training window.
-- `decide(model_state, session_date, features_known_before_decision)` → target exposure in [0, 1].
-- `CANDIDATE_LIST` and `selection_rule(completed_periods)` when the design has candidates. The selection sees only periods that have already ended. One continuous path is reported.
+- `PERIOD_RULE`: how candidate periods are formed. Default: the validation quarters of `get_development_fold_pdf`, extended through the holdout with the same step and made non-overlapping by `get_replay_period_pdf`.
+- `CANDIDATE_LIST` and `SELECTION_RULE` (the protocol's rule, for example the mean period score over the last 4 periods and its tie order), or a single candidate.
+- `run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in)` → the dict the development replay returns (`daily_equity_pdf` at least). Features (volatility, VIX, ...) are loaded through the guarded loaders. Inside the runner the boundary is the day after the window end.
+- `run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in)` → the continuous prior-only path, with the position carried across periods. An exit-family design calls `so.core.replay_walk_forward.run_prior_only_replay_dict`. The template uses `simulate_fractional_exposure_dict`.
+- `get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in)` → the uninformed baselines the protocol names, over the span the runner passes (the holdout only), with fixed seeds.
+
+An ML design refits inside `run_candidate_replay_dict` and `run_prior_only_path_dict`, for example daily on a trailing 6 months, using only bars before the decision bar. The template (`experiments/_template/design.py`) is a constant full exposure on the fractional-exposure family.
+
+The runner scores every period as the candidate's return minus buy-and-hold, selects for period f from earlier periods only, replays from the first period through the window end, and reports the holdout sessions (equity rebased at the window start). Before writing a result it truncates the bars after each of 12 month-ends inside the window and requires the same decisions. Ledger status is `valid` or `invalid_lookahead`. An `invalid_lookahead` row writes no daily paths and counts against the budget of 10. The design hash is the sha256 of `git rev-parse HEAD:<design folder>`, `git rev-parse HEAD:so`, and the config hash.
 
 The report uses the same honest numbers as `so.core.evaluation`: total return against buy-and-hold, annualized log excess
-with a block-bootstrap interval, time in the market, Sharpe, maximum drawdown, the uninformed baselines the protocol
-names, the minimum detectable effect of the window, and the success criteria (primary: total return above buy-and-hold;
-secondary: higher Sharpe or a smaller drawdown with at least 90% of buy-and-hold's return).
+with a 6-month block-bootstrap interval, time in the market, Sharpe, maximum drawdown, the uninformed baselines,
+the minimum detectable effect of the window, the success criteria (primary: total return above buy-and-hold;
+secondary: higher Sharpe or a smaller drawdown with at least 90% of buy-and-hold's return), and the candidate in force
+in each holdout period.
 
 ## Changing an experiment after its first validation run
 

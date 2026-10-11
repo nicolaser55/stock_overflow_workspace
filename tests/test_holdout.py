@@ -11,6 +11,7 @@ SO_ALLOW_LEGACY_REPRODUCTION are set only inside this file, to temporary values.
 
 import os
 import sys
+import json
 import types
 import tempfile
 import shutil
@@ -34,7 +35,10 @@ from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, roll_holdout_window_dict,
                              get_active_holdout_window_dict, get_development_end_date, get_latest_session_date,
                              check_development_date, get_replay_boundary_date, read_holdout_evaluation_pdf,
-                             run_holdout_evaluation, NO_WINDOW_MESSAGE_STR)
+                             run_holdout_evaluation, get_design_hash_str, get_prior_only_result_dict, NO_WINDOW_MESSAGE_STR)
+from so.core.local_file_management import read_csv_files_from_path, read_date_range_csv_files_from_path
+from so.core.fractional_exposure import simulate_fractional_exposure_dict
+from so.features.daily_features import get_session_decision_idx_dict
 from so.core.schedule import get_walk_forward_fold_pdf, get_development_fold_pdf
 from so.core.continuous_replay import check_replay_window_bool
 from so.core.raw_data import get_complete_ohlcv_pdf
@@ -356,132 +360,439 @@ def test_legacy():
         os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
     passed("legacy reproduction (pinned 2026-05-14 only, with a warning)")
 
-# FUNCTION: BUILD A SYNTHETIC DESIGN MODULE
-def get_design_module(leak_bool_in, seen_list_in, window_dict_in, name_str_in="exp_holdout_synthetic"):
+# FUNCTION: BUILD THE GIT PROBE THE TESTS INJECT
+def get_git_dict(design_tree_str_in="design-tree", so_tree_str_in="so-tree"):
     """
-    Builds a design whose fit records the last date it was given. A leaking design reports the decision date.
+    A passing git probe with injected tree ids (the design hash reads them).
 
     Args:
-        leak_bool_in (bool): Report the decision date as seen
-        seen_list_in (list): Dates the fit was given
-        window_dict_in (dict): Active window (the honest fit checks the runner boundary)
-        name_str_in (str): EXPERIMENT_NAME (part of the design hash)
+        design_tree_str_in (str): HEAD:<design folder>
+        so_tree_str_in (str): HEAD:so
+
+    Returns:
+        dict: Git probe
+    """
+    # RETURN THE PROBE
+    return {"clean_bool": True, "on_main_bool": True, "preregister_bool": True, "commit_str": "abc123",
+            "design_tree_str": design_tree_str_in, "so_tree_str": so_tree_str_in}
+
+# FUNCTION: BUILD A ONE-ROW DAILY EQUITY FRAME
+def get_planted_equity_pdf(date_in, total_return_float_in):
+    """
+    One session of daily equity whose total return is the given number.
+
+    Args:
+        date_in: Session date
+        total_return_float_in (float): Total return
+
+    Returns:
+        pd.DataFrame: date, equity, in_position, weight
+    """
+    # RETURN THE FRAME
+    return pd.DataFrame({"date": [pd.Timestamp(date_in).date()], "equity": [config.INITIAL_CAPITAL * (1.0 + total_return_float_in)],
+                         "in_position": [True], "weight": [1.0]})
+
+# FUNCTION: TEST THAT THE PIPELINE READS THROUGH A REGISTERED WINDOW
+def test_pipeline_holdout_flag():
+    """
+    Scans the pipeline notebooks for the holdout flag, and checks that a window does not hide the last raw session.
+
+    Returns:
+        None
+    """
+    # EVERY LOADER CALL IN A PIPELINE NOTEBOOK TURNS THE GUARD OFF
+    for notebook_path in sorted(os.listdir(os.path.join(WORKSPACE_PATH_STR, "pipeline"))):
+        if not notebook_path.endswith(".ipynb"):
+            continue
+        notebook_text = open(os.path.join(WORKSPACE_PATH_STR, "pipeline", notebook_path), encoding="utf-8").read()
+        for call_name_str in ["get_complete_ohlcv_pdf(", "read_date_range_csv_files_from_path(", "read_csv_files_from_path(", "get_vix_daily_feature_dict("]:
+            search_from_int = 0
+            while True:
+                found_int = notebook_text.find(call_name_str, search_from_int)
+                if found_int < 0:
+                    break
+                depth_int, end_int = 0, found_int
+                while end_int < len(notebook_text):
+                    if notebook_text[end_int] == "(":
+                        depth_int += 1
+                    elif notebook_text[end_int] == ")":
+                        depth_int -= 1
+                        if depth_int == 0:
+                            break
+                    end_int += 1
+                call_text = notebook_text[found_int:end_int + 1]
+                assert "enforce_holdout_bool_in=False" in call_text, f"{notebook_path} {call_name_str}"
+                search_from_int = end_int + 1
+    # THE RENAME CHECK IS A DATA CHECK AND READS EVERY RAW SESSION
+    assert "enforce_holdout_bool_in=False" in open(os.path.join(WORKSPACE_PATH_STR, "scripts", "check_spy_rename.py"), encoding="utf-8").read()
+    # WITH THE WINDOW OPEN, THE UNGUARDED LOADER STILL SEES THE LAST RAW SESSION
+    raw_path_str = write_raw_csv(os.path.join(TEMP_ROOT_STR, "raw_pipeline"), ["2025-10-09", "2025-10-10", "2026-08-13"])
+    tsday_path_str = os.path.join(TEMP_ROOT_STR, "TSDAY_pipeline.csv")
+    pd.DataFrame({"date": ["2026-08-13"]}).to_csv(tsday_path_str, index=False)
+    full_pdf = get_complete_ohlcv_pdf(raw_path_str, enforce_holdout_bool_in=False)
+    assert max(full_pdf["date"]) == pd.Timestamp("2026-08-13").date()
+    assert get_latest_session_date(raw_path_str, tsday_path_str) == pd.Timestamp("2026-08-13").date()
+    passed("pipeline reads through a registered window (notebooks, rename check, last raw session)")
+
+# FUNCTION: WRITE TWO DATE-STAMPED CACHE FILES
+def write_cache_csv(folder_str_in):
+    """
+    Writes cache_20251009.csv and cache_20251010.csv.
+
+    Args:
+        folder_str_in (str): Directory ending with "/"
+
+    Returns:
+        str: The directory
+    """
+    # WRITE ONE ROW PER FILE
+    os.makedirs(folder_str_in, exist_ok=True)
+    for stamp_str in ["20251009", "20251010"]:
+        pd.DataFrame({"value": [1]}).to_csv(f"{folder_str_in}cache_{stamp_str}.csv", index=False)
+    return folder_str_in
+
+# FUNCTION: TEST THE PIPELINE-CACHE GUARD
+def test_cache_guard():
+    """
+    Checks that a work-zone read stops at the window, a later date2 raises, and a store04 read does not.
+
+    Returns:
+        None
+    """
+    # POINT THE WORK ZONE AT A TEMPORARY FOLDER AND KEEP THE REAL ONE
+    saved_work_str = paths.LOCAL_WORKZONE_PATH_STR
+    work_str = os.path.join(TEMP_ROOT_STR, "workzone").replace("\\", "/") + "/"
+    store_str = os.path.join(TEMP_ROOT_STR, "store04_experiments", "exp").replace("\\", "/") + "/"
+    paths.LOCAL_WORKZONE_PATH_STR = work_str
+    try:
+        # A WORK-ZONE READ DROPS THE FILE DATED ON THE WINDOW START
+        write_cache_csv(work_str)
+        kept_pdf = read_date_range_csv_files_from_path(work_str, "2025-10-01", "2025-10-09")
+        assert len(kept_pdf) == 1
+        assert len(read_csv_files_from_path(work_str)) == 1
+        try:
+            read_date_range_csv_files_from_path(work_str, "2025-10-01", "2025-10-10")
+            raise AssertionError("a cache date2 on the holdout start was accepted")
+        except ValueError as error:
+            assert "holdout boundary" in str(error)
+        # STORE04 IS UNAFFECTED, INCLUDING WHEN NO WINDOW IS REGISTERED
+        write_cache_csv(store_str)
+        both_pdf = read_date_range_csv_files_from_path(store_str, "2025-10-01", "2025-10-10")
+        assert len(both_pdf) == 2
+        saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TEMP_ROOT_STR, "missing_windows.csv")
+        try:
+            assert len(read_date_range_csv_files_from_path(store_str, "2025-10-01", "2025-10-10")) == 2
+            try:
+                read_date_range_csv_files_from_path(work_str, "2025-10-01", "2025-10-09")
+                raise AssertionError("a cache read without a window was accepted")
+            except ValueError as error:
+                assert error.args[0] == NO_WINDOW_MESSAGE_STR or NO_WINDOW_MESSAGE_STR in str(error)
+        finally:
+            paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+    finally:
+        paths.LOCAL_WORKZONE_PATH_STR = saved_work_str
+    passed("pipeline cache guard (cut at the boundary, later date2 raises, store04 unaffected)")
+
+# FUNCTION: TEST THE DESIGN HASH
+def test_design_hash():
+    """
+    Checks that the hash changes with so/ and not with an unrelated tree.
+
+    Returns:
+        None
+    """
+    # IMPORT THE TEMPLATE AND HASH IT THREE WAYS
+    from experiments._template import design as template_design
+    same_str = get_design_hash_str(template_design, design_tree_str_in="design-tree", so_tree_str_in="so-tree")
+    again_str = get_design_hash_str(template_design, design_tree_str_in="design-tree", so_tree_str_in="so-tree")
+    changed_so_str = get_design_hash_str(template_design, design_tree_str_in="design-tree", so_tree_str_in="so-tree-changed")
+    changed_design_str = get_design_hash_str(template_design, design_tree_str_in="design-tree-changed", so_tree_str_in="so-tree")
+    # THE SAME TREES MATCH; EITHER TREE CHANGING DOES NOT; AN UNRELATED PATH IS NOT AN INPUT
+    assert same_str == again_str and same_str != changed_so_str and same_str != changed_design_str
+    passed("design hash (so/ changes it, an unrelated tree does not)")
+
+# FUNCTION: BUILD THE SELECTION DESIGN
+def get_selection_design():
+    """
+    Two candidates. "up" wins every period that ends before the window and loses every later period.
 
     Returns:
         module: Design
     """
     # BUILD THE MODULE
-    design_module = types.ModuleType("holdout_design")
-    design_module.EXPERIMENT_NAME = name_str_in
+    design_module = types.ModuleType("selection_design")
+    design_module.EXPERIMENT_NAME = "exp_holdout_selection"
     design_module.PROTOCOL_VERSION = "1.0"
-    design_module.DESIGN_REFIT_RULE = {"every_sessions": 1, "train_window": "6M"}
-    # DEFINE FIT AND DECIDE
-    def fit(frame_pdf, exclusive_date):
-        # RECORD THE LAST DATE OF THE FRAME
-        last_date = None if len(frame_pdf) == 0 else pd.Timestamp(frame_pdf["date"].max()).date()
-        seen_list_in.append((pd.Timestamp(exclusive_date).date(), last_date))
-        if last_date is not None:
-            assert last_date < pd.Timestamp(exclusive_date).date()
-        # A LEAK REPORTS THE DECISION DATE
-        if leak_bool_in:
-            return {"last_date_seen": pd.Timestamp(exclusive_date).date()}
-        # THE RUNNER ALLOWS THE WINDOW AND STILL REFUSES FORWARD DATA
-        check_development_date(window_dict_in["end"])
-        try:
-            check_development_date(pd.Timestamp(window_dict_in["end"]).date() + timedelta(days=5))
-            raise AssertionError("forward data was allowed inside the runner")
-        except ValueError as error:
-            assert "Forward data" in str(error)
-        return {"last_date_seen": last_date} if last_date is not None else {}
-    design_module.fit = fit
-    design_module.decide = lambda model_state_dict, session_date, feature_dict: 1.0
-    # RETURN THE MODULE
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = ["down", "up"]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+    # SCORE A PERIOD FROM ITS END DATE ALONE
+    def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
+        # "up" WINS DEVELOPMENT AND LOSES THE HOLDOUT
+        window_start = get_active_holdout_window_dict()["start"]
+        development_bool = pd.Timestamp(date2).date() < window_start
+        win_bool = (candidate == "up") == development_bool
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.5 if win_bool else -0.5), "trade_pdf": pd.DataFrame()}
+    # CARRY THE SELECTED CANDIDATE ONTO EACH SESSION
+    def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
+        session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+        row_dict_list, target_list, decision_list = [], [], []
+        for session_idx, session_date in enumerate(session_date_list):
+            period_match_pdf = period_pdf[(period_pdf["period_start"].map(lambda value: pd.Timestamp(value).date()) <= session_date)
+                                          & (period_pdf["period_end"].map(lambda value: pd.Timestamp(value).date()) >= session_date)]
+            if period_match_pdf.empty:
+                continue
+            candidate = selection_pdf.loc[selection_pdf["period_id"] == int(period_match_pdf["period_id"].iloc[0]), "candidate"].iloc[0]
+            weight_float = 1.0 if candidate == "up" else 0.0
+            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": weight_float > 0, "weight": weight_float})
+            target_list.append(weight_float)
+            decision_list.append(session_date)
+        return {"daily_equity_pdf": pd.DataFrame(row_dict_list), "trade_pdf": pd.DataFrame(),
+                "target_weight_arr": np.array(target_list, dtype=float), "decision_session_list": decision_list}
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
     return design_module
 
-# FUNCTION: TEST THE LEDGER AND THE CAUSAL REPLAY
+# FUNCTION: BUILD THE DEAD-BAND DESIGN
+def get_dead_band_design():
+    """
+    One candidate whose target jumps by a full point every 15 sessions and wiggles by 5 points in between.
+
+    Returns:
+        module: Design
+    """
+    # BUILD THE MODULE
+    design_module = types.ModuleType("dead_band_design")
+    design_module.EXPERIMENT_NAME = "exp_holdout_dead_band"
+    design_module.PROTOCOL_VERSION = "1.0"
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = ["band"]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+    design_module.DEAD_BAND = 0.20
+    # BUILD THE TARGET FROM THE SESSION POSITION
+    def get_target_arr(ohlcv_array_dict):
+        target_arr = np.empty(len(ohlcv_array_dict["session_date_list"]), dtype=float)
+        for session_idx in range(len(target_arr)):
+            base_float = 0.0 if (session_idx // 15) % 2 == 0 else 1.0
+            target_arr[session_idx] = base_float if session_idx % 15 == 0 else min(1.0, base_float + 0.05)
+        return target_arr
+    design_module.get_target_arr = get_target_arr
+    # A PERIOD SCORE DOES NOT NEED THE SIMULATOR (THERE IS ONE CANDIDATE)
+    def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.0), "trade_pdf": pd.DataFrame()}
+    # REPLAY ONCE WITH THE 20-POINT BAND
+    def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
+        target_arr = get_target_arr(ohlcv_array_dict)
+        date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
+        session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+        path_idx_list = [idx for idx, session_date in enumerate(session_date_list) if pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()]
+        simulation_dict = simulate_fractional_exposure_dict(ohlcv_array_dict, date1, date2, target_arr, design_module.DEAD_BAND, float(target_arr[path_idx_list[0]]))
+        simulation_dict["target_weight_arr"] = target_arr[path_idx_list]
+        simulation_dict["decision_session_list"] = [session_date_list[idx] for idx in path_idx_list]
+        return simulation_dict
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
+    return design_module
+
+# FUNCTION: BUILD A DESIGN THAT READS THE NEXT SESSION'S CLOSE
+def get_leak_design():
+    """
+    The target of session t is the next session's close divided by this session's close.
+
+    Returns:
+        module: Design
+    """
+    # BUILD THE MODULE
+    design_module = types.ModuleType("leak_design")
+    design_module.EXPERIMENT_NAME = "exp_holdout_leak"
+    design_module.PROTOCOL_VERSION = "1.0"
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = ["leak"]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+    # THE PERIOD SCORE DOES NOT LEAK (THE PATH DOES)
+    def run_candidate_replay_dict(ohlcv_array_dict, date1, date2, candidate):
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2, 0.0), "trade_pdf": pd.DataFrame()}
+    # READ THE NEXT SESSION'S CLOSE
+    def run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf):
+        end_idx_arr = ohlcv_array_dict["session_end_idx_arr"]
+        close_list = [float(ohlcv_array_dict["close_arr"][end_idx_arr[idx]]) for idx in range(len(end_idx_arr))]
+        session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+        date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
+        row_dict_list, target_list, decision_list = [], [], []
+        for session_idx, session_date in enumerate(session_date_list):
+            if not (pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date()):
+                continue
+            weight_float = close_list[session_idx + 1] / close_list[session_idx] if session_idx + 1 < len(close_list) else 0.0
+            row_dict_list.append({"date": session_date, "equity": config.INITIAL_CAPITAL, "in_position": weight_float > 0, "weight": weight_float})
+            target_list.append(weight_float)
+            decision_list.append(session_date)
+        return {"daily_equity_pdf": pd.DataFrame(row_dict_list), "trade_pdf": pd.DataFrame(),
+                "target_weight_arr": np.array(target_list, dtype=float), "decision_session_list": decision_list}
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict, date1, date2: {"flat": 0.0}
+    return design_module
+
+# FUNCTION: PREPARE THE TOKEN AND THE RESULTS FOLDER
+def get_evaluation_path_dict():
+    """
+    Token file, results folder and a temporary trial log.
+
+    Returns:
+        dict: token_path_str, results_path_str, trial_log_path_str
+    """
+    # WRITE THE TOKEN OUTSIDE THE DATA FOLDER
+    token_dir_str = tempfile.mkdtemp(prefix="so_holdout_token_")
+    token_path_str = os.path.join(token_dir_str, "token.txt")
+    with open(token_path_str, "w", encoding="utf-8") as token_file:
+        token_file.write("holdout-token\n")
+    # RETURN THE PATHS
+    return {"token_path_str": token_path_str, "results_path_str": tempfile.mkdtemp(prefix="so_holdout_results_"),
+            "trial_log_path_str": os.path.join(TEMP_ROOT_STR, "trial_log.csv")}
+
+# FUNCTION: TEST THE PRIOR-ONLY REPLAY
 def test_evaluation():
     """
-    Checks the preconditions, one causal replay, a repeated hash, the budget and a leaking design.
+    Checks the preconditions, selection carried across the window, the dead band, the template, and a leaking design.
 
     Returns:
         None
     """
     # PREPARE THE TOKEN, THE RESULTS FOLDER AND THE BARS
-    token_dir_str = tempfile.mkdtemp(prefix="so_holdout_token_")
-    token_path_str = os.path.join(token_dir_str, "token.txt")
-    with open(token_path_str, "w", encoding="utf-8") as token_file:
-        token_file.write("holdout-token\n")
-    results_path_str = tempfile.mkdtemp(prefix="so_holdout_results_")
-    trial_log_path_str = os.path.join(TEMP_ROOT_STR, "trial_log.csv")
-    git_dict = {"clean_bool": True, "on_main_bool": True, "preregister_bool": True, "commit_str": "abc123"}
+    path_dict = get_evaluation_path_dict()
+    git_dict = get_git_dict()
     window_dict = get_active_holdout_window_dict()
-    ohlcv_pdf = get_synthetic_ohlcv_pdf("2025-04-01", "2026-10-09", minute_vol_in=0.0004, seed_in=11)
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2023-06-01", "2026-10-09", minute_vol_in=0.0004, seed_in=11)
     ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
-    seen_list = []
-    design_module = get_design_module(False, seen_list, window_dict)
     real_trial_size = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
+    os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+    selection_module = get_selection_design()
     # REFUSE A MISSING RESULTS FOLDER AND A WRONG TOKEN BEFORE ANY ROW IS WRITTEN
+    os.environ.pop("SO_HOLDOUT_PATH")
     try:
-        run_holdout_evaluation(design_module, "honest", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=LEDGER_PATH_STR,
-                               trial_log_path_str_in=trial_log_path_str)
+        run_holdout_evaluation(selection_module, "selection", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=LEDGER_PATH_STR, trial_log_path_str_in=path_dict["trial_log_path_str"])
         raise AssertionError("evaluation without SO_HOLDOUT_PATH was accepted")
     except ValueError as error:
         assert "SO_HOLDOUT_PATH" in str(error)
-    os.environ["SO_HOLDOUT_PATH"] = results_path_str
+    os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
     os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "wrong"
     try:
-        run_holdout_evaluation(design_module, "honest", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=LEDGER_PATH_STR,
-                               trial_log_path_str_in=trial_log_path_str)
+        run_holdout_evaluation(selection_module, "selection", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=LEDGER_PATH_STR, trial_log_path_str_in=path_dict["trial_log_path_str"])
         raise AssertionError("a wrong token was accepted")
     except ValueError as error:
         assert "TOKEN" in str(error)
     assert not os.path.isfile(LEDGER_PATH_STR)
-    # RUN THE HONEST DESIGN ONCE
+    # THE SELECTION USES PERIOD RETURNS AND CARRIES THE DEVELOPMENT CHOICE INTO THE WINDOW
     os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
-    row_dict = run_holdout_evaluation(design_module, "honest", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=LEDGER_PATH_STR,
-                                      trial_log_path_str_in=trial_log_path_str)
-    # THE FIT NEVER SAW THE DECISION SESSION
-    assert len(seen_list) > 0 and all(last_date is None or last_date < decision_date for decision_date, last_date in seen_list)
-    # THE DAILY PATHS LAND ONLY UNDER SO_HOLDOUT_PATH
-    output_path_str = os.path.join(results_path_str, row_dict["window_id"], "honest", "strategy_daily_equity.csv")
-    assert os.path.isfile(output_path_str)
+    selection_ledger_str = os.path.join(TEMP_ROOT_STR, "selection_evaluations.csv")
+    selection_row = run_holdout_evaluation(selection_module, "selection", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                           ledger_path_str_in=selection_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+    candidate_dict = {int(period_id): candidate for period_id, candidate in json.loads(selection_row["holdout_candidates"]).items()}
+    ordered_id_list = sorted(candidate_dict)
+    assert selection_row["status"] == "valid"
+    assert candidate_dict[ordered_id_list[0]] == "up"
+    assert "down" in candidate_dict.values()
+    assert selection_row["carried_weight"] == 1.0
+    assert os.path.isfile(os.path.join(path_dict["results_path_str"], selection_row["window_id"], "selection", "strategy_daily_equity.csv"))
     assert not os.path.isfile(REAL_EVALUATIONS_PATH_STR)
-    assert os.path.isfile(LEDGER_PATH_STR)
-    # THE TEMPORARY TRIAL LOG HAS ONE TEST ROW; THE REAL TRIAL LOG IS UNCHANGED
-    trial_pdf = pd.read_csv(trial_log_path_str)
-    assert len(trial_pdf) == 1 and trial_pdf["stage"].iloc[0] == "test" and bool(trial_pdf["test_window_touched"].iloc[0])
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
-    assert row_dict["primary_pass"] in (True, False)
     # THE SAME DESIGN HASH ON THE SAME WINDOW IS REFUSED
     try:
-        run_holdout_evaluation(design_module, "honest_again", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=LEDGER_PATH_STR,
-                               trial_log_path_str_in=trial_log_path_str)
+        run_holdout_evaluation(selection_module, "selection_again", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=selection_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
         raise AssertionError("a repeated design hash was accepted")
     except ValueError as error:
         assert "already evaluated" in str(error)
-    # THE ELEVENTH DESIGN IS REFUSED (NINE PLACEHOLDER ROWS PLUS THE ONE ABOVE)
-    ledger_pdf = read_holdout_evaluation_pdf(LEDGER_PATH_STR)
-    placeholder_pdf = pd.concat([ledger_pdf.iloc[[0]].assign(design_id=f"pad_{idx}", design_hash=f"pad_hash_{idx}") for idx in range(9)], ignore_index=True)
-    pd.concat([ledger_pdf, placeholder_pdf], ignore_index=True).to_csv(LEDGER_PATH_STR, index=False)
-    other_module = get_design_module(False, [], window_dict, name_str_in="exp_holdout_other")
+    # A 20-POINT DEAD BAND IS KEPT, AND A REBALANCE FILLS AT 15:59 OF THE SAME SESSION
+    band_module = get_dead_band_design()
+    band_ledger_str = os.path.join(TEMP_ROOT_STR, "band_evaluations.csv")
+    band_row = run_holdout_evaluation(band_module, "band", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                      ledger_path_str_in=band_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+    assert band_row["status"] == "valid"
+    band_result_dict = get_prior_only_result_dict(band_module, ohlcv_array_dict, window_dict)
+    target_arr = band_module.get_target_arr(ohlcv_array_dict)
+    date1, date2 = band_result_dict["period_pdf"]["period_start"].iloc[0], band_result_dict["period_pdf"]["period_end"].iloc[-1]
+    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+    first_idx = next(idx for idx, session_date in enumerate(session_date_list) if pd.Timestamp(date1).date() <= session_date <= pd.Timestamp(date2).date())
+    band_direct_dict = simulate_fractional_exposure_dict(ohlcv_array_dict, date1, date2, target_arr, 0.20, float(target_arr[first_idx]))
+    open_direct_dict = simulate_fractional_exposure_dict(ohlcv_array_dict, date1, date2, target_arr, 0.0, float(target_arr[first_idx]))
+    path_trade_pdf = band_result_dict["path_dict"]["trade_pdf"]
+    assert list(path_trade_pdf["trade_idx"]) == list(band_direct_dict["trade_pdf"]["trade_idx"])
+    assert int((path_trade_pdf["reason"] == "rebalance").sum()) < int((open_direct_dict["trade_pdf"]["reason"] == "rebalance").sum())
+    idx_dict = get_session_decision_idx_dict(ohlcv_array_dict)
+    for trade_row in path_trade_pdf[path_trade_pdf["reason"] == "rebalance"].itertuples(index=False):
+        session_idx = int(ohlcv_array_dict["bar_session_idx_arr"][int(trade_row.trade_idx)])
+        assert int(trade_row.trade_idx) == int(idx_dict["fill_idx_arr"][session_idx])
+        assert session_idx + 1 == len(session_date_list) or int(trade_row.trade_idx) < int(ohlcv_array_dict["session_start_idx_arr"][session_idx + 1])
+        end_ts = ohlcv_array_dict["timestamp_index"][int(ohlcv_array_dict["session_end_idx_arr"][session_idx])]
+        if end_ts.hour == 15 and end_ts.minute == 59:
+            assert trade_row.trade_ts.hour == 15 and trade_row.trade_ts.minute == 59
+            decision_ts = ohlcv_array_dict["timestamp_index"][int(idx_dict["decision_idx_arr"][session_idx])]
+            assert decision_ts.hour == 15 and decision_ts.minute == 58
+    # THE TEMPLATE DESIGN PASSES THE TRUNCATION TEST, AND ITS BASELINES USE THE HOLDOUT ONLY
+    from experiments._template import design as template_design
+    saved_rule_dict = template_design.PERIOD_RULE
+    saved_baseline = template_design.get_baseline_return_dict
+    seen_dict = {}
+    def baseline_recorder(ohlcv_array_dict_in, date1_in, date2_in):
+        # RECORD THE SPAN AND CALL THE TEMPLATE
+        seen_dict["span"] = (pd.Timestamp(date1_in).date(), pd.Timestamp(date2_in).date())
+        return saved_baseline(ohlcv_array_dict_in, date1_in, date2_in)
+    template_design.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    template_design.get_baseline_return_dict = baseline_recorder
     try:
-        run_holdout_evaluation(other_module, "eleventh", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=LEDGER_PATH_STR,
-                               trial_log_path_str_in=trial_log_path_str)
+        template_ledger_str = os.path.join(TEMP_ROOT_STR, "template_evaluations.csv")
+        template_row = run_holdout_evaluation(template_design, "template", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                              ledger_path_str_in=template_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+    finally:
+        template_design.PERIOD_RULE = saved_rule_dict
+        template_design.get_baseline_return_dict = saved_baseline
+    assert template_row["status"] == "valid"
+    assert seen_dict["span"] == (pd.Timestamp(window_dict["start"]).date(), pd.Timestamp(window_dict["end"]).date())
+    # A DESIGN THAT READS THE NEXT CLOSE IS REJECTED AND CONSUMES A BUDGET SLOT
+    leak_module = get_leak_design()
+    leak_ledger_str = os.path.join(TEMP_ROOT_STR, "leak_evaluations.csv")
+    stdout_file = StringIO()
+    saved_stdout = sys.stdout
+    sys.stdout = stdout_file
+    try:
+        leak_row = run_holdout_evaluation(leak_module, "leak", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                          ledger_path_str_in=leak_ledger_str, trial_log_path_str_in=os.path.join(TEMP_ROOT_STR, "leak_trial_log.csv"))
+    finally:
+        sys.stdout = saved_stdout
+    assert leak_row["status"] == "invalid_lookahead"
+    assert "invalid_lookahead" in stdout_file.getvalue()
+    assert not os.path.isfile(os.path.join(path_dict["results_path_str"], leak_row["window_id"], "leak", "strategy_daily_equity.csv"))
+    assert not os.path.isfile(os.path.join(TEMP_ROOT_STR, "leak_trial_log.csv"))
+    assert len(read_holdout_evaluation_pdf(leak_ledger_str)) == 1
+    try:
+        run_holdout_evaluation(leak_module, "leak_again", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=leak_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+        raise AssertionError("a repeated leaking design was accepted")
+    except ValueError as error:
+        assert "already evaluated" in str(error)
+    leak_pdf = read_holdout_evaluation_pdf(leak_ledger_str)
+    placeholder_pdf = pd.concat([leak_pdf.iloc[[0]].assign(design_id=f"pad_{idx}", design_hash=f"pad_hash_{idx}") for idx in range(9)], ignore_index=True)
+    pd.concat([leak_pdf, placeholder_pdf], ignore_index=True).to_csv(leak_ledger_str, index=False)
+    eleventh_module = get_selection_design()
+    eleventh_module.EXPERIMENT_NAME = "exp_holdout_eleventh"
+    try:
+        run_holdout_evaluation(eleventh_module, "eleventh", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=leak_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
         raise AssertionError("an eleventh design was accepted")
     except ValueError as error:
         assert "evaluations" in str(error)
-    # A LEAKING DESIGN RAISES (ON A FRESH LEDGER, SO THE BUDGET IS NOT THE REASON)
-    fresh_ledger_str = os.path.join(TEMP_ROOT_STR, "fresh_evaluations.csv")
-    leak_list = []
-    leak_module = get_design_module(True, leak_list, window_dict, name_str_in="exp_holdout_leak")
-    try:
-        run_holdout_evaluation(leak_module, "leak", ohlcv_array_dict, token_path_str, git_dict, ledger_path_str_in=fresh_ledger_str,
-                               trial_log_path_str_in=trial_log_path_str)
-        raise AssertionError("a leaking design was accepted")
-    except ValueError as error:
-        assert "decision session" in str(error)
-    assert not os.path.isfile(fresh_ledger_str)
-    passed("ledger and causal replay (token, budget, no look-ahead, results only under SO_HOLDOUT_PATH)")
+    # THE TEMPORARY TRIAL LOG HOLDS THE VALID RUNS ONLY; THE REAL TRIAL LOG IS UNCHANGED
+    trial_pdf = pd.read_csv(path_dict["trial_log_path_str"])
+    assert len(trial_pdf) == 3 and set(trial_pdf["stage"]) == {"test"}
+    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
+    passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
+
+
 
 # FUNCTION: TEST THAT THE ARCHIVED SCHEDULE STILL HAS TEST WINDOWS
 def test_walk_forward_unchanged():
@@ -512,6 +823,9 @@ if __name__ == "__main__":
         test_development_schedule()
         test_guards()
         test_legacy()
+        test_pipeline_holdout_flag()
+        test_cache_guard()
+        test_design_hash()
         test_evaluation()
         test_walk_forward_unchanged()
         assert not os.path.isfile(REAL_WINDOWS_PATH_STR)

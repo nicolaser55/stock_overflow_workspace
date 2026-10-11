@@ -81,5 +81,7 @@ if __name__ == "__main__":
     row_dict = run_holdout_evaluation(design_module, os.path.basename(os.path.abspath(arg_dict.design)), ohlcv_array_dict,
                                       arg_dict.token_file, design_folder_str_in=arg_dict.design)
     # PRINT THE SUMMARY
-    print(f"Evaluated {row_dict['design_id']} on {row_dict['window_id']}: total return {row_dict['total_return']} "
-          f"vs buy-and-hold {row_dict['buy_hold_total_return']} (primary_pass={row_dict['primary_pass']})")
+    print(f"Evaluated {row_dict['design_id']} on {row_dict['window_id']}: status {row_dict['status']}")
+    if row_dict["status"] == "valid":
+        print(f"total return {row_dict['total_return']} vs buy-and-hold {row_dict['buy_hold_total_return']} "
+              f"(primary_pass={row_dict['primary_pass']})")

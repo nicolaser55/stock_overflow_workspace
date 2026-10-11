@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import subprocess
 from datetime import datetime, timedelta
@@ -11,9 +13,14 @@ from so import vix_config
 """
 Rolling 12-Month Holdout (Nicolas, 2026-10-11)
 
+The holdout result is the design's frozen prior-only path from its development start, continued without interruption
+through the holdout window: same code, same decision bar (15:58) and fill (15:59), same costs, dead band and cash
+rules, same candidate periods and selection rule, selection history and position carried over from development. Only
+the holdout sessions are reported. Every decision uses only information available at its decision bar.
+
 The holdout is the last HOLDOUT_WINDOW_MONTHS calendar months of the data, ending at the latest session present when
 the window is opened. It replaces the per-fold 3-month test windows and the fixed untouched window 2026-05-14 ->
-2026-08-13. Its purpose is to measure how a frozen design would have performed if it had been deployed over that year.
+2026-08-13.
 
 Once opened, the window is frozen: new downloads do not move it. Sessions after its end are forward data and are
 refused everywhere this module guards (a later task adds forward evaluation). Each frozen design may be evaluated once
@@ -29,10 +36,10 @@ secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no defaul
 WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "months_covered", "opened_ts", "opened_by",
                       "data_last_session_at_open", "retired_ts", "retire_reason"]
 # DEFINE THE LEDGER COLUMNS
-EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "total_return",
+EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
-                          "comparable_pass"]
+                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
 # DEFINE THE RUNNER FLAG (SET ONLY INSIDE run_holdout_evaluation)
@@ -558,9 +565,8 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
         raise ValueError("❌ The design commit is not on main.")
     if not git_dict["preregister_bool"]:
         raise ValueError("❌ The design has no preregister commit.")
-    # BUILD THE DESIGN HASH (COMMIT + CONFIG HASH)
-    from so.core.trial_log import get_config_hash_str
-    design_hash_str = f"{git_dict['commit_str']}_{get_config_hash_str(design_module_in)}"
+    # BUILD THE DESIGN HASH (THE DESIGN TREE, THE SHARED-CODE TREE, AND THE CONFIG HASH)
+    design_hash_str = get_design_hash_str(design_module_in, design_folder_str_in, git_dict.get("design_tree_str"), git_dict.get("so_tree_str"))
     # REFUSE A REPEATED DESIGN AND AN ELEVENTH DESIGN
     ledger_pdf = read_holdout_evaluation_pdf(ledger_path_str_in)
     window_pdf = ledger_pdf[ledger_pdf["window_id"] == window_dict["window_id"]] if len(ledger_pdf) else ledger_pdf
@@ -572,220 +578,377 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
     return {"window_dict": window_dict, "design_hash_str": design_hash_str, "commit_str": git_dict["commit_str"]}
 
 """
-Causal Replay
+Prior-Only Replay
 """
 
-# FUNCTION: GET THE FIRST DATE OF A TRAINING WINDOW
-def get_train_start_date(exclusive_date_in, train_window_str_in):
+# FUNCTION: HASH A FROZEN DESIGN
+def get_design_hash_str(design_module_in, design_folder_str_in=".", design_tree_str_in=None, so_tree_str_in=None):
     """
-    The day a training window opens: exclusive_date minus "6M" or "1Y".
+    sha256 of git rev-parse HEAD:<design folder>, git rev-parse HEAD:so, and the design's config hash.
+    An unrelated path is not an input, so an unrelated commit does not change the hash. A change under the design
+    folder or under so/ does.
 
     Args:
-        exclusive_date_in (datetime.date): Decision session (not included)
-        train_window_str_in (str): "6M" or "1Y"
+        design_module_in (module): Design module (uppercase constants are hashed)
+        design_folder_str_in (str): Design folder, relative to the workspace
+        design_tree_str_in (str | None): Injected HEAD:<design folder> (None = read git)
+        so_tree_str_in (str | None): Injected HEAD:so (None = read git)
 
     Returns:
-        datetime.date: First date included
+        str: Hex digest
     """
-    # PARSE THE WINDOW
-    window_str = str(train_window_str_in).upper()
-    if window_str.endswith("M"):
-        return (pd.Timestamp(exclusive_date_in) - pd.DateOffset(months=int(window_str[:-1]))).date()
-    if window_str.endswith("Y"):
-        return (pd.Timestamp(exclusive_date_in) - pd.DateOffset(years=int(window_str[:-1]))).date()
-    raise ValueError(f"❌ Unknown train window {train_window_str_in}")
+    # IMPORT THE CONFIG HASH HERE (AVOID AN IMPORT CYCLE)
+    from so.core.trial_log import get_config_hash_str
+    # READ THE TWO TREES WHEN THE CALLER DID NOT INJECT THEM
+    design_tree_str = design_tree_str_in
+    if design_tree_str is None:
+        design_tree_str = subprocess.check_output(["git", "rev-parse", f"HEAD:{design_folder_str_in}"], cwd=paths.WORKSPACE_PATH_STR, text=True).strip()
+    so_tree_str = so_tree_str_in
+    if so_tree_str is None:
+        so_tree_str = subprocess.check_output(["git", "rev-parse", "HEAD:so"], cwd=paths.WORKSPACE_PATH_STR, text=True).strip()
+    # HASH THE TWO TREES AND THE CONFIG
+    payload_str = design_tree_str + "\n" + so_tree_str + "\n" + get_config_hash_str(design_module_in)
+    return hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
-# FUNCTION: BUILD THE CAUSAL FRAME A FIT MAY SEE
-def get_fit_frame_pdf(session_pdf_in, exclusive_date_in, train_window_str_in):
+# FUNCTION: BUILD THE CANDIDATE PERIODS THROUGH THE WINDOW
+def get_holdout_period_pdf(design_module_in, session_date_list_in, window_dict_in):
     """
-    Sessions strictly before the decision date and inside the training window.
+    Development validation quarters (get_development_fold_pdf), extended through the holdout with the same step and
+    made non-overlapping (get_replay_period_pdf). The extension is allowed only because the runner is replaying the
+    frozen path; development code still stops at the development end.
 
     Args:
-        session_pdf_in (pd.DataFrame): One row per session (date, ...)
-        exclusive_date_in (datetime.date): Decision session
-        train_window_str_in (str): Training window
+        design_module_in (module): Design (PERIOD_RULE)
+        session_date_list_in (list): Sessions the bars actually contain
+        window_dict_in (dict): Active window
 
     Returns:
-        pd.DataFrame: The frame
+        pd.DataFrame: period_id, period_start, period_end, session_count, valid_start, valid_end
     """
-    # CUT THE FRAME
-    train_start_date = get_train_start_date(exclusive_date_in, train_window_str_in)
-    date_arr = pd.to_datetime(session_pdf_in["date"]).dt.date
-    return session_pdf_in[(date_arr < exclusive_date_in) & (date_arr >= train_start_date)].reset_index(drop=True)
+    # IMPORT THE FOLD AND PERIOD BUILDERS HERE
+    from so.core.schedule import get_development_fold_pdf
+    from so.core.continuous_replay import get_replay_period_pdf
+    # COLLECT THE PERIOD RULE AND THE DATES
+    rule_dict = design_module_in.PERIOD_RULE
+    session_date_list = [get_date(session_date) for session_date in session_date_list_in]
+    window_end_date = min(get_date(window_dict_in["end"]), session_date_list[-1])
+    # BUILD THE DEVELOPMENT QUARTERS (ANCHORED ON THE REGISTERED WINDOW, NOT ON THE TRUNCATED END)
+    fold_pdf = get_development_fold_pdf(session_date_list, int(rule_dict["embargo_sessions"]), list(rule_dict["train_years"]),
+                                       validation_window_months_in=config.VALIDATION_WINDOW_MONTHS, step_months_in=config.WALK_FORWARD_STEP_MONTHS)
+    if fold_pdf.empty:
+        raise ValueError("❌ The design has no development period on these sessions.")
+    # EXTEND ONE STEP AT A TIME UNTIL THE WINDOW END (OR THE LAST SESSION THE BARS CONTAIN)
+    extra_dict_list, last_end_date = [], get_date(fold_pdf["valid_end"].iloc[-1])
+    next_id_int = int(fold_pdf["fold_id"].max()) + 1
+    while last_end_date < window_end_date:
+        later_date_list = [session_date for session_date in session_date_list if session_date > last_end_date]
+        if not later_date_list:
+            break
+        step_end_date = (pd.Timestamp(last_end_date) + pd.DateOffset(months=config.WALK_FORWARD_STEP_MONTHS)).date()
+        bounded_date_list = [session_date for session_date in later_date_list if session_date <= min(step_end_date, window_end_date)] or [later_date_list[0]]
+        period_end_date = bounded_date_list[-1]
+        extra_dict_list.append({"fold_id": next_id_int, "valid_start": later_date_list[0], "valid_end": period_end_date})
+        next_id_int += 1
+        if period_end_date <= last_end_date:
+            break
+        last_end_date = period_end_date
+    # KEEP THE COLUMNS THE PERIOD BUILDER READS AND MAKE THE PERIODS NON-OVERLAPPING
+    fold_pdf = fold_pdf[["fold_id", "valid_start", "valid_end"]]
+    if extra_dict_list:
+        fold_pdf = pd.concat([fold_pdf, pd.DataFrame(extra_dict_list)], ignore_index=True)
+    period_pdf = get_replay_period_pdf(fold_pdf, session_date_list)
+    # DROP A PERIOD THAT STARTS AFTER THE BARS END AND CLIP THE LAST END
+    period_pdf = period_pdf[period_pdf["period_start"].map(get_date) <= window_end_date].reset_index(drop=True)
+    period_pdf["period_end"] = [min(get_date(period_end), window_end_date) for period_end in period_pdf["period_end"]]
+    return period_pdf
 
-# FUNCTION: REFIT AND DECIDE ONE SESSION
-def get_session_decision_dict(design_module_in, session_pdf_in, session_date_in, candidate_in=None):
+# FUNCTION: GET THE TOTAL RETURN OF A REPLAY'S DAILY EQUITY
+def get_equity_total_return_float(daily_equity_pdf_in):
     """
-    Refits on data strictly before session_date_in and asks for the target exposure. A model state that reports
-    last_date_seen on or after the decision session is a leak and raises.
+    Last equity divided by the initial capital, minus one. A candidate replay starts a fresh window at the initial capital.
 
     Args:
-        design_module_in (module): Design (fit, decide, DESIGN_REFIT_RULE)
-        session_pdf_in (pd.DataFrame): All sessions the runner holds
-        session_date_in (datetime.date): Decision session
-        candidate_in (str | None): Candidate name
+        daily_equity_pdf_in (pd.DataFrame): daily equity (column equity)
 
     Returns:
-        dict: model_state_dict, exposure_float
+        float: Total return
     """
-    # BUILD THE FRAME AND REFUSE A FRAME THAT REACHES THE DECISION
-    rule_dict = design_module_in.DESIGN_REFIT_RULE
-    frame_pdf = get_fit_frame_pdf(session_pdf_in, session_date_in, rule_dict["train_window"])
-    if len(frame_pdf) and get_date(frame_pdf["date"].max()) >= get_date(session_date_in):
-        raise ValueError("❌ Fit frame includes the decision session.")
-    # FIT AND REFUSE A LEAK THE DESIGN REPORTS
-    model_state_dict = design_module_in.fit(frame_pdf, session_date_in)
-    if "last_date_seen" in model_state_dict and get_date(model_state_dict["last_date_seen"]) >= get_date(session_date_in):
-        raise ValueError("❌ The design saw the decision session or a later date.")
-    # DECIDE FROM INFORMATION KNOWN BEFORE THE SESSION
-    prior_pdf = session_pdf_in[pd.to_datetime(session_pdf_in["date"]).dt.date < get_date(session_date_in)]
-    feature_dict = {"candidate": candidate_in, "prior_close": None if prior_pdf.empty else float(prior_pdf["close"].iloc[-1])}
-    exposure_float = float(design_module_in.decide(model_state_dict, session_date_in, feature_dict))
-    # RETURN THE DECISION
-    return {"model_state_dict": model_state_dict, "exposure_float": exposure_float}
+    # RETURN ZERO ON AN EMPTY WINDOW
+    if daily_equity_pdf_in is None or len(daily_equity_pdf_in) == 0:
+        return 0.0
+    return float(daily_equity_pdf_in["equity"].iloc[-1]) / config.INITIAL_CAPITAL - 1.0
 
-# FUNCTION: BUILD THE TARGET-WEIGHT ARRAY OF ONE CANDIDATE OVER THE WINDOW
-def get_exposure_arr(design_module_in, session_pdf_in, window_date_list_in, candidate_in=None):
+# FUNCTION: SCORE EVERY CANDIDATE ON EVERY PERIOD
+def get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf_in):
     """
-    Walks the window session by session. fit is called on the design's refit schedule; between refits the previous
-    model state is reused. Every fit sees only earlier sessions.
+    Period score = the candidate's period return minus buy-and-hold over the same period. Development periods and
+    holdout periods are both scored. Each call is the design's own replay of that period.
+
+    Args:
+        design_module_in (module): Design (CANDIDATE_LIST, run_candidate_replay_dict)
+        ohlcv_array_dict_in (dict): Bars
+        period_pdf_in (pd.DataFrame): Periods
+
+    Returns:
+        pd.DataFrame: fold_id, candidate, excess_return
+    """
+    # IMPORT BUY-AND-HOLD HERE
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    # SCORE EACH PERIOD AND EACH CANDIDATE
+    row_dict_list = []
+    for period_row in period_pdf_in.itertuples(index=False):
+        buy_hold_float = get_buy_and_hold_result_dict(ohlcv_array_dict_in, period_row.period_start, period_row.period_end)["metric_dict"]["total_return"]
+        for candidate in design_module_in.CANDIDATE_LIST:
+            replay_dict = design_module_in.run_candidate_replay_dict(ohlcv_array_dict_in, period_row.period_start, period_row.period_end, candidate)
+            row_dict_list.append({"fold_id": int(period_row.period_id), "candidate": candidate,
+                                  "excess_return": get_equity_total_return_float(replay_dict["daily_equity_pdf"]) - buy_hold_float})
+    return pd.DataFrame(row_dict_list)
+
+# FUNCTION: CHOOSE THE CANDIDATE IN FORCE FOR EACH PERIOD
+def get_governing_selection_pdf(design_module_in, score_pdf_in, period_pdf_in):
+    """
+    Selection for period f uses periods before f only (get_pooled_selection_pdf, then get_prior_only_period_candidate_dict).
+    The first period has an empty history and takes the first candidate. A single candidate governs every period.
+
+    Args:
+        design_module_in (module): Design (CANDIDATE_LIST, SELECTION_RULE)
+        score_pdf_in (pd.DataFrame): Period scores
+        period_pdf_in (pd.DataFrame): Periods
+
+    Returns:
+        pd.DataFrame: period_id, candidate, candidate_idx (the candidate in force)
+    """
+    # IMPORT THE SELECTION FUNCTIONS HERE
+    from so.core.evaluation import get_pooled_selection_pdf
+    from so.core.continuous_replay import get_prior_only_period_candidate_dict
+    # A SINGLE CANDIDATE GOVERNS EVERY PERIOD
+    candidate_list = list(design_module_in.CANDIDATE_LIST)
+    if len(candidate_list) == 1:
+        return pd.DataFrame({"period_id": period_pdf_in["period_id"].astype(int), "candidate": candidate_list[0], "candidate_idx": 0})
+    # SELECT FROM EARLIER PERIODS ONLY AND MAP THE CHOICE ONTO THE NEXT PERIOD
+    rule_dict = design_module_in.SELECTION_RULE
+    selection_pdf = get_pooled_selection_pdf(score_pdf_in, ["candidate"], "excess_return", int(rule_dict["pooled_periods"]), list(rule_dict["tie_break"]))
+    selection_pdf["candidate_idx"] = selection_pdf["candidate"].map({name: idx for idx, name in enumerate(candidate_list)})
+    governing_dict = get_prior_only_period_candidate_dict(selection_pdf, period_pdf_in, "candidate_idx")
+    # THE FIRST PERIOD HAS NO PRIOR SELECTION
+    row_dict_list = []
+    for period_id in period_pdf_in["period_id"].astype(int):
+        candidate_idx = int(governing_dict[period_id]) if period_id in governing_dict else 0
+        row_dict_list.append({"period_id": period_id, "candidate": candidate_list[candidate_idx], "candidate_idx": candidate_idx})
+    return pd.DataFrame(row_dict_list)
+
+# FUNCTION: RUN THE PRIOR-ONLY PATH ON ONE BAR SET
+def get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict_in):
+    """
+    Periods, scores, the candidate in force, and the design's continuous path.
 
     Args:
         design_module_in (module): Design
-        session_pdf_in (pd.DataFrame): Sessions (date, close), including history before the window
-        window_date_list_in (list[datetime.date]): Holdout sessions
-        candidate_in (str | None): Candidate
+        ohlcv_array_dict_in (dict): Bars
+        window_dict_in (dict): Active window
 
     Returns:
-        np.ndarray: Target exposure per window session
+        dict: period_pdf, score_pdf, selection_pdf, path_dict
     """
-    # COLLECT THE REFIT STEP
-    every_sessions = int(design_module_in.DESIGN_REFIT_RULE["every_sessions"])
-    exposure_list, model_state_dict = [], None
-    # ITERATE OVER THE WINDOW
-    for session_pos, session_date in enumerate(window_date_list_in):
-        # REFIT ON THE SCHEDULE AND ON THE FIRST SESSION
-        if model_state_dict is None or session_pos % every_sessions == 0:
-            decision_dict = get_session_decision_dict(design_module_in, session_pdf_in, session_date, candidate_in)
-            model_state_dict = decision_dict["model_state_dict"]
-            exposure_list.append(decision_dict["exposure_float"])
-        else:
-            # REUSE THE MODEL STATE (THE FEATURES ARE STILL ONLY THE PRIOR CLOSE)
-            prior_pdf = session_pdf_in[pd.to_datetime(session_pdf_in["date"]).dt.date < get_date(session_date)]
-            feature_dict = {"candidate": candidate_in, "prior_close": float(prior_pdf["close"].iloc[-1])}
-            exposure_list.append(float(design_module_in.decide(model_state_dict, session_date, feature_dict)))
-    # RETURN THE ARRAY
-    return np.array(exposure_list, dtype=float)
+    # BUILD THE PERIODS, THE SCORES AND THE PATH
+    period_pdf = get_holdout_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"], window_dict_in)
+    score_pdf = get_candidate_score_pdf(design_module_in, ohlcv_array_dict_in, period_pdf)
+    selection_pdf = get_governing_selection_pdf(design_module_in, score_pdf, period_pdf)
+    path_dict = design_module_in.run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf, selection_pdf)
+    return {"period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
 
-# FUNCTION: SPLIT A WINDOW INTO CALENDAR MONTHS
-def get_month_span_list(window_date_list_in):
+# FUNCTION: DROP BARS AFTER A CUT DATE
+def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     """
-    One (start, end) pair per calendar month of the window.
+    The same arrays with every session after cut_date_in removed. Kept sessions stay a prefix, so their bar indexes
+    and session positions do not move.
 
     Args:
-        window_date_list_in (list[datetime.date]): Holdout sessions
+        ohlcv_array_dict_in (dict): Bars
+        cut_date_in (datetime.date): Last session kept
 
     Returns:
-        list[tuple]: (first session, last session) of each month
+        dict: Truncated arrays
     """
-    # GROUP THE SESSIONS BY MONTH
+    # FIND THE LAST KEPT SESSION AND ITS LAST BAR
+    session_date_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
+    last_idx = max(idx for idx, session_date in enumerate(session_date_list) if session_date <= get_date(cut_date_in))
+    end_bar_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx]) + 1
+    # COPY THE PREFIX
+    truncated_dict = {key_str: ohlcv_array_dict_in[key_str][:end_bar_idx] for key_str in ["open_arr", "high_arr", "low_arr", "close_arr", "bar_session_idx_arr"]}
+    truncated_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"][:end_bar_idx]
+    truncated_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"][:last_idx + 1])
+    truncated_dict["session_start_idx_arr"] = ohlcv_array_dict_in["session_start_idx_arr"][:last_idx + 1]
+    truncated_dict["session_end_idx_arr"] = ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1]
+    truncated_dict["date_session_idx_dict"] = {get_date(session_date): idx for idx, session_date in enumerate(truncated_dict["session_date_list"])}
+    return truncated_dict
+
+# FUNCTION: LIST THE CUT DATES OF THE TRUNCATION TEST
+def get_truncation_cut_date_list(session_date_list_in, window_dict_in):
+    """
+    The last session of each calendar month inside the window, at most 12 (the latest 12 when a window has more).
+
+    Args:
+        session_date_list_in (list): Sessions
+        window_dict_in (dict): Active window
+
+    Returns:
+        list[datetime.date]: Cut dates
+    """
+    # GROUP THE HOLDOUT SESSIONS BY MONTH
+    start_date, end_date = get_date(window_dict_in["start"]), get_date(window_dict_in["end"])
     month_dict = {}
-    for session_date in window_date_list_in:
-        month_dict.setdefault((session_date.year, session_date.month), []).append(session_date)
-    # RETURN THE SPANS IN ORDER
-    return [(date_list[0], date_list[-1]) for _, date_list in sorted(month_dict.items())]
+    for session_date in session_date_list_in:
+        session_day = get_date(session_date)
+        if start_date <= session_day <= end_date:
+            month_dict.setdefault((session_day.year, session_day.month), []).append(session_day)
+    # RETURN THE MONTH ENDS
+    return [date_list[-1] for _, date_list in sorted(month_dict.items())][-12:]
 
-# FUNCTION: SELECT CANDIDATES PERIOD BY PERIOD AND BUILD ONE EXPOSURE PATH
-def get_selected_exposure_arr(design_module_in, session_pdf_in, window_date_list_in):
+# FUNCTION: COMPARE ONE TRUNCATED REPLAY WITH THE FULL REPLAY
+def get_lookahead_difference_str(full_result_dict_in, short_result_dict_in, cut_date_in):
     """
-    If the design has no CANDIDATE_LIST, one exposure path. If it has candidates and selection_rule, each month is
-    governed by the candidate selected from completed earlier months only (the first month uses an empty history).
+    None when every decision on a session before the cut matches. The cut session itself is the last session of the
+    truncated replay, which the simulator liquidates; that liquidation is not a strategy decision and is excluded.
+    Target weights are compared on every session up to and including the cut.
 
     Args:
-        design_module_in (module): Design
-        session_pdf_in (pd.DataFrame): Sessions
-        window_date_list_in (list[datetime.date]): Holdout sessions
+        full_result_dict_in (dict): Replay on all bars
+        short_result_dict_in (dict): Replay on bars through the cut
+        cut_date_in (datetime.date): Cut date
 
     Returns:
-        np.ndarray: Target exposure per window session
+        str | None: The decision that differed, or None
     """
-    # WITHOUT CANDIDATES, REPLAY THE SINGLE RULE
-    candidate_list = list(getattr(design_module_in, "CANDIDATE_LIST", []) or [])
-    if not candidate_list:
-        return get_exposure_arr(design_module_in, session_pdf_in, window_date_list_in)
-    # SCORE EVERY CANDIDATE OVER THE WHOLE WINDOW FIRST (EACH DECISION IS CAUSAL)
-    exposure_dict = {candidate: get_exposure_arr(design_module_in, session_pdf_in, window_date_list_in, candidate) for candidate in candidate_list}
-    date_to_pos = {get_date(session_date): pos for pos, session_date in enumerate(window_date_list_in)}
-    # WALK THE MONTHS, SELECTING FROM COMPLETED MONTHS ONLY
-    selected_list, completed_dict_list = [], []
-    for month_start, month_end in get_month_span_list(window_date_list_in):
-        selected = design_module_in.selection_rule(pd.DataFrame(completed_dict_list))
-        # COPY THE SELECTED CANDIDATE'S EXPOSURE FOR THIS MONTH
-        for session_date in window_date_list_in:
-            if month_start <= get_date(session_date) <= month_end:
-                selected_list.append(exposure_dict[selected][date_to_pos[get_date(session_date)]])
-        # RECORD EACH CANDIDATE'S MEAN EXPOSURE ON THE COMPLETED MONTH (A SCORE THAT USES ONLY THAT MONTH)
-        for candidate in candidate_list:
-            month_exposure_arr = np.array([exposure_dict[candidate][date_to_pos[get_date(session_date)]]
-                                           for session_date in window_date_list_in if month_start <= get_date(session_date) <= month_end])
-            completed_dict_list.append({"candidate": candidate, "period_end": month_end, "mean_exposure": float(month_exposure_arr.mean())})
-    # RETURN THE PATH
-    return np.array(selected_list, dtype=float)
+    # COMPARE THE CANDIDATE IN FORCE ON PERIODS THAT END BEFORE THE CUT
+    full_period_pdf, short_period_pdf = full_result_dict_in["period_pdf"], short_result_dict_in["period_pdf"]
+    for period_id in full_period_pdf["period_id"].astype(int):
+        full_end_date = get_date(full_period_pdf.loc[full_period_pdf["period_id"] == period_id, "period_end"].iloc[0])
+        if full_end_date >= get_date(cut_date_in):
+            continue
+        short_match_pdf = short_period_pdf[short_period_pdf["period_id"] == period_id]
+        if short_match_pdf.empty:
+            return f"period {period_id} missing at {cut_date_in}"
+        full_candidate = full_result_dict_in["selection_pdf"].loc[full_result_dict_in["selection_pdf"]["period_id"] == period_id, "candidate"].iloc[0]
+        short_candidate = short_result_dict_in["selection_pdf"].loc[short_result_dict_in["selection_pdf"]["period_id"] == period_id, "candidate"].iloc[0]
+        if full_candidate != short_candidate:
+            return f"candidate of period {period_id} at {cut_date_in}"
+    # COMPARE TARGET WEIGHTS ON EVERY SESSION UP TO THE CUT
+    full_path_dict, short_path_dict = full_result_dict_in["path_dict"], short_result_dict_in["path_dict"]
+    if "target_weight_arr" in full_path_dict and "target_weight_arr" in short_path_dict:
+        short_weight_dict = {get_date(session_date): float(short_path_dict["target_weight_arr"][idx])
+                             for idx, session_date in enumerate(short_path_dict["decision_session_list"])}
+        for idx, session_date in enumerate(full_path_dict["decision_session_list"]):
+            session_day = get_date(session_date)
+            if session_day <= get_date(cut_date_in) and session_day in short_weight_dict:
+                if abs(float(full_path_dict["target_weight_arr"][idx]) - short_weight_dict[session_day]) > 1e-12:
+                    return f"target weight on {session_day}"
+    # COMPARE POSITIONS AND WEIGHTS ON SESSIONS STRICTLY BEFORE THE CUT
+    full_equity_pdf, short_equity_pdf = full_path_dict["daily_equity_pdf"].copy(), short_path_dict["daily_equity_pdf"].copy()
+    full_equity_pdf["date"] = full_equity_pdf["date"].map(get_date)
+    short_equity_pdf["date"] = short_equity_pdf["date"].map(get_date)
+    merged_pdf = full_equity_pdf.merge(short_equity_pdf, on="date", suffixes=("_full", "_short"))
+    before_pdf = merged_pdf[merged_pdf["date"] < get_date(cut_date_in)]
+    if "in_position_full" in before_pdf.columns and not np.array_equal(before_pdf["in_position_full"].to_numpy(), before_pdf["in_position_short"].to_numpy()):
+        return f"position on {before_pdf.loc[before_pdf['in_position_full'].to_numpy() != before_pdf['in_position_short'].to_numpy(), 'date'].iloc[0]}"
+    if "weight_full" in before_pdf.columns and float(np.max(np.abs(before_pdf["weight_full"].to_numpy(dtype=float) - before_pdf["weight_short"].to_numpy(dtype=float)))) > 1e-12:
+        return f"weight on {before_pdf.loc[np.abs(before_pdf['weight_full'] - before_pdf['weight_short']).idxmax(), 'date']}"
+    # COMPARE TRADES STRICTLY BEFORE THE CUT, EXCLUDING THE FORCED END-OF-WINDOW SALE
+    def get_trade_key_list(trade_pdf_in):
+        # KEEP NOTHING WHEN THERE ARE NO TRADES
+        if trade_pdf_in is None or len(trade_pdf_in) == 0:
+            return []
+        trade_pdf = trade_pdf_in.copy()
+        if "reason" in trade_pdf.columns:
+            trade_pdf = trade_pdf[trade_pdf["reason"] != "END"]
+        trade_pdf["session"] = pd.to_datetime(trade_pdf["trade_ts"]).dt.tz_convert("America/New_York").dt.date
+        trade_pdf = trade_pdf[trade_pdf["session"] < get_date(cut_date_in)]
+        delta_str = "delta_share_count" if "delta_share_count" in trade_pdf.columns else "delta"
+        return [(str(session_date), float(delta)) for session_date, delta in zip(trade_pdf["session"], trade_pdf[delta_str])]
+    full_trade_list, short_trade_list = get_trade_key_list(full_path_dict.get("trade_pdf")), get_trade_key_list(short_path_dict.get("trade_pdf"))
+    if len(full_trade_list) != len(short_trade_list) or any(abs(full_delta - short_delta) > 1e-12 or full_session != short_session
+                                                           for (full_session, full_delta), (short_session, short_delta) in zip(full_trade_list, short_trade_list)):
+        return f"trade before {cut_date_in}"
+    return None
 
-# FUNCTION: REPLAY THE HOLDOUT AND BUILD THE REPORT
-def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, baseline_return_dict_in=None):
+# FUNCTION: REBASE THE HOLDOUT SEGMENT AND BUILD THE REPORT
+def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, result_dict_in):
     """
-    One continuous fractional-exposure path over the window (costs from so.config), buy-and-hold over the same
-    sessions, the annualized log excess with a 6-month block bootstrap, time in the market, Sharpe, maximum
-    drawdown, the minimum detectable effect of the monthly log excess, and the project success criteria.
+    Reports only the holdout sessions. Equity is rebased so the equity entering the window equals the initial capital.
+    Buy-and-hold and the design's baselines are computed on the holdout sessions only.
 
     Args:
-        design_module_in (module): Design
-        ohlcv_array_dict_in (dict): Output of so.core.trade_execution.get_ohlcv_array_dict
-        window_dict_in (dict): Active window (start, end)
-        baseline_return_dict_in (dict | None): Uninformed baselines the protocol names (name -> total return)
+        design_module_in (module): Design (get_baseline_return_dict)
+        ohlcv_array_dict_in (dict): Bars through the window end
+        window_dict_in (dict): Active window
+        result_dict_in (dict): The full prior-only result
 
     Returns:
         dict: report_dict, daily_equity_pdf, buy_hold_equity_pdf
     """
-    # IMPORT THE REPLAY AND EVALUATION FUNCTIONS HERE (AVOID AN IMPORT CYCLE)
-    from so.core.fractional_exposure import simulate_fractional_exposure_dict
+    # IMPORT THE EVALUATION FUNCTIONS HERE
     from so.core.reentry_simulation import get_buy_and_hold_result_dict
     from so.core.evaluation import get_chained_daily_return_pdf, get_success_criteria_dict, get_mde_float
     from so.core.continuous_replay import get_log_excess_bootstrap_dict
-    # BUILD A SESSION TABLE AND THE WINDOW SESSIONS
-    session_pdf = pd.DataFrame({"date": ohlcv_array_dict_in["session_date_list"],
-                                "close": [float(ohlcv_array_dict_in["close_arr"][idx]) for idx in ohlcv_array_dict_in["session_end_idx_arr"]]})
+    # CUT THE PATH TO THE HOLDOUT AND REBASE IT
     start_date, end_date = get_date(window_dict_in["start"]), get_date(window_dict_in["end"])
-    window_date_list = [get_date(session_date) for session_date in session_pdf["date"] if start_date <= get_date(session_date) <= end_date]
-    # BUILD THE EXPOSURE OF THE WINDOW AND ALIGN IT TO EVERY SESSION OF THE ARRAYS
-    window_exposure_arr = get_selected_exposure_arr(design_module_in, session_pdf, window_date_list)
-    target_arr = np.full(len(session_pdf), np.nan)
-    window_pos_list = [pos for pos, session_date in enumerate(session_pdf["date"]) if start_date <= get_date(session_date) <= end_date]
-    target_arr[window_pos_list] = window_exposure_arr
-    # REPLAY THE PATH AND BUY-AND-HOLD (THE RUNNER FLAG IS ALREADY SET BY THE CALLER)
-    simulation_dict = simulate_fractional_exposure_dict(ohlcv_array_dict_in, start_date, end_date, target_arr, dead_band_in=0.0,
-                                                       initial_weight_in=float(window_exposure_arr[0]))
+    equity_pdf = result_dict_in["path_dict"]["daily_equity_pdf"].copy()
+    equity_pdf["date"] = equity_pdf["date"].map(get_date)
+    prior_pdf = equity_pdf[equity_pdf["date"] < start_date]
+    holdout_pdf = equity_pdf[(equity_pdf["date"] >= start_date) & (equity_pdf["date"] <= end_date)].copy()
+    base_float = float(prior_pdf["equity"].iloc[-1]) if len(prior_pdf) else config.INITIAL_CAPITAL
+    holdout_pdf["equity"] = holdout_pdf["equity"] * (config.INITIAL_CAPITAL / base_float)
+    carried_weight_float = float(holdout_pdf["weight"].iloc[0]) if "weight" in holdout_pdf.columns and len(holdout_pdf) else np.nan
+    # BUY-AND-HOLD AND THE DESIGN'S BASELINES, BOTH OVER THE HOLDOUT ONLY
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, start_date, end_date)
+    baseline_return_dict = design_module_in.get_baseline_return_dict(ohlcv_array_dict_in, start_date, end_date)
     # CALCULATE THE LOG EXCESS, THE SUCCESS CRITERIA AND THE MDE
-    strategy_return_pdf = get_chained_daily_return_pdf([simulation_dict["daily_equity_pdf"]])
+    strategy_return_pdf = get_chained_daily_return_pdf([holdout_pdf])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])
     log_excess_dict = get_log_excess_bootstrap_dict(strategy_return_pdf, buy_hold_return_pdf, block_month_count_in=6)
-    success_dict = get_success_criteria_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_return_dict_in)
+    success_dict = get_success_criteria_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_return_dict)
     merged_pdf = strategy_return_pdf.merge(buy_hold_return_pdf, on="date", suffixes=("_strategy", "_buy_hold"))
     merged_pdf["month"] = pd.to_datetime(merged_pdf["date"]).dt.to_period("M")
     month_pdf = merged_pdf.groupby("month").agg(strategy_log=("daily_return_strategy", lambda series: float(np.log1p(series).sum())),
                                                 buy_hold_log=("daily_return_buy_hold", lambda series: float(np.log1p(series).sum())))
     month_excess_arr = (month_pdf["strategy_log"] - month_pdf["buy_hold_log"]).to_numpy(dtype=float)
+    # RECORD THE CANDIDATE IN FORCE IN EACH HOLDOUT PERIOD
+    period_pdf, selection_pdf = result_dict_in["period_pdf"], result_dict_in["selection_pdf"]
+    holdout_period_pdf = period_pdf[period_pdf["period_end"].map(get_date) >= start_date]
+    candidate_dict = {int(period_row.period_id): selection_pdf.loc[selection_pdf["period_id"] == period_row.period_id, "candidate"].iloc[0]
+                      for period_row in holdout_period_pdf.itertuples(index=False)}
     # RETURN THE REPORT
     report_dict = {"total_return": success_dict["strategy_total_return"], "buy_hold_total_return": success_dict["buy_hold_total_return"],
                    "annualized_log_excess": log_excess_dict["annualized_log_excess"], "log_excess_ci_low": log_excess_dict["ci_low"],
-                   "log_excess_ci_high": log_excess_dict["ci_high"], "in_market_pct": float(simulation_dict["daily_equity_pdf"]["in_position"].mean()),
+                   "log_excess_ci_high": log_excess_dict["ci_high"], "in_market_pct": float(holdout_pdf["in_position"].mean()) if "in_position" in holdout_pdf.columns else np.nan,
                    "sharpe_ratio": success_dict["strategy_sharpe_ratio"], "max_drawdown": success_dict["strategy_max_drawdown"],
                    "mde": get_mde_float(float(np.std(month_excess_arr, ddof=1)) if len(month_excess_arr) > 1 else np.nan, len(month_excess_arr)),
                    "primary_pass": success_dict["primary_success"], "secondary_pass": success_dict["secondary_success"],
-                   "comparable_pass": success_dict["comparable_return"], "baselines_beaten": success_dict["baselines_beaten"]}
-    return {"report_dict": report_dict, "daily_equity_pdf": simulation_dict["daily_equity_pdf"], "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"]}
+                   "comparable_pass": success_dict["comparable_return"], "baselines_beaten": success_dict["baselines_beaten"],
+                   "carried_weight": carried_weight_float, "holdout_candidates": json.dumps(candidate_dict)}
+    return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"]}
+
+# FUNCTION: RUN THE TRUNCATION TEST
+def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in):
+    """
+    Re-runs the prior-only path on bars truncated after each month-end inside the window. Returns the first difference.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars through the window end
+        window_dict_in (dict): Active window
+        full_result_dict_in (dict): The full replay
+
+    Returns:
+        str | None: The cut and the decision that differed, or None
+    """
+    # CHECK EACH MONTH END
+    for cut_date in get_truncation_cut_date_list(ohlcv_array_dict_in["session_date_list"], window_dict_in):
+        short_result_dict = get_prior_only_result_dict(design_module_in, get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date), window_dict_in)
+        difference_str = get_lookahead_difference_str(full_result_dict_in, short_result_dict, cut_date)
+        if difference_str is not None:
+            return f"{cut_date}: {difference_str}"
+    return None
 
 # FUNCTION: APPEND ONE LEDGER ROW
 def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
@@ -806,20 +969,21 @@ def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
 
 # FUNCTION: EVALUATE ONE FROZEN DESIGN ON THE ACTIVE WINDOW
 def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_in, token_file_path_str_in, git_precondition_dict_in=None,
-                           design_folder_str_in=".", baseline_return_dict_in=None, ledger_path_str_in=None, trial_log_path_str_in=None):
+                           design_folder_str_in=".", ledger_path_str_in=None, trial_log_path_str_in=None):
     """
-    Nicolas only. Checks the preconditions, replays the design over the active window with the runner flag set, writes
-    the daily paths under SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends one ledger row and one trial-log row
-    (stage "test", test_window_touched True).
+    Nicolas only. Checks the preconditions, replays the frozen prior-only path from the development start through the
+    window end, runs the truncation test, and only then writes a result. A failed truncation test writes no daily
+    paths and appends a ledger row with status "invalid_lookahead" (it counts against the window budget). A valid
+    run writes the holdout paths under SO_HOLDOUT_PATH/<window_id>/<design_id>/, appends a ledger row with status
+    "valid", and appends one trial-log row (stage "test", test_window_touched True).
 
     Args:
         design_module_in (module): Design
         design_id_str_in (str): Design id
-        ohlcv_array_dict_in (dict): Bars the replay may use (history before the window included; nothing after the end)
+        ohlcv_array_dict_in (dict): Bars from the first session through the window end (nothing after the end)
         token_file_path_str_in (str): Token file
-        git_precondition_dict_in (dict | None): Injected git result
-        design_folder_str_in (str): Design folder for the git probe
-        baseline_return_dict_in (dict | None): Protocol baselines
+        git_precondition_dict_in (dict | None): Injected git result (may include design_tree_str and so_tree_str)
+        design_folder_str_in (str): Design folder for the git probe and the design-tree hash
         ledger_path_str_in (str | None): Ledger CSV
         trial_log_path_str_in (str | None): Trial log CSV (None = the shared trial log)
 
@@ -830,32 +994,40 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     precondition_dict = check_evaluation_precondition_dict(design_module_in, design_id_str_in, token_file_path_str_in,
                                                            git_precondition_dict_in, design_folder_str_in, ledger_path_str_in)
     window_dict = precondition_dict["window_dict"]
-    # SET THE RUNNER FLAG FOR THE REPLAY ONLY
+    # SET THE RUNNER FLAG SO THE WINDOW ITSELF IS READABLE AND THE DAY AFTER IT IS NOT
     global _RUNNER_ACTIVE_BOOL
     _RUNNER_ACTIVE_BOOL = True
     try:
-        # REPLAY THE WINDOW
-        result_dict = get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, baseline_return_dict_in)
+        # REPLAY THE PATH, THEN THE TRUNCATION TEST, BEFORE ANY RESULT IS WRITTEN
+        full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict)
+        failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
+        report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
     finally:
         # CLEAR THE FLAG EVEN IF THE REPLAY RAISES
         _RUNNER_ACTIVE_BOOL = False
-    # WRITE THE DAILY PATHS ONLY UNDER SO_HOLDOUT_PATH
+    # BUILD THE LEDGER ROW
+    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
+                "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds")}
+    # A LEAK COUNTS AGAINST THE BUDGET AND WRITES NO PATH
+    if failure_str:
+        print(f"invalid_lookahead: {failure_str}")
+        row_dict["status"] = "invalid_lookahead"
+        append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+        return row_dict
+    # WRITE THE HOLDOUT PATHS ONLY UNDER SO_HOLDOUT_PATH
     results_path_str = os.environ["SO_HOLDOUT_PATH"]
     output_path_str = os.path.join(results_path_str, window_dict["window_id"], design_id_str_in)
     os.makedirs(output_path_str, exist_ok=True)
-    result_dict["daily_equity_pdf"].to_csv(os.path.join(output_path_str, "strategy_daily_equity.csv"), index=False)
-    result_dict["buy_hold_equity_pdf"].to_csv(os.path.join(output_path_str, "buy_hold_daily_equity.csv"), index=False)
-    # APPEND THE LEDGER ROW
-    report_dict = result_dict["report_dict"]
-    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
-                "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
-                **{key_str: report_dict[key_str] for key_str in EVALUATION_COLUMN_LIST if key_str in report_dict}}
+    report_dict["daily_equity_pdf"].to_csv(os.path.join(output_path_str, "strategy_daily_equity.csv"), index=False)
+    report_dict["buy_hold_equity_pdf"].to_csv(os.path.join(output_path_str, "buy_hold_daily_equity.csv"), index=False)
+    # APPEND THE VALID LEDGER ROW AND THE TRIAL-LOG ROW
+    report_fields_dict = report_dict["report_dict"]
+    row_dict["status"] = "valid"
+    row_dict.update(report_fields_dict)
     append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
-    # APPEND THE TRIAL-LOG ROW
     from so.core.trial_log import log_trial_dict
     log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
-                   {key_str: report_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
+                   {key_str: report_fields_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
                    True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
                    note_str_in="holdout evaluation", file_path_str_in=trial_log_path_str_in, alert_in=False)
-    # RETURN THE LEDGER ROW
     return row_dict
