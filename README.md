@@ -107,7 +107,7 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 | experiments | `store04_experiments/<experiment>/<stepNN_..._data>/` | the experiment's notebooks | regenerate by re-running |
 | experiments | `store04_experiments/trial_log.csv` | every experiment notebook | **never edit** |
 | records | `records/holdout_windows.csv` | `scripts/holdout_window.py` (Nicolas only) | append-only; a retired row is filled once |
-| records | `records/holdout_evaluations.csv` | `scripts/holdout_evaluate.py` (Nicolas only) | append-only summary metrics |
+| records | `records/holdout_evaluations.csv` | `scripts/holdout_evaluate.py` (Nicolas only) | append-only summary metrics; `status` is `valid` or `invalid_lookahead` |
 | holdout results | `SO_HOLDOUT_PATH` (no default) | the holdout evaluation | daily paths; not in git |
 
 Deleting an experiment's folder never affects the pipeline or another experiment. `SO_HOLDOUT_PATH` is an environment
@@ -124,9 +124,13 @@ variable with no default: when it is unset, holdout results cannot be written. A
   If no holdout window is registered, development notebooks must refuse to run.
 - **The holdout** is the last 12 calendar months of the data when Nicolas opens the window
   (`scripts/holdout_window.py`). Once opened it is frozen. Sessions after its end are forward data and are refused.
-  Each frozen design may be evaluated once per window, at most 10 designs, and only by Nicolas
-  (`scripts/holdout_evaluate.py`). Agents never read the holdout, never set `SO_HOLDOUT_PATH`,
-  `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never run those scripts.
+  The result is the design's frozen prior-only path from its development start, continued through the window: same
+  code, same 15:58 decision and 15:59 fill, same costs, dead band and selection rule, with selection history and
+  position carried over. Only the holdout sessions are reported. Before a result is written, the runner repeats that
+  path on bars cut after each of 12 month-ends in the window; a difference is ledger status `invalid_lookahead` (no
+  daily paths, and the row counts against the budget). Each frozen design may be evaluated once per window, at most
+  10 designs, and only by Nicolas (`scripts/holdout_evaluate.py`). Agents never read the holdout, never set
+  `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never run those scripts.
 - **Archived experiments** (exp01–exp13) keep their recorded numbers and stay pinned to the old boundary 2026-05-14.
   Nicolas re-runs them only with `SO_ALLOW_LEGACY_REPRODUCTION=1`, which cannot extend past that date.
 - **Every exploration, signal check, validation candidate, summary and test is logged** in the shared trial log, with the

@@ -107,7 +107,7 @@ the active holdout start.*
   forced buy-back after `max_cash_sessions_in`), trailing stops, re-entry rule builders (model, fixed delay, random,
   oracle), trend rule, buy-and-hold.
 - `experiments/exp03_ath_exit/rules.py`: exit-signal + buy-back simulation on top of it, random exit / random buy-back.
-- `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments).
+- `so.core.holdout`: the rolling 12-month holdout (registry, development boundary, guards, Nicolas-only evaluation of the frozen prior-only path, with a truncation test and ledger status `valid` / `invalid_lookahead`). `so.core.schedule.get_development_fold_pdf` builds validation folds up to that boundary; `get_walk_forward_fold_pdf` is unchanged (archived experiments). Pipeline notebooks pass `enforce_holdout_bool_in=False` because they prepare data and compute no strategy result. Work-zone and gold-zone cache reads are guarded unless that flag is set.
 - `so.core.schedule`: walk-forward folds; `so.core.evaluation`: pooled selection, prior-only path, MDE, baseline
   summaries, chained daily returns, monthly bootstrap, success criteria; `so.core.trial_log`: the shared trial log.
 - `so.features.daily_features`: 16 daily features at the 15:58 decision bar (returns 1-250d, MA50/MA200 distance,
@@ -289,6 +289,27 @@ frozen; data after its end is forward data and is refused. Each frozen design ma
 re-run only by Nicolas with `SO_ALLOW_LEGACY_REPRODUCTION=1`). **No window is registered.** Nicolas opens it after the
 download and the pipeline re-run.
 
+Audit of `agent/holdout-split` at `3540f65` (Nicolas, 2026-10-11), fixed on the same branch. No window opened, no
+evaluation, no trial-log rows.
+
+- **B1.** The pipeline prepares data and computes no strategy result, so it must run with or without a registered
+  window. `pipeline/step06` and `step07` call `get_complete_ohlcv_pdf(..., enforce_holdout_bool_in=False)`. step07 keeps
+  its cutoff `2026-04-15`. The same flag is passed through the VIX loaders, because an active window that starts before
+  that cutoff would otherwise reject step07's own cutoff. `scripts/check_spy_rename.py` is a data check (it counts
+  sessions, then applies its own cut) and gets the same flag. Steps 00 and 01 read the raw folder directly. Steps 02–05
+  read the raw folder directly and read their caches with the flag off (L1).
+- **L1.** `read_date_range_csv_files_from_path` and `read_csv_files_from_path` take `enforce_holdout_bool_in=True`. Inside
+  the work zone or the gold zone, files dated on or after the replay boundary are skipped, and an explicit date2 on or
+  after the boundary raises. With no window the guard raises. `store04_experiments` is unaffected. The pipeline passes
+  `False`.
+- **R1–R3.** The runner no longer fits and decides session by session. It replays the design's frozen prior-only path
+  from the development start through the window end (same code, 15:58/15:59, costs, dead band, candidates, selection,
+  carried position). Only the holdout sessions are reported. A truncation test (12 month-ends) runs before any result
+  is written. Status `invalid_lookahead` writes no daily paths and counts against the budget. Status `valid` is a
+  normal evaluation.
+- **H1.** The design hash is the sha256 of `git rev-parse HEAD:<design folder>`, `git rev-parse HEAD:so`, and the config
+  hash. An unrelated commit does not change it.
+
 **Calibration re-runs of exp05 and exp06 under the new split, as new versions: proposed, waiting for Nicolas.**
 
 ### Then: text / qualitative data (new data, needs Nicolas)
@@ -340,3 +361,4 @@ download and the pipeline re-run.
 | 2026-10-09 | agent | exp13_e1m1_robustness (Nicolas's override of exp12's last-test commitment): main `67806e5` is an ancestor; roadmap `ce2df27`; audit notes B1/B3/B4 `cc243d6`; pre-registered `afe6b42`; run once: R1–R4 fail, R5 holds → **E1M1 IS NOT ROBUST**, VIX line closed; 81 trials (workspace 3,651 + 4,089 legacy = 7,740); parked "write-up of the negative result" (recommendation: do it now) | Blocked: the write-up and text data are parked for Nicolas (§7) |
 | 2026-10-11 | agent | Rolling holdout task stopped at the gate: main HEAD `11a1322` has the new rules 1 and 3, but no commit message "rules: rolling holdout" (`git log --grep`). Parked for Nicolas. No code, no window, no trials | Unblocked only if Nicolas confirms `11a1322` / `e3e0219` or adds the named commit |
 | 2026-10-11 | agent | Nicolas confirmed `e3e0219` and `11a1322` are the rules change. Rolling-holdout infrastructure on `agent/holdout-split`: `so.core.holdout`, guards, development schedule, Nicolas-only scripts, archive notes on exp01–exp13, tests. No window opened, no evaluation, no trial-log rows | Nicolas: download SPY through the latest session, re-run pipeline 00-06, then `scripts/holdout_window.py open`. Calibration re-runs of exp05 and exp06 are proposed and waiting |
+| 2026-10-11 | agent | Audit of `3540f65` (B1, L1, R1–R3, H1): pipeline and cache reads run with a window open; the runner replays the frozen prior-only path and truncation-tests it; design hash is content-addressed. Synthetic tests only. No window opened, no evaluation, no trial-log rows | Same next step: Nicolas downloads, re-runs the pipeline, then opens the window |
