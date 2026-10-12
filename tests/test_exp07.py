@@ -32,6 +32,7 @@ from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.core.continuous_replay import simulate_continuous_replay_dict
 from so.core.replay_walk_forward import run_candidate_replay_dict, run_prior_only_replay_dict
+from experiments.exp07_warning_lights_exit.design import CANDIDATE_LIST, SELECTION_RULE, run_candidate_replay_dict as run_design_replay_dict
 from experiments.exp07_warning_lights_exit.rules import get_schedule_tuple, get_rule_candidate_list, get_light_pdf, get_rule_builder_func
 from synthetic_data import get_synthetic_ohlcv_pdf
 
@@ -120,6 +121,22 @@ def test_walk_forward(ohlcv_array_dict_in, daily_pdf_in):
     assert sum(name.startswith("random_reentry_") for name in baseline_name_list) == exp_config.RANDOM_RUN_COUNT
     passed(f"walk-forward (3 x {len(period_pdf)} candidate periods chain to their totals; ties -> k = 5; prior-only f -> f + 1; {len(baseline_name_list)} baseline rows)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID AND TIE-BREAK
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # TIES: THE LARGER k
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp07_warning_lights_exit import design
+    assert CANDIDATE_LIST == ["k3", "k4", "k5"] and SELECTION_RULE["tie_break"] == [("light_k", False)]
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "k3"
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "k5").all()
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = run_design_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (k in 3, 4, 5; ties -> k = 5; one finite replay)")
+
 """
 Runner
 """
@@ -136,4 +153,5 @@ if __name__ == "__main__":
     test_lights(synthetic_ohlcv_pdf, synthetic_daily_pdf)
     test_mechanics(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_walk_forward(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp07 tests passed ✅")
