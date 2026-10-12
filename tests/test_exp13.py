@@ -75,9 +75,10 @@ def test_config():
     assert len(grid_list) == 36 and len(set(grid_list)) == 36
     assert (exp_config.FROZEN_M1_FADE_RATIO, exp_config.FROZEN_MA_LENGTH, exp_config.FROZEN_FRESH_EXIT_BOOL) in grid_list
     assert exp_config.FROZEN_MA_DIST_COL_STR == f"ma{exp_config.FROZEN_MA_LENGTH}_dist_pct"
-    assert sum(exp_config.EXPECTED_STEP_TRIAL_COUNT_DICT.values()) == 81 <= exp_config.TRIAL_BUDGET
+    assert sum(exp_config.EXPECTED_STEP_TRIAL_COUNT_DICT.values()) == 81
+    assert exp_config.TRIAL_BUDGET == 1 * 44 + 1 and exp_config.EXPERIMENT_NAME == "exp13_e1m1_robustness_v2"
     assert exp_config.DEV_END_DATE_STR < exp_config.UNTOUCHED_START_DATE_STR and exp_config.STRESS_DATA_CUTOFF_DATE_STR < exp_config.DEV_START_DATE_STR
-    passed("config (36 variants with E1M1 = 0.85 / 200 / on; 81 expected trials <= budget 150; spans before the untouched window)")
+    passed("config (36 variants with E1M1 = 0.85 / 200 / on; v2 budget 45; protocol 1.0 expected 81; spans before the untouched window)")
 
 # TEST 2: THE AVERAGE DISTANCES
 def test_ma_dist(daily_pdf_in):
@@ -240,6 +241,22 @@ def test_reports(ohlcv_array_dict_in, daily_pdf_in, vix_feature_pdf_in):
 Runner
 """
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S SINGLE CANDIDATE
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # ONE RULE GOVERNS EVERY PERIOD
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp13_e1m1_robustness import design
+    assert design.CANDIDATE_LIST == ["E1M1"]
+    assert design.DATA_SOURCE_LIST == ["SPY_1MIN", "VIX_DAILY", "VIX3M_DAILY"]
+    period_pdf = pd.DataFrame({"period_id": [0, 1], "period_start": ["2022-01-03", "2022-04-01"], "period_end": ["2022-03-31", "2022-06-30"]})
+    score_pdf = pd.DataFrame({"fold_id": [0, 1], "candidate": ["E1M1", "E1M1"], "excess_return": [0.0, 0.0]})
+    governing_pdf = get_governing_selection_pdf(design, score_pdf, period_pdf)
+    assert (governing_pdf["candidate"] == "E1M1").all()
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = design.run_candidate_replay_dict(ohlcv_array_dict_in, date1, date2, "E1M1")
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (frozen E1M1 governs every period; one finite replay)")
+
 # IF THE FILE IS RUN DIRECTLY
 if __name__ == "__main__":
     # GENERATE THE SYNTHETIC DATA (ABOUT 3.5 YEARS) AND AN ALIGNED SYNTHETIC VIX TABLE
@@ -257,4 +274,5 @@ if __name__ == "__main__":
     test_null_summary()
     test_nulls(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_feature_pdf)
     test_reports(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_feature_pdf)
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp13 tests passed ✅")

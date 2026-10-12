@@ -54,7 +54,7 @@ stock_overflow_workspace/
 | exp08_vix_signal_check | **archived** (was DONE, VIX line STOP; no gate opens: G1, G2, G4 fail; G3 passes) | `experiments/exp08_vix_signal_check/PROTOCOL.md` |
 | exp09-exp11 (VIX) | **archived** (was SKIPPED by exp08's pre-registered gates) | `docs/RESEARCH_STATE_2026-10-11.md` §6 |
 | exp12_vix_fear_reentry | **pre-registered** 2026-10-12 (protocol 2.0, re-run under the new rules, not yet run). Protocol 1.0 (+119.24% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp12_vix_fear_reentry/PROTOCOL.md` |
-| exp13_e1m1_robustness | **archived** (was E1M1 IS NOT ROBUST; R1–R4 fail; stress +53.32% vs +73.09%; p2 = 0.088; VIX line closed) | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
+| exp13_e1m1_robustness | **pre-registered** 2026-10-12 (protocol 2.0, frozen E1M1 only, not yet run). Protocol 1.0 (E1M1 IS NOT ROBUST) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
 | Rolling holdout | Infrastructure in place. A window is registered. The agent does not read it and does not evaluate it | `so/core/holdout.py` |
 | Text / qualitative data | Blocked: new data source (parked decision for Nicolas) | `docs/RESEARCH_STATE_2026-10-11.md` |
 
