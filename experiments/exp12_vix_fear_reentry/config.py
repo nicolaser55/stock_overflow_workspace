@@ -1,4 +1,4 @@
-# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
+# VERSION 2.0 (2026-10-12): re-run under the current rules, not new evidence. The protocol 1.0 code is at tag pre-port-20261012.
 # IMPORT THE SHARED CONFIGURATION AND THE VIX CONFIGURATION
 from so import config
 from so import vix_config
@@ -23,10 +23,10 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp12_vix_fear_reentry"
-PROTOCOL_VERSION = "1.0"
-# DEFINE THE TRIAL BUDGET (6 EXPLORATION + 264 VALIDATION + 1 SUMMARY = 271 EXPECTED)
-TRIAL_BUDGET = 300
+EXPERIMENT_NAME = "exp12_vix_fear_reentry_v2"
+PROTOCOL_VERSION = "2.0"
+# DEFINE THE TRIAL BUDGET (6 CANDIDATES x 44 QUARTERS + 1 SUMMARY; THE 6 EXPLORATION TRIALS ARE NOT REPEATED)
+TRIAL_BUDGET = 6 * 44 + 1
 
 """
 Exits (FIXED from exp04 and exp07, not re-tuned; each keeps its original re-entry rule as the fallback)

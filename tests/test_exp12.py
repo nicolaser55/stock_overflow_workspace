@@ -299,6 +299,24 @@ def test_reports(ohlcv_array_dict_in, vix_feature_pdf_in, prior_dict_in):
     assert np.isclose(year_pdf["log_excess"].sum(), np.log(path_equity_pdf["equity"].iloc[-1] / buy_hold_equity_pdf["equity"].iloc[-1]), atol=1e-9)
     passed(f"reports (scorecard reasons and VIX; concentration by hand; {len(year_pdf)} yearly log excesses sum to the total)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID AND TIE-BREAK
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # TIES: THE FIXED RANK, 0 FIRST (E2M3). THE FIRST PERIOD IS THE FIRST LISTED RULE.
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp12_vix_fear_reentry import design
+    assert design.CANDIDATE_LIST == ["E1M1", "E1M2", "E1M3", "E2M1", "E2M2", "E2M3"]
+    assert design.SELECTION_RULE["tie_break"] == [("tie_order", True)]
+    assert design.DATA_SOURCE_LIST == ["SPY_1MIN", "VIX_DAILY", "VIX3M_DAILY"]
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in design.CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "E1M1"
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "E2M3").all()
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = design.run_candidate_replay_dict(ohlcv_array_dict_in, date1, date2, design.CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (6 candidates, ties -> E2M3, one finite replay)")
+
 """
 Runner
 """
@@ -320,4 +338,5 @@ if __name__ == "__main__":
     test_no_look_ahead(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_feature_pdf)
     synthetic_prior_dict = test_walk_forward(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_feature_pdf)
     test_reports(synthetic_ohlcv_array_dict, synthetic_vix_feature_pdf, synthetic_prior_dict)
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp12 tests passed ✅")
