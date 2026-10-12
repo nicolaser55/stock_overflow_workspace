@@ -492,6 +492,12 @@ version may follow from these results.
 file was not written back: the last display cell raised `TypeError` after the CSVs and the trial rows were written.
 The run was not repeated. No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp02_stop_reentry_v2`.
 
+*2026-10-12 (later the same day):* `exp03_ath_exit_v2` was pre-registered in `26700e0` (17:52:39 +0300) and run once.
+616 trials, all logged at 2026-10-12T20:03:46, after that commit. Prior-only +111.12% vs +199.04%, STOP. On the five
+quarters whose bounds match the old run and end before the development end, all 15 rules match the old saved returns.
+No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp03_ath_exit_v2`. The partial exp04 port stays
+uncommitted. Stop here, as Nicolas asked.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -553,3 +559,4 @@ The run was not repeated. No holdout evaluation. Details: `docs/RESULTS_LOG.md`,
 | 2026-10-12 | agent | Audit of `791b0cc`: each holdout replay loads a fresh design module, so a module-level cache cannot carry a full-run fit into the look-ahead checks. Synthetic tests only. No experiment, no window, no shared trial-log row | Same next step: the weekly-retrained exp02 re-entry model is proposed, waiting for Nicolas |
 | 2026-10-12 | agent | Archived reproduction check built on `agent/reproduce` (Nicolas, 2026-10-12): `SO_EXPERIMENT_ZONE_PATH` in `so/paths.py`, `scripts/reproduce_archived.py`, `records/archived_reproduction_expected.csv` (119 numbers from the committed notebook outputs). Synthetic tests only. The script was not run on real data. No experiment, no window, no shared trial-log row | Nicolas runs `scripts/reproduce_archived.py` (flag for that session only). The weekly-retrained exp02 model and the write-up stay parked |
 | 2026-10-12 | agent | Replace-with-ports, exp02 only. Pre-registered `4ff407a` (14:05:49 +0300). Development run logged 739 trials at 16:43:23 (738 validation + 1 summary), after the commit. Prior-only +61.82% vs +199.04%, STOP. nbconvert failed on the last display cell after the CSVs and the log were written; the notebook was not written back and the run was not repeated. Display cell corrected in source only. `tests/test_vix_features.py` points its registry at a missing file so the pinned 2026-05-14 cutoff stays the one under test when a window is registered. `scripts/reproduce_archived.py` and its test were removed (Nicolas: dropped; the notebooks it read are at tag `pre-port-20261012`). No holdout evaluation. Workspace trial log 4,390 rows (4,390 + 4,089 legacy = 8,479) | exp03_ath_exit_v2: finish the uncommitted port and pre-register it. Do not re-run exp02 |
+| 2026-10-12 | agent | Replace-with-ports, exp02 gaps and exp03. exp02 v2 documentation only (`5a88633`): 539 saved refits, weekly, windows 10Y and ALL, purge 21 rows each, first refit 2015-04-20, last 2025-07-14; budget 739 inside 793. Notebook runner (`1787be1`) saves a failed notebook. exp03 v2 pre-registered `26700e0` (17:52:39 +0300) and run once: 616 trials at 20:03:46, prior-only +111.12% vs +199.04%, STOP. Five shared quarters match the old returns exactly. No holdout evaluation. Workspace trial log 5,006 rows (5,006 + 4,089 legacy = 9,095). exp04's partial port left uncommitted | Stop, as Nicolas asked on 2026-10-12. Do not re-run exp02 or exp03 |

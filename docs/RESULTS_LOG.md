@@ -154,6 +154,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp02_stop_reentry` | 1.0 | **STOP** (2026-10-05) | 0 signals; prior-only +111.66% vs +237.21%; the model's re-entry is worse than all 20 random re-entry runs |
 | `exp02_stop_reentry_v2` | 2.0 | **STOP** (2026-10-12) | Re-run under the new rules, not new evidence. Prior-only +61.82% vs +199.04% over 41 development periods. Below buy-and-hold and below every saved baseline |
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
+| `exp03_ath_exit_v2` | 2.0 | **STOP** (2026-10-12) | Re-run under the new rules, not new evidence. Prior-only +111.12% vs +199.04% over 41 development periods. Beats random exits (20/20) and loses to random buy-backs (1/20) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
@@ -499,6 +500,65 @@ that could have been is the +62% one.
 
 Mathematically: the prior-only total return is 0.6182 and buy-and-hold is 1.9904, so the difference of total returns
 is −1.372. The annualized log excess is −0.0594 per year. Its 6-month block interval [−0.1164, −0.0062] does not
+contain 0.
+
+## exp03_ath_exit_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `26700e0`
+(2026-10-12 17:52:39 +0300), before any trial of this name. Config hash `d9d257cb6f`. One development run. The notebook
+`step01_development.ipynb` was executed by `scripts/execute_notebook.py` and saved with its outputs. 615 validation
+trials and 1 summary (616), note `re-run under new rules`, `test_window_touched` false on every row, every row
+`logged_ts` 2026-10-12T20:03:46. The first logged row is trial `2026101220034656923500000_d9d257cb6f`, stage
+`validation`, fold 0, candidate `0.005|delay_5`, total return +1.42% against buy-and-hold +1.25% on that fresh window.
+The protocol's budget (protocol §4, `TRIAL_BUDGET`) is 15 × 44 + 1 = **661**. The development span has 41 periods, so
+the run logged 15 × 41 + 1 = 616, inside the budget. The 2005-2014 exploration was not re-run.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** From the saved notebook
+outputs and `summary_data.csv`.
+- **Prior-only path: +111.12% vs buy-and-hold +199.04%.** About 7.58% a year vs 11.31% a year, from those two total
+  returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Time in the market 60.4% (39.6% in cash). 18 of 41 periods beat
+  buy-and-hold (sign-test p = 0.826); mean period excess −0.95% (SD 3.48%, t = −1.75); MDE 1.52% per period (6.09% per
+  year). Annualized log excess **−3.37%/yr**, 6-month block interval [−6.94%, −0.24%] (124 months). The interval lies
+  below 0. The protocol's "supported" flag stays false.
+- Sharpe 0.52 vs 0.68, from `get_sharpe_ratio` on the saved daily equity and on buy-and-hold's saved daily returns.
+  Maximum drawdown −28.83% vs −34.21%, the minima of `performance_over_time_data.csv`. Comparable return, Sharpe and
+  drawdown flags are all false. Primary success is false. The smaller drawdown does not count: the path is not at 90%
+  of buy-and-hold (+179.14% would be required; the path is +111.12%).
+- Baselines on the same span, from the notebook output and `summary_data.csv`: random buy-back median **+168.81%**
+  (the path beats 1 of 20), random exit median **+38.19%** (the path beats 20 of 20), 200-session trend **+93.31%**.
+  The information test needs both random families. The path beats the exit family and loses to the buy-back family.
+  107 exits, 2 forced buy-backs.
+- Optimistic, labelled after the fact: candidate `0.010|delay_5` chains to **+170.47%** against a fresh-window
+  buy-and-hold of **+198.70%**. That chain resets each period. The path buy-and-hold is +199.04% because the position
+  is one continuous series. Protocol §6 already says these are not the same object.
+- Activity, from `summary_data.csv`: turnover 20.83 per year, 214 trades, 19 candidate switches (1.86 per year).
+
+**Calibration against the old quarterly exp03, periods that end before the development end.** The development end is
+2025-07-17. Old quarters were read from `exp03_ath_exit/step02_walk_forward_data/`. The old schedule has 44 validation
+quarters. Three end on or after 2025-07-17. Their returns were not read. Forty of the remaining quarters overlap a v2
+period that also ends before the development end. The v2 start is 0 to 6 days later than the old start, and the v2 end
+is 0 to 5 days later, because v2 steps back from the development end and the old schedule stepped back from its own
+end. Five pairs have the same start and the same end: 2016-01-19 to 2016-04-15, 2016-04-18 to 2016-07-15, 2021-04-19
+to 2021-07-16, 2022-01-18 to 2022-04-14, and 2022-04-18 to 2022-07-15. On those five, all 15 rules (75 rows in
+`score_data.csv` against `validation_candidate_data.csv`) match. The largest absolute difference of total return is
+2.0×10⁻¹⁶, and buy-and-hold matches exactly. The other quarters are not the same windows, so their returns are not the
+same object. The rules did not change. The date shift is the cause of every difference outside those five quarters.
+
+**Verdict: STOP.** The stopping rule is CONTINUE only when the prior-only path beats buy-and-hold and both random
+families. It loses to buy-and-hold (+111.12% vs +199.04%) and to the random buy-back median (+168.81%). It beats
+random exits. This is not a candidate result. No holdout evaluation was run. No further version may follow from this
+result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold
+near the all-time high and bought back later got to +111%. It was in the market about three sessions in five. Selling
+at a random moment and using the same buy-back finished at +38%, so the decision to sell near the high beat random
+sell timing on every one of the 20 draws. Buying back at random after those same sales finished at +169%, ahead of
+the rule's own buy-back. The edge from the exit was given away while waiting to buy. That is the same reading as
+protocol 1.0. The best rule chosen after seeing every period (`0.010|delay_5`, +170% against a fresh-window
+buy-and-hold of +199%) could not have been selected in advance; the path that could have been is the +111% one.
+
+Mathematically: the prior-only total return is 1.1112 and buy-and-hold is 1.9904, so the difference of total returns
+is −0.879. The annualized log excess is −0.0337 per year. Its 6-month block interval [−0.0694, −0.0024] does not
 contain 0.
 
 ## exp03_ath_exit
