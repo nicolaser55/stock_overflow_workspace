@@ -37,6 +37,7 @@ from so.core.reentry_simulation import simulate_stop_reentry_dict
 from so.core.continuous_replay import simulate_continuous_replay_dict
 from so.core.replay_walk_forward import run_candidate_replay_dict, run_prior_only_replay_dict
 from experiments.exp04_trend_exit.rules import get_rule_builder_func as get_exp04_rule_builder_func
+from experiments.exp06_capped_regret_reentry.design import CANDIDATE_LIST, SELECTION_RULE, run_candidate_replay_dict as run_design_replay_dict
 from experiments.exp06_capped_regret_reentry.rules import get_schedule_tuple, get_rule_candidate_list, get_exit_signal_arr, get_capped_reentry_func, \
                                                          get_rule_builder_func, get_trigger_summary_dict
 from synthetic_data import get_synthetic_ohlcv_pdf
@@ -172,6 +173,23 @@ def test_walk_forward(ohlcv_array_dict_in, daily_pdf_in):
     assert sum(name.startswith("random_exit_") for name in prior_dict["baseline_pdf"]["baseline"]) == exp_config.RANDOM_RUN_COUNT
     passed(f"walk-forward (12 x {len(period_pdf)} candidate periods chain to their totals; ties -> c 20, b 1%, trend; prior-only f -> f + 1)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID AND TIE-BREAK
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # TIES: LONGER COOLING, THEN THE SMALLER BUY-STOP, THEN THE TREND EXIT
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp06_capped_regret_reentry import design
+    assert len(CANDIDATE_LIST) == 12 and CANDIDATE_LIST[0] == "trend_ma200|0.01|0"
+    assert SELECTION_RULE["tie_break"] == [("cooling", False), ("buy_stop", True), ("exit_order", True)]
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "trend_ma200|0.01|0"
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "trend_ma200|0.01|20").all()
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = run_design_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (12 candidates, ties -> trend 1% cooling 20, one finite replay)")
+
 """
 Runner
 """
@@ -189,4 +207,5 @@ if __name__ == "__main__":
     test_reentry_rule()
     test_mechanics(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_walk_forward(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp06 tests passed ✅")

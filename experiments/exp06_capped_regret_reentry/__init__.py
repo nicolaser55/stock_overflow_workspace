@@ -1,1 +1,3 @@
-"""exp06_capped_regret_reentry: an exit signal paired with a buy-stop that caps the cost of a wrong exit (continuous replay; data-dependent follow-up of exp03)."""
+"""
+exp06_capped_regret_reentry_v2: capped-regret re-entry, re-run under the current rules. Protocol: experiments/exp06_capped_regret_reentry/PROTOCOL.md version 2.0.
+"""
