@@ -19,7 +19,7 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | Experiment | Question | Steps | Protocol | Status |
 |---|---|---|---|---|
 | `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy) | 01 model dataset, 02 signal check, 03 walk-forward, 04 multivariate signal check (diagnostic, added 2026-10-06) | 1.0 (steps 01-03), 1.1 (step 04) | **archived** (was STOP) 2026-10-06 (signal check p = 0.10; prior-only +146.94% vs +218.48%); step 04 diagnostic 2026-10-06: mean AUC 0.4943 vs null max 0.5282, p = 0.75, no information (cannot reverse the STOP) |
-| `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 mechanism check, 02 signal check, 03 walk-forward | 1.0 | **archived** (was STOP) 2026-10-05 (0 signals; prior-only +111.66% vs +237.21%) |
+| `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 development replay | 2.0 | **STOP** (2026-10-12), re-run under the new rules, not new evidence (prior-only +61.82% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp03_ath_exit` | Sell when the close is near the all-time high; buy back after a delay or a dip (15 rules) | 01 exploration, 02 walk-forward | 1.0 | **archived** (was STOP) 2026-10-05 (prior-only +143.05% vs +237.21%) |
 | `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | 01 exploration, 02 continuous replay | 1.0 | **archived** (was STOP) 2026-10-06 (prior-only +70.84% vs +229.74%) |
 | `exp05_vol_scaled_exposure` | Hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, 20-point dead band (4 candidates) | 01 signal check + exploration, 02 continuous replay | 1.0 | **archived** (was STOP) 2026-10-06 (prior-only +165.69% vs +229.74%) |
@@ -36,6 +36,10 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 threshold or recorded number was changed. They stay pinned to the old untouched window 2026-05-14 and are superseded by
 `so.core.holdout`. Re-run only by Nicolas with `SO_ALLOW_LEGACY_REPRODUCTION=1`. exp09–exp11 were skipped and have no
 `config.py` or `PROTOCOL.md`; the registry rows above are the archive record.*
+
+*2026-10-12 (Nicolas): each strategy folder is replaced in place by a version 2.0. exp02's folder is that version and
+its row above is the new result. The other rows stay the archive record until their own version is pre-registered.
+Version 1.0 code and notebook outputs are at tag `pre-port-20261012`.*
 
 *Correction 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`, I2): exp06's "beats
 both random families" means it beat the median of each (19/20 random exits, 15/20 random re-entries; empirical p ≈ 0.10

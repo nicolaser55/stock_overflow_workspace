@@ -7,7 +7,8 @@ Run from the workspace root:   python tests/test_vix_features.py   (or python te
 What is verified (synthetic data; temporary files under logs/test_vix_tmp/ inside the workspace, removed at the end):
     1. Loaders: raise without a cutoff and with a cutoff on or after 2026-05-14; never return a row after the cutoff (a
        row dated 2026-05-14 is planted in a yearly file); never open a file dated after the cutoff (corrupt files are
-       planted there); raise when a "date" differs from the New York date of the timestamp.
+       planted there); raise when a "date" differs from the New York date of the timestamp. The registry path is a
+       missing file for the duration of the suite, so a registered window does not move that pinned boundary.
     2. _prev uses the close of the strictly previous date; _intraday picks the bar labelled decision - 1 minute on a full
        day (15:57) and on a half day (12:57).
     3. Staleness (lag 3 accepted, lag 4 stale) and the fallback of _intraday (missing session, half day without an
@@ -332,6 +333,10 @@ if __name__ == "__main__":
     # START FROM AN EMPTY TEMPORARY FOLDER
     shutil.rmtree(TMP_PATH_STR, ignore_errors=True)
     os.makedirs(TMP_PATH_STR, exist_ok=True)
+    # POINT THE REGISTRY AT A MISSING FILE SO THE PINNED 2026-05-14 CUTOFF IS WHAT THIS SUITE CHECKS
+    from so import paths
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TMP_PATH_STR, "no_holdout_windows.csv")
     try:
         test_loaders()
         setup_dict = get_synthetic_setup_dict()
@@ -341,6 +346,7 @@ if __name__ == "__main__":
         test_formulas()
         test_end_to_end()
     finally:
-        # REMOVE THE TEMPORARY FOLDER
+        # RESTORE THE REGISTRY PATH AND REMOVE THE TEMPORARY FOLDER
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
         shutil.rmtree(TMP_PATH_STR, ignore_errors=True)
     print("\nAll VIX data layer tests passed ✅")

@@ -5,7 +5,8 @@ Run from the workspace root:   python tests/test_holdout.py   (or python tests/r
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
 Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The real trial log and
-records/holdout_windows.csv are not written. SO_HOLDOUT_PATH, SO_HOLDOUT_EVALUATION_TOKEN and
+records/holdout_windows.csv are not written. If that registry file already exists, its size is unchanged.
+SO_HOLDOUT_PATH, SO_HOLDOUT_EVALUATION_TOKEN and
 SO_ALLOW_LEGACY_REPRODUCTION are set only inside this file, to temporary values.
 """
 
@@ -49,6 +50,8 @@ from synthetic_data import get_synthetic_ohlcv_pdf
 
 # KEEP THE REAL REGISTRY PATHS AND POINT THE SUITE AT TEMPORARY FILES
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+REAL_WINDOWS_EXISTS_BOOL = os.path.isfile(REAL_WINDOWS_PATH_STR)
+REAL_WINDOWS_SIZE_INT = os.path.getsize(REAL_WINDOWS_PATH_STR) if REAL_WINDOWS_EXISTS_BOOL else None
 REAL_EVALUATIONS_PATH_STR = paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR
 REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
 REGISTRY_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
@@ -984,7 +987,10 @@ if __name__ == "__main__":
         test_evaluation()
         test_holdout_flag_scan()
         test_walk_forward_unchanged()
-        assert not os.path.isfile(REAL_WINDOWS_PATH_STR)
+        # THE REAL REGISTRY IS UNCHANGED (IT MAY ALREADY EXIST; THIS SUITE MUST NOT WRITE IT)
+        assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
+        if REAL_WINDOWS_EXISTS_BOOL:
+            assert os.path.getsize(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_SIZE_INT
         print("\nAll holdout tests passed ✅")
     finally:
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)

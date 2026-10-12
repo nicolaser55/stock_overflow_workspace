@@ -39,13 +39,13 @@ stock_overflow_workspace/
 └── records/                     versioned CSV records (bad tick corrections; legacy trial log; holdout registry and ledger)
 ```
 
-## 2. Current status (2026-10-11)
+## 2. Current status (2026-10-12)
 
 | Experiment | Status | Protocol |
 |---|---|---|
 | Pipeline steps 00-06 | Built and kept (5,436 sessions, 2005-01-03 -> 2026-08-13, bad ticks corrected) | `pipeline/README.md` |
 | exp01_minute_entry | **archived** (was STOP; signal check p = 0.10; prior-only +146.94% vs buy-and-hold +218.48%) | `experiments/exp01_minute_entry/PROTOCOL.md` |
-| exp02_stop_reentry | **archived** (was STOP; prior-only +111.66% vs +237.21%) | `experiments/exp02_stop_reentry/PROTOCOL.md` |
+| exp02_stop_reentry | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +61.82% vs +199.04%). Protocol 1.0 (+111.66% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp02_stop_reentry/PROTOCOL.md` |
 | exp03_ath_exit | **archived** (was STOP; prior-only +143.05% vs +237.21%) | `experiments/exp03_ath_exit/PROTOCOL.md` |
 | exp04_trend_exit | **archived** (was STOP; continuous replay: prior-only +70.84% vs +229.74%) | `experiments/exp04_trend_exit/PROTOCOL.md` |
 | exp05_vol_scaled_exposure | **archived** (was STOP; prior-only +165.69% vs +229.74%; lower drawdown) | `experiments/exp05_vol_scaled_exposure/PROTOCOL.md` |
@@ -55,7 +55,7 @@ stock_overflow_workspace/
 | exp09-exp11 (VIX) | **archived** (was SKIPPED by exp08's pre-registered gates) | `docs/RESEARCH_STATE_2026-10-11.md` §6 |
 | exp12_vix_fear_reentry | **archived** (was STOP; data-dependent follow-up of exp08; prior-only +119.24% vs +229.74%; VIX line closed) | `experiments/exp12_vix_fear_reentry/PROTOCOL.md` |
 | exp13_e1m1_robustness | **archived** (was E1M1 IS NOT ROBUST; R1–R4 fail; stress +53.32% vs +73.09%; p2 = 0.088; VIX line closed) | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
-| Rolling holdout | Infrastructure in place. **No window registered yet** (Nicolas opens it) | `so/core/holdout.py` |
+| Rolling holdout | Infrastructure in place. A window is registered. The agent does not read it and does not evaluate it | `so/core/holdout.py` |
 | Text / qualitative data | Blocked: new data source (parked decision for Nicolas) | `docs/RESEARCH_STATE_2026-10-11.md` |
 
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`): exp06's "beats its
@@ -67,9 +67,9 @@ random baselines" means it beat the median of each random family (19/20, 15/20; 
 `AGENTS.md` and `.cursor/rules/`.
 
 Earlier results (stopped v1 and v2, the step 13 exploration) are summarized in `docs/history/RESULTS_LOG_2026-10-05.md`.
-**No holdout window has been opened, and no test window has ever been evaluated.** The 2015-2026 validation quarters have
+**A holdout window is registered. It has not been evaluated, and no archived test window was evaluated as a holdout.** The 2015-2026 validation quarters have
 been looked at many times (they are development data, not out-of-sample data); see `docs/history/AUDIT_2026-10-05.md` §F6.
-exp01–exp13 are archived (pinned to the old untouched window 2026-05-14). The evaluation design from 2026-10-11 is the
+exp01 and exp03–exp13 are still the archived code (pinned to the old untouched window 2026-05-14). exp02's folder is protocol 2.0 as of 2026-10-12. The evaluation design from 2026-10-11 is the
 rolling 12-month holdout (`so.core.holdout`).
 
 ## 3. Setup (once per machine)
@@ -161,36 +161,14 @@ variable with no default: when it is unset, holdout results cannot be written. A
 python tests/run_all_tests.py
 ```
 
-Seventeen suites on synthetic data (a few minutes). All must end with "passed ✅". Run them after every code change.
+Sixteen suites on synthetic data (a few minutes). All must end with "passed ✅". Run them after every code change.
 The list is the header of `tests/run_all_tests.py`.
 
 ### Reproduction
 
-`scripts/reproduce_archived.py` re-executes the archived notebooks (exp01–exp08, exp12 and exp13; exp09–exp11 were
-skipped and have no notebooks) and compares the printed headline numbers with
-`records/archived_reproduction_expected.csv`. Those numbers were copied from the committed notebook outputs. Each row
-names the notebook, the cell id and the label.
-
-**Only Nicolas runs it.** It refuses to start unless `SO_ALLOW_LEGACY_REPRODUCTION` is `1` in that process. It does not
-write `store04_experiments` or the real trial log: it points `SO_EXPERIMENT_ZONE_PATH` at a temporary folder (the trial
-log moves with that folder). Raw bars and pipeline caches are read from the normal data folder. Each notebook is
-executed from a copy; the committed notebook is not overwritten. Set the flag in the shell session only, not with
-`setx`.
-
-The notebooks run in dependency order (exp01's dataset before its later steps, exp03's schedule before exp04–exp07,
-exp12 step 02 before exp13, because exp13 reads those saved periods from the experiment zone). `--list` prints that
-order. `--only exp05` runs that experiment alone. `--only exp13` also runs exp12 step 02.
-
-**Disclosure.** The run reads market data through 2026-05-13. That date sits inside the new holdout window (the last
-12 months once a window is opened; no window is registered yet). The run recomputes numbers already recorded in the
-committed notebooks. It is not a holdout evaluation, it opens no window, and it writes no shared trial-log row.
-
-From the saved cell timings, the full run is about 2.5–3 hours (exp01 is most of it: the dataset, about 22 minutes of
-signal-check nulls, and about 45 folds at about 0.9 minutes each). `--only exp05` is a few minutes. Those timings are
-inferred from the committed outputs, not from a re-run: this check has not been executed on the real data.
-
-A passing run writes `records/archived_reproduction_<YYYYMMDD_HHMM>.csv` (expected, reproduced, match) and exits 0
-only when every figure matches at the recorded precision. The temporary folder is left in place.
+`scripts/reproduce_archived.py` was dropped on 2026-10-12 (Nicolas: replace each experiment in place). It read the
+archived notebooks from the working tree. Those notebooks stay at tag `pre-port-20261012`. The headline numbers copied
+from them stay in `records/archived_reproduction_expected.csv`. The check is not run.
 
 ## 8. Conventions
 

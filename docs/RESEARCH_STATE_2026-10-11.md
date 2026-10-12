@@ -461,6 +461,9 @@ A passing run writes `records/archived_reproduction_<YYYYMMDD_HHMM>.csv` and exi
 the recorded precision. From the committed cell timings the full run is about 2.5–3 hours; `--only exp05` is a few
 minutes. That estimate is inferred from the saved outputs, not from a re-run.
 
+*2026-10-12 (later): the script and `tests/test_archived_reproduction.py` were removed. The notebooks they read stay at
+tag `pre-port-20261012`. `records/archived_reproduction_expected.csv` stays. The check is not run.*
+
 Some RESULTS_LOG headlines are percentages of a printed fraction (0.5039 is the table form of +50.39%) or a decimal
 log excess (−0.0377 is −3.77%/yr). The expected table stores the printed number and the precision of the quoted
 headline, so extra printed digits still match.
@@ -483,6 +486,11 @@ interface; and, for exp01 and exp02, weekly rolling retraining with the original
 is tuned and no rule is added. Each version is labelled "re-run under the new rules, not new evidence". The agent
 does not evaluate the holdout. The exp05 version is prepared for Nicolas's own end-to-end evaluation. No further
 version may follow from these results.
+
+*2026-10-12 (later the same day):* `exp02_stop_reentry_v2` was pre-registered in `4ff407a` (14:05:49 +0300) and run once.
+739 trials, all logged at 2026-10-12T16:43:23, after that commit. Prior-only +61.82% vs +199.04%, STOP. The notebook
+file was not written back: the last display cell raised `TypeError` after the CSVs and the trial rows were written.
+The run was not repeated. No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp02_stop_reentry_v2`.
 
 ### Then: text / qualitative data (new data, needs Nicolas)
 
@@ -544,3 +552,4 @@ version may follow from these results.
 | 2026-10-12 | agent | Rolling retraining built on `agent/rolling-retrain` from `main` `62cad32` (Nicolas, 2026-10-11). Commits `b5c5f4b` (module), `c7e95bb` (holdout ledger and template), `da4efb0` (synthetic tests). 16 test suites passed. No experiment, no window, no shared trial-log row. Archived exp01–exp13 unchanged | A daily-feature, weekly-retrained version of exp02's re-entry model is proposed, waiting for Nicolas |
 | 2026-10-12 | agent | Audit of `791b0cc`: each holdout replay loads a fresh design module, so a module-level cache cannot carry a full-run fit into the look-ahead checks. Synthetic tests only. No experiment, no window, no shared trial-log row | Same next step: the weekly-retrained exp02 re-entry model is proposed, waiting for Nicolas |
 | 2026-10-12 | agent | Archived reproduction check built on `agent/reproduce` (Nicolas, 2026-10-12): `SO_EXPERIMENT_ZONE_PATH` in `so/paths.py`, `scripts/reproduce_archived.py`, `records/archived_reproduction_expected.csv` (119 numbers from the committed notebook outputs). Synthetic tests only. The script was not run on real data. No experiment, no window, no shared trial-log row | Nicolas runs `scripts/reproduce_archived.py` (flag for that session only). The weekly-retrained exp02 model and the write-up stay parked |
+| 2026-10-12 | agent | Replace-with-ports, exp02 only. Pre-registered `4ff407a` (14:05:49 +0300). Development run logged 739 trials at 16:43:23 (738 validation + 1 summary), after the commit. Prior-only +61.82% vs +199.04%, STOP. nbconvert failed on the last display cell after the CSVs and the log were written; the notebook was not written back and the run was not repeated. Display cell corrected in source only. `tests/test_vix_features.py` points its registry at a missing file so the pinned 2026-05-14 cutoff stays the one under test when a window is registered. `scripts/reproduce_archived.py` and its test were removed (Nicolas: dropped; the notebooks it read are at tag `pre-port-20261012`). No holdout evaluation. Workspace trial log 4,390 rows (4,390 + 4,089 legacy = 8,479) | exp03_ath_exit_v2: finish the uncommitted port and pre-register it. Do not re-run exp02 |

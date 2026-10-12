@@ -131,8 +131,9 @@ known. Nothing is tuned and no rule is added.
 The order is exp02, exp03, exp04, exp05, exp06, exp07, exp12, exp13 (as the frozen E1M1 rule), exp01. exp08 is removed
 (it is a signal check, not a strategy). exp09–exp11 stay in the registry text as "skipped, never built". The legacy
 code and notebook outputs are not kept in the workspace; they stay in git at tag `pre-port-20261012`. The old results
-stay in this log. The old saved outputs stay in the data folder. `scripts/reproduce_archived.py` and the pending fix
-to it are dropped.
+stay in this log. The old saved outputs stay in the data folder. `scripts/reproduce_archived.py` and its test were
+removed in the exp02 v2 recording session: the checker read notebooks from the working tree, and those notebooks now
+live only at tag `pre-port-20261012`. `records/archived_reproduction_expected.csv` stays. The check is not run.
 
 Every new version is labelled **re-run under the new rules, not new evidence**: the old version already used this
 data. No holdout evaluation is run by the agent. The exp05 version is prepared so Nicolas can run an end-to-end
@@ -151,6 +152,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 |---|---|---|---|
 | `exp01_minute_entry` | 1.0 (1.1: step 04) | **STOP** (2026-10-06) | Signal check: 2 signal bins vs null max 4, p = 0.10 → STOP. Walk-forward (run before the verdict): prior-only +146.94% vs buy-and-hold +218.48%. Step 04 diagnostic (multivariate, added after the results): mean AUC 0.4943 vs null max 0.5282, p = 0.75, no information (Outcome A) |
 | `exp02_stop_reentry` | 1.0 | **STOP** (2026-10-05) | 0 signals; prior-only +111.66% vs +237.21%; the model's re-entry is worse than all 20 random re-entry runs |
+| `exp02_stop_reentry_v2` | 2.0 | **STOP** (2026-10-12) | Re-run under the new rules, not new evidence. Prior-only +61.82% vs +199.04% over 41 development periods. Below buy-and-hold and below every saved baseline |
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
@@ -354,6 +356,60 @@ validation and 1 summary trials).
   re-entry (median of 20) +159.63% — **the model beats none of the 20 random runs**; 200-session trend +106.16%.
 - Reading: the stop itself costs little (stop + next-day buy-back ≈ buy-and-hold); the losses come from waiting in cash,
   and the model's waiting is worse than random (consistent with a mean validation AUC of 0.470 for the all-history window).
+
+## exp02_stop_reentry_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `4ff407a`
+(2026-10-12 14:05:49 +0300), before any trial of this name. Config hash `5e7f583681`. One development run, 2026-10-12T16:43:23:
+738 validation trials and 1 summary (739), note `re-run under new rules`, `test_window_touched` false on every row. The
+protocol's budget line was 18 × 44 + 1 = 793; the development span has 41 periods, so the run logged 18 × 41 + 1 = 739,
+inside the budget. The signal check and the mechanism check of protocol 1.0 were not re-run.
+
+The notebook `step01_development.ipynb` was executed by nbconvert. Cells through the save and the trial log completed.
+`logs/exp02_v2.err` ends with `TypeError: get_trial_count_pdf() missing 1 required positional argument` on the last
+display cell. nbconvert did not write the notebook, so the file has no cell outputs. The numbers below are copied from
+`store04_experiments/exp02_stop_reentry_v2/step01_development_data/` (written at 16:43:23, the same timestamp as the
+trial rows). The run was not repeated: a second execution would append another 739 trials. After this record, the last
+cell was pointed at `read_trial_log_pdf()` and was not executed.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** From `summary_data.csv`,
+`period_data.csv` and `performance_over_time_data.csv`.
+- **Prior-only path: +61.82% vs buy-and-hold +199.04%.** About 4.82% a year vs 11.31% a year, from those two total
+  returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Time in the market 73.5% (26.5% in cash). 22 of 41 periods beat
+  buy-and-hold (sign-test p = 0.378); mean period excess −1.55% (SD 4.70%, t = −2.11); MDE 2.05% per period (8.22% per
+  year). Annualized log excess **−5.94%/yr**, 6-month block interval [−11.64%, −0.62%] (124 months). The interval lies
+  below 0, so it excludes a gain. The protocol's "supported" flag stays false, because support means the lower bound is
+  above 0.
+- Sharpe 0.42 vs 0.68; maximum drawdown −21.01% vs −34.21%. These two pairs are `get_success_criteria_dict` applied to
+  the saved daily returns (the same function the notebook calls). The drawdown column of the saved performance file has
+  the same minima. Comparable return, Sharpe and drawdown flags are all false. Primary success is false. The smaller
+  drawdown does not count: the path is not at 90% of buy-and-hold (+179.14% would be required; the path is +61.82%).
+- Baselines on the same span, from `summary_data.csv`: fixed delay 1 **+195.30%**, delay 5 **+178.07%**, delay 20
+  **+81.54%**; random re-entry median **+122.95%**; 200-session trend **+93.31%**. The path is below every one of them.
+  The 20 individual random returns were not written (the save cell drops `random_return_list`) and the notebook print
+  was lost with the failed write, so "beats k of 20" is not in the saved files. Being below the median is the information
+  comparison the protocol asks for: the model's re-entry does not beat matched random re-entry.
+- Optimistic, labelled after the fact: candidate `ALL|4|0.00` chains to **+218.98%**. The same product on the saved
+  fresh-window buy-and-hold column is **+198.70%** (`score_data.csv`, the formula in `get_optimistic_dict`). That chain
+  is not the prior-only path. The path buy-and-hold is +199.04% because the position is one continuous series; the
+  fresh-window chain resets each period. Protocol §8 already says these are not the same object.
+- Activity and refits, from `summary_data.csv`: turnover 5.57 per year, 252 trades, 26 candidate switches (2.54 per
+  year). Mean refit rows used 3,163.6, mean share purged 0.70%, mean absolute prediction move 0.0037.
+
+**Verdict: STOP.** The stopping rule is CONTINUE only when the prior-only path beats buy-and-hold and every same-stop
+fixed delay. It beats none of them. This is not a candidate result. No holdout evaluation was run. No further version
+may follow from this result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold
+on the trailing stop and waited for the model got to +62%. It was in cash about one session in four. Buying back the
+next day finished at +195%, close to staying invested. The model's longer waits finished far behind that, and behind
+a five-day wait, a twenty-day wait, and the median random wait. The best rule chosen after seeing every period
+(`ALL|4|0.00`, +219% against a fresh-window buy-and-hold of +199%) could not have been selected in advance; the path
+that could have been is the +62% one.
+
+Mathematically: the prior-only total return is 0.6182 and buy-and-hold is 1.9904, so the difference of total returns
+is −1.372. The annualized log excess is −0.0594 per year. Its 6-month block interval [−0.1164, −0.0062] does not
+contain 0.
 
 ## exp03_ath_exit
 
