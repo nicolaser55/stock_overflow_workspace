@@ -31,25 +31,28 @@ alwaysApply: true
 
 ## Running notebooks
 
-- Notebooks are run top to bottom on a fresh kernel, never cell by cell, so that the saved outputs are the evidence:
+- Notebooks are run top to bottom on a fresh kernel, never cell by cell, so that the saved outputs are the evidence.
+  The runner is `scripts/execute_notebook.py`. It executes with nbclient and writes the notebook in a `finally` block,
+  so a cell that fails is saved with the outputs collected so far, including the error. A failed run is evidence. Do
+  not execute that notebook again to replace the error with a clean output. Fix the cause, record the failed run and
+  any trials it already logged, then run once.
 
   ```
-  venv-main\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=-1 --ExecutePreprocessor.kernel_name=venv-main <notebook path>
+  venv-main\Scripts\python.exe scripts\execute_notebook.py <notebook path>
   ```
 
-  If `venv-main\Scripts\jupyter.exe` does not exist, park it as a decision and use `venv-main\Scripts\python.exe -m
-  jupyter nbconvert ...` if that works.
 - Runs longer than a few minutes (exp01-style walk-forwards take ~1 h): start them in the background with a log and poll
   the log instead of blocking the terminal:
 
   ```
   New-Item -ItemType Directory -Force logs | Out-Null
-  Start-Process -FilePath venv-main\Scripts\jupyter.exe -ArgumentList 'nbconvert','--to','notebook','--execute','--inplace','--ExecutePreprocessor.timeout=-1','--ExecutePreprocessor.kernel_name=venv-main','<notebook path>' -RedirectStandardOutput logs\<name>.out -RedirectStandardError logs\<name>.err -WindowStyle Hidden -PassThru
-  Get-Content logs\<name>.err -Tail 5
+  Start-Process -FilePath venv-main\Scripts\python.exe -ArgumentList 'scripts\execute_notebook.py','<notebook path>' -RedirectStandardOutput logs\<name>.out -RedirectStandardError logs\<name>.err -WindowStyle Hidden -PassThru
+  Get-Content logs\<name>.out -Tail 5
   ```
 
-  The run is finished when the `.err` log ends with `Writing ... bytes to <notebook>`; a Python error appears there too.
-  While it runs, work on something that does not depend on it (documentation, tests, the next protocol).
+  The run is finished when the `.out` log ends with `saved <notebook path>`. A failed cell is an error output in the
+  saved notebook, and the exception text is in the `.err` log. While it runs, work on something that does not depend
+  on it (documentation, tests, the next protocol).
 - Read results from the saved notebook outputs and from `store04_experiments\<experiment>\...` CSV files with Python.
 - Each notebook warns when the trial log already holds entries of its stage: a re-run ADDS trials. Do not re-run a
   validation notebook unless the protocol requires it; if a run crashed half-way, fix the cause, record the crash and the

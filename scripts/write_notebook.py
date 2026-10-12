@@ -7,8 +7,8 @@ Notebook Writer (agent helper)
 
 Usage: venv-main/Scripts/python.exe scripts/write_notebook.py <cell source file> <notebook path>
 The cell source file holds the code cells in order, separated by lines that are exactly "# %%". The notebook is written
-without outputs, with the venv-main kernel (the same metadata as the existing notebooks); it is then executed top to
-bottom with nbconvert (workflow.mdc), so the saved outputs are the evidence.
+without outputs, with the venv-main kernel (the same metadata as the existing notebooks). Execute it with
+scripts/execute_notebook.py (workflow.mdc). That run always saves the notebook, including when a cell fails.
 """
 
 # DEFINE THE NOTEBOOK METADATA (AS THE EXISTING NOTEBOOKS)
