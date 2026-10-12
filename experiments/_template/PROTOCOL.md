@@ -23,9 +23,8 @@ A source that is not in this table is not used. When the evidence for a clock is
 | Source | Convention | Availability | Revision | Role |
 |---|---|---|---|---|
 | `SPY_1MIN` | bar start | label + 1 minute | not revised (stored IBKR bars) | feature |
-| `VIX_DAILY` | midnight date label | that date at 16:15 America/New_York | not revised (stored print) | feature |
 
-The VIX feature in the template is `vix_level_prev`: the daily close of the previous session, read through `DataContext.get` as of the decision. The same session's 16:15 close is not used.
+The two features are `intraday_return_pct` (decision close over the session open) and `prev_day_return_pct` (the previous session's close-to-close return). Both are knowable at the decision moment, the end of the 15:58 bar. The same session's close, the 15:59 bar, is not a feature.
 
 A development replay loads this list with `get_development_data_context` (through the development end). The evaluation script loads the same names with `load_source_frame_dict` through the window end. A design that omits `DATA_SOURCE_LIST` is treated as `["SPY_1MIN"]`.
 
@@ -33,7 +32,19 @@ A development replay loads this list with `get_development_data_context` (throug
 Exactly as implemented (file and function names). For every feature: what it uses up to the decision bar.
 
 ## 5. Walk-forward and selection
-Schedule (embargo ≥ horizon), candidates (each logged), selection rule and tie-breaks, refit, test only after freezing.
+Candidate periods are the development validation quarters (`get_development_fold_pdf`), extended through the holdout. The embargo is the label horizon (`so.config.LABEL_HORIZON_SESSIONS`). The fold schedule's `train_years` is 1, so a validation quarter exists; it is not the model's training window. The candidates are the three training windows below. Selection pools the last 4 completed quarters. A tie takes the longer window, then the candidate name. The first period has no completed quarter and takes the first listed candidate (`6M`).
+
+## 5.1 Retraining
+Pre-registered (Nicolas, 2026-10-11). Changing any line here after a result is a new version.
+
+- **Training-window candidates:** `6M`, `2Y`, `10Y` (`so.config.TRAIN_WINDOW_CANDIDATE_LIST_DEFAULT`). A row is inside a window when its date is on or after (retrain day − the window) and on or before the retrain day.
+- **Retraining frequency:** weekly, the first session of each calendar week (`so.config.RETRAIN_FREQUENCY_DEFAULT_STR`). A Monday holiday is a Tuesday refit. The first decision session of the span is always a refit. `RETRAIN_FREQUENCY_COMPARISON_STR` is empty: this template does not pre-register the optional weekly-versus-quarterly comparison. A protocol that does pre-register it may name one comparison, and no other.
+- **Label:** `y_fwd_positive`, 1 when the net return from the fill to the close 20 sessions later is positive (`so.config.LABEL_HORIZON_SESSIONS`). `label_known_ts` is the decision moment of that later session (`get_fixed_horizon_label_known_ts_arr`). The last 20 sessions have no clock.
+- **Purge:** a training row must have `label_known_ts` strictly before the retraining decision. Rows that fail are dropped and counted as purged. They are never filled with 0 or any other value. A finite label with no clock raises.
+- **Feature known times:** both features are read from the SPY bars. `available_ts` is the decision moment. `so.core.point_in_time.check_feature_available_ts` refuses a feature known after that moment. There is no second clock.
+- **Minimum training rows:** 20. A refit with fewer rows raises. There is no fallback window. A one-class window returns that class's rate; that is the model's defined behaviour, not a different window.
+- **Selection:** period score = period return − buy-and-hold. The candidate for quarter f is chosen from the last 4 completed quarters before f (prior-only). Tie order: longer training window (`train_window_months` descending: 10Y, then 2Y, then 6M), then the candidate name ascending.
+- **Decisions:** every session from the warmup onward, at the decision bar, with the latest model of the candidate in force. The weight is the predicted probability.
 
 ## 6. Baselines
 Same simulator, same costs. Always the uninformed version of the informed component (random / fixed choices).
@@ -68,7 +79,7 @@ candidate on every period (period return minus buy-and-hold), selects for period
 replays one continuous path from the first period through the window end. Before any result is written it re-runs that
 path on bars truncated after each of 12 month-ends inside the window. A difference aborts with ledger status
 `invalid_lookahead` and writes no daily paths; that row counts against the window budget. A valid run has status
-`valid` and reports only the holdout sessions.
+`valid` and reports only the holdout sessions. A valid model-based run also writes `refit_log.csv` next to the daily paths (the refits whose session falls inside the holdout). The ledger row adds the retraining frequency, the training-window candidates, the number of those refits, the average share purged, turnover per year, and the number of candidate switches.
 
 The report names the uninformed baselines of §6, computed on the holdout sessions only, plus buy-and-hold over those
 sessions: total return against buy-and-hold, annualized log excess with a 6-month block interval, time in the market,
@@ -82,3 +93,4 @@ carried into the window, and the candidate in force in each holdout period.
 | 1.0 | YYYY-MM-DD | Initial protocol |
 | template | 2026-10-11 | Holdout evaluation section added (rolling 12-month holdout; development boundary from so.core.holdout) |
 | template | 2026-10-11 | Holdout evaluation rewritten to the frozen prior-only path (audit R1–R3, H1): design interface, truncation test, ledger status |
+| template | 2026-10-12 | Rolling retrain example (Nicolas, 2026-10-11): weekly logistic regression, windows 6M/2Y/10Y, purge by dropping unfinished labels. VIX is no longer read. |
