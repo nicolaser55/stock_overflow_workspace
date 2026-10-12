@@ -19,6 +19,7 @@ PROTOCOL_VERSION = exp_config.PROTOCOL_VERSION
 DATA_SOURCE_LIST = list(exp12_design.DATA_SOURCE_LIST)
 
 # THE REPLAY IS exp12'S, WHICH ALREADY KNOWS E1M1
+get_bar_period_pdf = exp12_design.get_bar_period_pdf
 run_candidate_replay_dict = exp12_design.run_candidate_replay_dict
 run_prior_only_path_dict = exp12_design.run_prior_only_path_dict
 get_development_data_context = exp12_design.get_development_data_context

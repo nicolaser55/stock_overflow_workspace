@@ -31,7 +31,7 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp08.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_rolling_retrain.py", "test_execute_notebook.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp08.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
