@@ -362,15 +362,17 @@ validation and 1 summary trials).
 **Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `4ff407a`
 (2026-10-12 14:05:49 +0300), before any trial of this name. Config hash `5e7f583681`. One development run, 2026-10-12T16:43:23:
 738 validation trials and 1 summary (739), note `re-run under new rules`, `test_window_touched` false on every row. The
-protocol's budget line was 18 × 44 + 1 = 793; the development span has 41 periods, so the run logged 18 × 41 + 1 = 739,
-inside the budget. The signal check and the mechanism check of protocol 1.0 were not re-run.
+protocol's budget (protocol §5, `TRIAL_BUDGET`) is 18 × 44 + 1 = **793**. Recounted from `trial_log.csv` on 2026-10-12:
+738 rows with stage `validation` and 1 row with stage `summary`, 739 in total, every row `logged_ts`
+2026-10-12T16:43:23, `test_window_touched` false. The development span has 41 periods, so 18 × 41 + 1 = 739. The run is
+inside the budget. It was not repeated. The signal check and the mechanism check of protocol 1.0 were not re-run.
 
-The notebook `step01_development.ipynb` was executed by nbconvert. Cells through the save and the trial log completed.
-`logs/exp02_v2.err` ends with `TypeError: get_trial_count_pdf() missing 1 required positional argument` on the last
-display cell. nbconvert did not write the notebook, so the file has no cell outputs. The numbers below are copied from
+The executed notebook has no saved outputs. nbconvert stopped at the last cell (`logs/exp02_v2.err` ends with
+`TypeError: get_trial_count_pdf() missing 1 required positional argument`) and did not write
+`step01_development.ipynb`. The evidence is the CSVs in
 `store04_experiments/exp02_stop_reentry_v2/step01_development_data/` (written at 16:43:23, the same timestamp as the
-trial rows). The run was not repeated: a second execution would append another 739 trials. After this record, the last
-cell was pointed at `read_trial_log_pdf()` and was not executed.
+trial rows) and those 739 trial-log rows. The corrected last cell reads the trial log and passes that frame to
+`get_trial_count_pdf`. It was not executed. A second execution would append another 739 trials, so the run stays as it is.
 
 **Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** From `summary_data.csv`,
 `period_data.csv` and `performance_over_time_data.csv`.
@@ -393,8 +395,96 @@ cell was pointed at `read_trial_log_pdf()` and was not executed.
   fresh-window buy-and-hold column is **+198.70%** (`score_data.csv`, the formula in `get_optimistic_dict`). That chain
   is not the prior-only path. The path buy-and-hold is +199.04% because the position is one continuous series; the
   fresh-window chain resets each period. Protocol §8 already says these are not the same object.
-- Activity and refits, from `summary_data.csv`: turnover 5.57 per year, 252 trades, 26 candidate switches (2.54 per
-  year). Mean refit rows used 3,163.6, mean share purged 0.70%, mean absolute prediction move 0.0037.
+- Activity, from `summary_data.csv`: turnover 5.57 per year, 252 trades, 26 candidate switches (2.54 per year).
+
+**Refits, from the code and from `refit_log_data.csv` (539 rows).** The run did use `so.core.rolling_retrain`.
+`config.py` sets `RETRAIN_FREQUENCY_STR` to `so.config.RETRAIN_FREQUENCY_DEFAULT_STR`, which is `"weekly"`, and
+`TRAIN_WINDOW_CANDIDATE_LIST` to `["10Y", "ALL"]`. `design.get_window_retrain_dict` calls
+`run_rolling_retrain_dict` with that frequency and with purging on (`purge_unfinished_label_bool` true).
+`get_labelled_row_pdf` sets `label_known_ts` with `get_fixed_horizon_label_known_ts_arr` at the 20-session horizon.
+The saved log is the subset `run_prior_only_path_dict` keeps: a model row is written only when that model was used on
+a path session. It is not every refit the walker produced. Both windows are in the file (`train_window` and
+`candidate` are `10Y` or `ALL` on every row). On each window, the increase in `model_id` between consecutive saved
+rows equals the number of ISO weeks between those dates, including the gaps, and no ISO week is repeated. The session
+is a Monday, or a Tuesday when that week has no Monday session (10Y: 244 Mondays and 32 Tuesdays; ALL: 239 Mondays
+and 24 Tuesdays). That is a weekly schedule. Every row has `rows_purged` = 21, and `last_label_known_ts` is strictly
+before `decision_ts`. Each refit drops 21 training rows whose label was not yet knowable.
+- Saved refits: **539** (10Y 276, ALL 263). Average rows used **3,163.6**. Mean share purged **0.698%**
+  (`rows_purged / (rows_used + rows_purged)`; the pooled share is 0.659%). The same two averages are the
+  `summary_data.csv` refit columns (3,163.6 and 0.70% at two decimals). Mean absolute prediction move 0.0037, from
+  that summary row.
+- First saved refit **2015-04-20** (10Y, `model_id` 477). Last saved refit **2025-07-14** (ALL, `model_id` 1011).
+  10Y's saved rows run 2015-04-20 to 2025-04-14 (`model_id` 477 to 998, mean rows used 2,484.3, mean share purged
+  0.838%). ALL's saved rows run 2018-01-16 to 2025-07-14 (`model_id` 620 to 1011, mean rows used 3,876.4, mean share
+  purged 0.551%). The ids below those first saved values are earlier weekly refits that this path did not use, so
+  they are not in the file. 10Y models after 2025-04-14 are in the same position: the path was on ALL, and those
+  later 10Y refits were not saved.
+
+**Comparison with the old quarterly exp02, periods that end before the development end.** The development end is
+2025-07-17 (`get_development_end_date` for the 20-session embargo). It is the last `valid_end` in v2
+`period_data.csv`. Old quarters were read from `exp02_stop_reentry/step03_walk_forward_data/` (`fold_schedule_data.csv`
+dates, then `prior_only_data.csv` for the folds that remain). The old schedule has 44 validation quarters. Three of
+them end on or after 2025-07-17. Their returns and candidates were not read. Equality of the two paths is not
+required: the old number is a fresh window after a quarterly refit, and the v2 number is one slice of the continuous
+weekly path (protocol §8).
+- v2 period 0, 2015-04-20 to 2015-07-17, ends before the development end. Its continuous-path return is **+1.73%**
+  and its candidate is the default `10Y|3|-0.05` (`selection_data.csv`). The old prior-only file has no row for that
+  first quarter. The old path starts at the next quarter; the old first quarter was used only to choose it.
+- One old prior-only quarter ends on 2025-07-16, before the development end (fold 40, 2025-04-17 to 2025-07-16,
+  candidate `all|4|0.00`, fresh-window return **+18.04%**). The v2 period that covers those dates ends on
+  2025-07-17, so that pair is not in the table.
+- The other 39 quarters overlap on 84 to 91 days, one old fold to one v2 period, no duplicate. The candidate is the
+  same window, k and offset on **26 of 39** (letter case ignored: old `10y`, v2 `10Y`). The returns are not equal.
+  The same candidate can still diverge, because the position and the refit are not the same object: 2020-07-20 to
+  2020-10-16 is `ALL|5|0.05` on both and the returns are −4.53% and +8.68%; 2021-01-19 to 2021-04-16 is `10Y|3|0.05`
+  on both and the returns are +6.55% and −0.03%.
+
+v2 return is the continuous path cut by `get_period_return_pdf`'s rule (equity at the period's last session divided
+by equity at the previous session, minus 1), from `prior_only_daily_equity_data.csv`. Old return is
+`valid_total_return` in `prior_only_data.csv`. Old dates are `valid_start` to `valid_end`. v2 dates are
+`period_start` to `period_end`.
+
+| v2 period | v2 candidate | v2 return | old quarter | old candidate | old return | candidate |
+|---|---|---:|---|---|---:|---|
+| 2015-07-20 to 2015-10-16 | 10Y\|4\|-0.05 | −4.59% | 2015-07-17 to 2015-10-16 | 10y\|4\|-0.05 | −5.18% | same |
+| 2015-10-19 to 2016-01-15 | 10Y\|4\|-0.05 | −7.46% | 2015-10-15 to 2016-01-14 | 10y\|4\|-0.05 | −6.32% | same |
+| 2016-01-19 to 2016-04-15 | 10Y\|4\|0.05 | −2.54% | 2016-01-19 to 2016-04-15 | 10y\|4\|0.05 | −3.00% | same |
+| 2016-04-18 to 2016-07-15 | 10Y\|5\|0.05 | −0.16% | 2016-04-18 to 2016-07-15 | 10y\|5\|-0.05 | +2.94% | different |
+| 2016-07-18 to 2016-10-17 | 10Y\|4\|-0.05 | −0.75% | 2016-07-15 to 2016-10-14 | 10y\|5\|0.05 | −1.25% | different |
+| 2016-10-18 to 2017-01-17 | 10Y\|5\|0.05 | −0.78% | 2016-10-14 to 2017-01-13 | 10y\|5\|0.05 | +0.49% | same |
+| 2017-01-18 to 2017-04-17 | 10Y\|4\|-0.05 | +3.39% | 2017-01-17 to 2017-04-13 | 10y\|4\|-0.05 | +3.84% | same |
+| 2017-04-18 to 2017-07-17 | 10Y\|4\|-0.05 | +4.84% | 2017-04-17 to 2017-07-14 | 10y\|4\|-0.05 | +5.44% | same |
+| 2017-07-18 to 2017-10-17 | 10Y\|4\|-0.05 | +5.15% | 2017-07-17 to 2017-10-16 | 10y\|4\|-0.05 | +5.01% | same |
+| 2017-10-18 to 2018-01-17 | 10Y\|4\|-0.05 | +7.62% | 2017-10-17 to 2018-01-16 | 10y\|4\|-0.05 | +5.89% | same |
+| 2018-01-18 to 2018-04-17 | ALL\|4\|-0.05 | −6.44% | 2018-01-16 to 2018-04-13 | all\|4\|-0.05 | −6.57% | same |
+| 2018-04-18 to 2018-07-17 | ALL\|3\|-0.05 | +6.27% | 2018-04-17 to 2018-07-16 | all\|3\|-0.05 | +2.77% | same |
+| 2018-07-18 to 2018-10-17 | ALL\|3\|-0.05 | +1.16% | 2018-07-17 to 2018-10-16 | all\|3\|-0.05 | +1.67% | same |
+| 2018-10-18 to 2019-01-17 | ALL\|3\|-0.05 | −5.74% | 2018-10-16 to 2019-01-15 | all\|3\|-0.05 | −5.53% | same |
+| 2019-01-18 to 2019-04-17 | ALL\|3\|0.05 | +5.49% | 2019-01-14 to 2019-04-12 | all\|3\|0.05 | +7.86% | same |
+| 2019-04-18 to 2019-07-17 | ALL\|4\|-0.05 | −0.11% | 2019-04-17 to 2019-07-16 | all\|4\|-0.05 | +0.50% | same |
+| 2019-07-18 to 2019-10-17 | ALL\|3\|0.05 | +0.61% | 2019-07-17 to 2019-10-16 | all\|3\|0.05 | +0.60% | same |
+| 2019-10-18 to 2020-01-17 | ALL\|3\|0.05 | +0.84% | 2019-10-16 to 2020-01-15 | all\|3\|0.05 | +3.84% | same |
+| 2020-01-21 to 2020-04-17 | 10Y\|3\|0.05 | −12.34% | 2020-01-16 to 2020-04-15 | 10y\|3\|0.00 | −15.40% | different |
+| 2020-04-20 to 2020-07-17 | ALL\|3\|0.00 | −2.39% | 2020-04-17 to 2020-07-16 | all\|5\|0.05 | +6.34% | different |
+| 2020-07-20 to 2020-10-16 | ALL\|5\|0.05 | −4.53% | 2020-07-17 to 2020-10-16 | all\|5\|0.05 | +8.68% | same |
+| 2020-10-19 to 2021-01-15 | 10Y\|3\|0.05 | +11.70% | 2020-10-15 to 2021-01-14 | 10y\|3\|0.05 | +9.88% | same |
+| 2021-01-19 to 2021-04-16 | 10Y\|3\|0.05 | +6.55% | 2021-01-19 to 2021-04-15 | 10y\|3\|0.05 | −0.03% | same |
+| 2021-04-19 to 2021-07-16 | 10Y\|5\|0.00 | +4.45% | 2021-04-19 to 2021-07-16 | 10y\|5\|-0.05 | +4.63% | different |
+| 2021-07-19 to 2021-10-15 | ALL\|5\|-0.05 | +2.48% | 2021-07-16 to 2021-10-15 | all\|5\|-0.05 | +1.84% | same |
+| 2021-10-18 to 2022-01-14 | 10Y\|5\|0.00 | +4.91% | 2021-10-14 to 2022-01-13 | 10y\|5\|-0.05 | +6.36% | different |
+| 2022-01-18 to 2022-04-14 | 10Y\|5\|0.00 | −5.36% | 2022-01-18 to 2022-04-14 | 10y\|5\|-0.05 | −4.23% | different |
+| 2022-04-18 to 2022-07-15 | 10Y\|5\|0.00 | −9.59% | 2022-04-18 to 2022-07-15 | 10y\|5\|-0.05 | −9.57% | different |
+| 2022-07-18 to 2022-10-17 | ALL\|4\|0.00 | +3.91% | 2022-07-15 to 2022-10-14 | all\|3\|0.05 | +9.33% | different |
+| 2022-10-18 to 2023-01-17 | ALL\|3\|0.05 | +6.18% | 2022-10-14 to 2023-01-13 | all\|3\|0.05 | +6.24% | same |
+| 2023-01-18 to 2023-04-17 | ALL\|4\|0.00 | +6.74% | 2023-01-17 to 2023-04-14 | all\|3\|0.05 | +4.53% | different |
+| 2023-04-18 to 2023-07-17 | ALL\|4\|0.00 | +9.17% | 2023-04-17 to 2023-07-14 | all\|4\|0.00 | +9.08% | same |
+| 2023-07-18 to 2023-10-17 | ALL\|4\|0.00 | −3.20% | 2023-07-17 to 2023-10-16 | all\|4\|0.00 | −2.96% | same |
+| 2023-10-18 to 2024-01-17 | 10Y\|5\|0.00 | +8.89% | 2023-10-17 to 2024-01-16 | 10y\|5\|-0.05 | +9.53% | different |
+| 2024-01-18 to 2024-04-17 | ALL\|5\|0.00 | +5.67% | 2024-01-16 to 2024-04-15 | 10y\|5\|0.00 | +6.01% | different |
+| 2024-04-18 to 2024-07-17 | ALL\|5\|0.05 | +11.82% | 2024-04-17 to 2024-07-16 | all\|5\|0.05 | +11.73% | same |
+| 2024-07-18 to 2024-10-17 | ALL\|5\|0.05 | −3.06% | 2024-07-17 to 2024-10-16 | all\|5\|0.05 | −4.59% | same |
+| 2024-10-18 to 2025-01-17 | 10Y\|3\|0.00 | +4.88% | 2024-10-16 to 2025-01-15 | 10y\|5\|0.00 | +2.65% | different |
+| 2025-01-21 to 2025-04-17 | 10Y\|3\|0.00 | −16.61% | 2025-01-15 to 2025-04-14 | 10y\|3\|0.00 | −13.80% | same |
 
 **Verdict: STOP.** The stopping rule is CONTINUE only when the prior-only path beats buy-and-hold and every same-stop
 fixed delay. It beats none of them. This is not a candidate result. No holdout evaluation was run. No further version
