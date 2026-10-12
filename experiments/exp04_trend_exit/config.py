@@ -1,4 +1,3 @@
-# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
 # IMPORT THE SHARED CONFIGURATION
 from so import config
 
@@ -18,8 +17,8 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp04_trend_exit"
-PROTOCOL_VERSION = "1.0"
+EXPERIMENT_NAME = "exp04_trend_exit_v2"
+PROTOCOL_VERSION = "2.0"
 
 """
 Rules (PROTOCOL.md §4): 3 buffers x 3 confirmations = 9 candidates (fixed by the roadmap of 2026-10-06, never fitted)
@@ -44,8 +43,6 @@ EMBARGO_TRADING_DAYS = 20
 FIXED_TRAIN_WINDOW_YEARS = 10
 # DEFINE THE NUMBER OF PERIODS (VALIDATION QUARTERS) POOLED FOR THE SELECTION (CURRENT PERIOD + PREVIOUS PERIODS)
 SELECTION_POOLED_QUARTER_COUNT = 4
-# DEFINE THE FIRST DATE OF THE UNTOUCHED DATA (NO REPLAY MAY END ON OR AFTER IT; research-integrity.mdc "Never" rule 1)
-UNTOUCHED_START_DATE_STR = "2026-05-14"
 
 """
 Baselines And Statistics (PROTOCOL.md §6, §8)
@@ -65,3 +62,10 @@ Exploration (step 01, 2005-2014 only; context, does not change the grid)
 # DEFINE THE EXPLORATION REPLAY WINDOW (THE MOVING AVERAGE EXISTS FROM THE 201ST SESSION; BEFORE IT THE RULE STAYS INVESTED)
 EXPLORATION_REPLAY_START_DATE_STR = config.EXPLORATION_START_DATE_STR
 EXPLORATION_REPLAY_END_DATE_STR = config.EXPLORATION_END_DATE_STR
+
+"""
+Trial budget (protocol 1.0 grid: 9 candidates x 44 quarters, plus one summary row)
+"""
+
+# DEFINE THE TRIAL BUDGET OF THIS VERSION
+TRIAL_BUDGET = 9 * 44 + 1

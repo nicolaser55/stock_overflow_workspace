@@ -47,7 +47,7 @@ stock_overflow_workspace/
 | exp01_minute_entry | **archived** (was STOP; signal check p = 0.10; prior-only +146.94% vs buy-and-hold +218.48%) | `experiments/exp01_minute_entry/PROTOCOL.md` |
 | exp02_stop_reentry | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +61.82% vs +199.04%). Protocol 1.0 (+111.66% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp02_stop_reentry/PROTOCOL.md` |
 | exp03_ath_exit | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +111.12% vs +199.04%). Protocol 1.0 (+143.05% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp03_ath_exit/PROTOCOL.md` |
-| exp04_trend_exit | **archived** (was STOP; continuous replay: prior-only +70.84% vs +229.74%) | `experiments/exp04_trend_exit/PROTOCOL.md` |
+| exp04_trend_exit | **pre-registered** 2026-10-12 (protocol 2.0, re-run under the new rules, not yet run). Protocol 1.0 (+70.84% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp04_trend_exit/PROTOCOL.md` |
 | exp05_vol_scaled_exposure | **archived** (was STOP; prior-only +165.69% vs +229.74%; lower drawdown) | `experiments/exp05_vol_scaled_exposure/PROTOCOL.md` |
 | exp06_capped_regret_reentry | **archived** (was STOP; prior-only +147.38% vs +229.74%; beats its random baselines) | `experiments/exp06_capped_regret_reentry/PROTOCOL.md` |
 | exp07_warning_lights_exit | **archived** (was STOP; prior-only +49.09% vs +229.74%; all 12 exits bought back higher) | `experiments/exp07_warning_lights_exit/PROTOCOL.md` |

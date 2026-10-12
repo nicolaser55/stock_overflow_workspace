@@ -13,6 +13,7 @@ What is verified (synthetic data):
     4. Candidate paths: one row per (candidate, period), excess = total - buy-and-hold, period returns chain to the total.
     5. Prior-only path: with one candidate it equals that candidate replayed over the path span; both random families
        have RANDOM_RUN_COUNT runs; ties select the largest buffer and confirmation; period f's choice governs f + 1.
+    6. Holdout design: the 9 names, the same tie order, the first period uses the first rule, one finite replay.
 """
 
 import os
@@ -36,6 +37,7 @@ from so.core.reentry_simulation import simulate_trend_rule_dict
 from so.core.continuous_replay import simulate_continuous_replay_dict
 from so.core.replay_walk_forward import run_candidate_replay_dict, run_prior_only_replay_dict
 from experiments.exp04_trend_exit.rules import get_schedule_tuple, get_rule_candidate_list, get_trend_exit_signal_arr, get_trend_reentry_signal_arr, get_rule_builder_func
+from experiments.exp04_trend_exit.design import CANDIDATE_LIST, SELECTION_RULE, run_candidate_replay_dict as run_design_replay_dict
 from synthetic_data import get_synthetic_ohlcv_pdf
 
 # DEFINE THE UNTOUCHED START USED BY THE TESTS (AFTER THE SYNTHETIC DATA)
@@ -139,6 +141,25 @@ def test_walk_forward(ohlcv_array_dict_in, daily_pdf_in):
     passed(f"walk-forward (9 x {len(period_pdf)} candidate periods chain to their totals; ties -> x 5%, n 10; prior-only f -> f + 1; "
            f"single candidate == direct replay; {len(baseline_name_list)} baseline rows)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID, TIE-BREAK AND ONE REPLAY
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # THE NINE NAMES AND THE PROTOCOL TIE ORDER
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp04_trend_exit import design
+    assert CANDIDATE_LIST == [f"{buffer:.2f}|{confirmation}" for buffer, confirmation in [(0.0, 1), (0.0, 5), (0.0, 10), (0.03, 1), (0.03, 5), (0.03, 10), (0.05, 1), (0.05, 5), (0.05, 10)]]
+    assert SELECTION_RULE["pooled_periods"] == 4 and SELECTION_RULE["tie_break"] == [("buffer", False), ("confirmation", False)]
+    # EVERY SCORE TIED: THE LARGER BUFFER AND CONFIRMATION GOVERN EVERY PERIOD AFTER THE FIRST
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == CANDIDATE_LIST[0]
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "0.05|10").all()
+    # ONE CANDIDATE ON A SPAN THAT IS NOT A DEVELOPMENT PERIOD RETURNS A FINITE EQUITY
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = run_design_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (9 candidates, ties -> x 5% n 10, first period is 0.00|1, one finite replay)")
+
 """
 Runner
 """
@@ -155,4 +176,5 @@ if __name__ == "__main__":
     test_signals(synthetic_ohlcv_pdf, synthetic_daily_pdf)
     test_mechanics(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_walk_forward(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp04 tests passed ✅")

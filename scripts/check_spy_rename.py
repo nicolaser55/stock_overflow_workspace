@@ -38,6 +38,8 @@ EXPECTED_EXPLORATION_BUY_HOLD_PCT, EXPECTED_EXPLORATION_TREND_PCT = 69.02, 50.39
 EXPECTED_REPLAY_TREND_PCT, EXPECTED_REPLAY_EXIT_COUNT, EXPECTED_REPLAY_BUY_HOLD_PCT = 108.03, 35, 235.39
 # DEFINE THE DATA CUT OF CHECKS (b) AND (c) AND THE REPLAY SPAN
 DATA_CUT_DATE_STR = "2026-04-15"
+# THE DATE THIS CHECK WAS RECORDED AGAINST (THE OLD UNTOUCHED START). exp04 v2 NO LONGER STORES IT.
+RECORDED_UNTOUCHED_START_DATE_STR = "2026-05-14"
 REPLAY_START_DATE_STR, REPLAY_END_DATE_STR = "2015-04-17", "2026-04-15"
 
 # FUNCTION: COMPARE A RETURN WITH ITS EXPECTED VALUE (2 DECIMALS OF A PERCENT)
@@ -78,7 +80,7 @@ if __name__ == "__main__":
     ohlcv_array_dict = get_ohlcv_array_dict(cut_ohlcv_pdf)
     daily_pdf = get_daily_feature_pdf(ohlcv_array_dict)
     print(f"Bars used by (b) and (c):\t{cut_ohlcv_pdf['date'].min()} -> {cut_ohlcv_pdf['date'].max()}")
-    assert cut_ohlcv_pdf["date"].max() < pd.Timestamp(exp04_config.UNTOUCHED_START_DATE_STR).date()
+    assert cut_ohlcv_pdf["date"].max() < pd.Timestamp(RECORDED_UNTOUCHED_START_DATE_STR).date()
     # (b) EXPLORATION BUY AND HOLD AND 200-SESSION TREND RULE (exp02 STEP 01 FUNCTIONS)
     exploration_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, config.EXPLORATION_START_DATE_STR, config.EXPLORATION_END_DATE_STR)
     exploration_trend_dict = simulate_trend_rule_dict(ohlcv_array_dict, daily_pdf, config.EXPLORATION_START_DATE_STR, config.EXPLORATION_END_DATE_STR, "ma200_dist_pct")
@@ -86,7 +88,7 @@ if __name__ == "__main__":
     result_bool_list.append(check_pct_bool("(b) 200-session rule 2005-2014", exploration_trend_dict["metric_dict"]["total_return"], EXPECTED_EXPLORATION_TREND_PCT))
     # (c) exp04 CONTINUOUS REPLAY OF x = 0, n = 1 AND BUY AND HOLD OVER THE VALIDATION SPAN
     exit_signal_arr, reentry_func, reason_str = get_rule_builder_func(daily_pdf)({"buffer": 0.0, "confirmation": 1})
-    replay_dict = simulate_continuous_replay_dict(ohlcv_array_dict, REPLAY_START_DATE_STR, REPLAY_END_DATE_STR, exp04_config.UNTOUCHED_START_DATE_STR,
+    replay_dict = simulate_continuous_replay_dict(ohlcv_array_dict, REPLAY_START_DATE_STR, REPLAY_END_DATE_STR, RECORDED_UNTOUCHED_START_DATE_STR,
                                                   volatility_arr_in=np.full(len(daily_pdf), np.nan), stop_k_in=None, reentry_func_in=reentry_func,
                                                   reentry_reason_str_in=reason_str, exit_signal_arr_in=exit_signal_arr, max_cash_sessions_in=exp04_config.MAX_CASH_SESSIONS)
     replay_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, REPLAY_START_DATE_STR, REPLAY_END_DATE_STR)
