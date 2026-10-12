@@ -465,6 +465,25 @@ Some RESULTS_LOG headlines are percentages of a printed fraction (0.5039 is the 
 log excess (−0.0377 is −3.77%/yr). The expected table stores the printed number and the precision of the quoted
 headline, so extra printed digits still match.
 
+### Replace every experiment under the current rules (Nicolas, 2026-10-12)
+
+Decided by Nicolas on 2026-10-12. Each experiment folder is replaced in place. The old code and notebook outputs stay
+in git at tag `pre-port-20261012` (commit `00269da7e34e273907eeb6a43ac6fc3e93580561`). The old results stay in
+`docs/RESULTS_LOG.md`. The old saved outputs stay in the data folder. `scripts/reproduce_archived.py` and its pending
+fix are dropped; that reproduction is not run.
+
+Order: exp02, exp03, exp04, exp05, exp06, exp07, exp12, exp13 as the frozen E1M1 rule, exp01. exp08 is removed (a
+signal check, not a strategy). exp09–exp11 were skipped and never built; that sentence stays in the registry.
+
+A version 2.0 keeps the old protocol's rules, complete candidate grid, selection rule, tie order, baselines, costs,
+success criteria and stopping rules. It changes only the evaluation machinery: the development boundary from the
+registered holdout window; data through `DataContext` with a declared `DATA_SOURCE_LIST`; the `so.core.holdout` design
+interface; and, for exp01 and exp02, weekly rolling retraining with the original training-window candidates (exp01:
+3, 5 and 10 years; exp02: 10 years and all history) and the original labels, with `label_known_ts` purging. Nothing
+is tuned and no rule is added. Each version is labelled "re-run under the new rules, not new evidence". The agent
+does not evaluate the holdout. The exp05 version is prepared for Nicolas's own end-to-end evaluation. No further
+version may follow from these results.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions

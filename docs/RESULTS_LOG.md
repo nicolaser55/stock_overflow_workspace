@@ -118,6 +118,26 @@ pre-register the weekly-versus-quarterly comparison. No experiment was run, no h
 trial-log row was added. Archived experiments exp01–exp13 are unchanged. A daily-feature, weekly-retrained version of
 exp02's re-entry model is a natural first user; proposed, waiting for Nicolas.
 
+## Methodology note (2026-10-12, Nicolas): replace every experiment under the current rules
+
+Decided by Nicolas on 2026-10-12. Each experiment folder is replaced in place by a version 2.0 that keeps the old
+protocol's rules, complete candidate grid, selection rule, tie order, baselines, costs, success criteria and stopping
+rules, and changes only the evaluation machinery: the development boundary comes from the registered holdout window;
+data is read through the point-in-time `DataContext` with a declared `DATA_SOURCE_LIST`; the design uses the
+`so.core.holdout` interface; and the model-based experiments (exp01, exp02) retrain weekly (`so.core.rolling_retrain`)
+with their original training-window candidates and label definitions, purging rows whose `label_known_ts` is not yet
+known. Nothing is tuned and no rule is added.
+
+The order is exp02, exp03, exp04, exp05, exp06, exp07, exp12, exp13 (as the frozen E1M1 rule), exp01. exp08 is removed
+(it is a signal check, not a strategy). exp09–exp11 stay in the registry text as "skipped, never built". The legacy
+code and notebook outputs are not kept in the workspace; they stay in git at tag `pre-port-20261012`. The old results
+stay in this log. The old saved outputs stay in the data folder. `scripts/reproduce_archived.py` and the pending fix
+to it are dropped.
+
+Every new version is labelled **re-run under the new rules, not new evidence**: the old version already used this
+data. No holdout evaluation is run by the agent. The exp05 version is prepared so Nicolas can run an end-to-end
+evaluation himself. No further version may follow from these results.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

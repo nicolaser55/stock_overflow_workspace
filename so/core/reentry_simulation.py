@@ -157,7 +157,8 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
         ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict (complete data)
         date1_in, date2_in (datetime.date | str): Window bounds (inclusive)
         volatility_arr_in (np.ndarray): daily_volatility per session position (stop distance = k x volatility)
-        stop_k_in (float | None): Stop multiplier k (None = no stop)
+        stop_k_in (float | np.ndarray | None): Stop multiplier k (None = no stop). An array is one k per session
+            position; a scalar is the same k on every session (the original call)
         reentry_func_in (function | None): Re-entry rule f(session_idx, cash_session_count, episode_dict) (None = never).
             A rule may set episode_dict["exit_block_sessions"] = c before returning True: the exit signal is then
             ignored for the c decisions after the re-entry (cooling-off; absent = 0, the original behaviour).
@@ -264,14 +265,16 @@ def simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatili
         range_close_arr = close_arr[bar1_idx:bar2_idx + 1]
         # IF THERE IS NO STOP (NO MULTIPLIER OR NO VOLATILITY YET)
         volatility = volatility_arr_in[session_idx]
-        if stop_k_in is None or not np.isfinite(volatility):
+        # A SCALAR K IS THE ORIGINAL CALL; AN ARRAY SUPPLIES THE CANDIDATE IN FORCE ON THIS SESSION
+        session_stop_k = stop_k_in if stop_k_in is None or np.ndim(stop_k_in) == 0 else stop_k_in[session_idx]
+        if session_stop_k is None or not np.isfinite(session_stop_k) or not np.isfinite(volatility):
             # UPDATE THE HIGHEST CLOSE AND RETURN
             state_dict["highest_close"] = max(state_dict["highest_close"], range_close_arr.max())
             return False
         # CALCULATE THE HIGHEST CLOSE BEFORE EVERY BAR OF THE RANGE
         highest_before_arr = np.maximum.accumulate(np.concatenate([[state_dict["highest_close"]], range_close_arr]))[:-1]
         # CALCULATE THE STOP OF EVERY BAR (NEVER MOVES DOWN)
-        stop_arr = np.maximum(state_dict["stop"], highest_before_arr * (1 - stop_k_in * volatility))
+        stop_arr = np.maximum(state_dict["stop"], highest_before_arr * (1 - session_stop_k * volatility))
         # FIND THE FIRST BAR WHOSE LOW REACHES THE STOP
         hit_pos_arr = np.flatnonzero(low_arr[bar1_idx:bar2_idx + 1] <= stop_arr)
         # IF THE STOP IS HIT

@@ -51,7 +51,9 @@ from so.features.barrier_labels import get_date_market_open_ts_dict
 from so.features.daily_features import get_daily_feature_pdf, get_session_decision_idx_dict
 from so.core.reentry_simulation import simulate_stop_reentry_dict, get_fixed_delay_reentry_func, get_oracle_reentry_func, \
                                     get_window_session_idx_arr, get_buy_and_hold_result_dict, simulate_trend_rule_dict
-from experiments.exp02_stop_reentry.walk_forward import get_fold_pdf, get_pooled_selection_pdf, run_validation_candidate_pdf, run_window_with_baseline_dict
+from experiments.exp02_stop_reentry.selection import get_pooled_selection_pdf
+from experiments.exp02_stop_reentry.model import get_session_threshold_reentry_func
+from experiments.exp02_stop_reentry.design import run_candidate_replay_dict, CANDIDATE_LIST, SELECTION_RULE
 from so.core.evaluation import get_chained_daily_return_pdf, get_excess_return_bootstrap_dict, get_success_criteria_dict, get_prior_only_pdf, \
                                get_window_return_summary_dict, get_candidate_summary_pdf, get_baseline_summary_pdf, get_mde_float
 from so.core.evaluation import get_pooled_selection_pdf as get_generic_pooled_selection_pdf
@@ -278,18 +280,29 @@ def test_simulator_rules(ohlcv_array_dict_in, daily_pdf_in):
 7-8. Schedule And Selection
 """
 
-# FUNCTION: TEST THE exp02 SCHEDULE
+# FUNCTION: TEST THE exp02 DEVELOPMENT SCHEDULE
 def test_schedule():
-    # BUILD THE SCHEDULE ON THE REAL CALENDAR
-    session_date_list = list(pd.to_datetime(get_date_range_market_schedule_pdf("2005-01-03", "2026-08-13")["date"]).dt.date)
-    fold_pdf = get_fold_pdf(session_date_list)
-    session_pos_dict = {date_object: idx for idx, date_object in enumerate(session_date_list)}
-    # ASSERT THE GAPS
-    for _, row in fold_pdf.iterrows():
-        assert session_pos_dict[row["valid_start"]] - session_pos_dict[row["train_end"]] - 1 >= exp_config.EMBARGO_TRADING_DAYS
-        assert session_pos_dict[row["test_start"]] - session_pos_dict[row["valid_end"]] - 1 >= exp_config.EMBARGO_TRADING_DAYS
-        assert row["train_start_all"] == session_date_list[0] and row["refit_end"] == row["valid_end"]
-    passed(f"exp02 schedule ({len(fold_pdf)} folds, first test {fold_pdf['test_start'].iloc[0]}, embargo {exp_config.EMBARGO_TRADING_DAYS} sessions, 'all' window)")
+    # POINT THE REGISTRY AT A TEMPORARY WINDOW SO THE REAL HOLDOUT IS NOT READ
+    import tempfile
+    from so import paths
+    from so.core.schedule import get_development_fold_pdf
+    from so.core.holdout import get_development_end_date
+    real_path_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = f"{tempfile.mkdtemp()}/holdout_windows.csv".replace("\\", "/")
+    try:
+        # A CALENDAR THAT ENDS BEFORE THE REAL WINDOW, WITH A FAKE ACTIVE WINDOW AT ITS END
+        session_date_list = list(pd.to_datetime(get_date_range_market_schedule_pdf("2005-01-03", "2024-12-31")["date"]).dt.date)
+        pd.DataFrame([{"window_id": "wtest", "status": "active", "start": session_date_list[-300], "end": session_date_list[-1],
+                       "session_count": 300, "months_covered": 12.0, "opened_ts": "", "opened_by": "test",
+                       "data_last_session_at_open": session_date_list[-1], "retired_ts": "", "retire_reason": ""}]).to_csv(paths.HOLDOUT_WINDOWS_FILE_PATH_STR, index=False)
+        development_end = get_development_end_date(exp_config.EMBARGO_TRADING_DAYS, session_date_list)
+        fold_pdf = get_development_fold_pdf(session_date_list, exp_config.EMBARGO_TRADING_DAYS, [exp_config.FOLD_TRAIN_WINDOW_YEARS])
+        # NO TEST WINDOW, AND THE LAST VALIDATION END IS THE DEVELOPMENT END
+        assert "test_start" not in fold_pdf.columns and pd.Timestamp(fold_pdf["valid_end"].iloc[-1]).date() == development_end
+        assert len(fold_pdf) > 10 and exp_config.EMBARGO_TRADING_DAYS == 20
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = real_path_str
+    passed(f"exp02 development schedule ({len(fold_pdf)} folds, embargo {exp_config.EMBARGO_TRADING_DAYS}, no test window)")
 
 # FUNCTION: TEST THE POOLED SELECTION
 def test_pooled_selection():
@@ -379,32 +392,29 @@ def test_success_criteria():
 11. End-To-End Fold
 """
 
-# FUNCTION: TEST ONE FOLD END TO END
+# FUNCTION: TEST THAT THE RE-ENTRY RULE AND A CONSTANT STOP ARRAY MATCH THE ORIGINAL CALLS
 def test_end_to_end(ohlcv_array_dict_in, daily_pdf_in):
-    # BUILD A SHORT SCHEDULE (1-YEAR FIXED WINDOW TO FIT THE SYNTHETIC DATA)
-    fold_pdf = get_fold_pdf(ohlcv_array_dict_in["session_date_list"], max_fold_count_in=2, train_years_in=1)
-    assert len(fold_pdf) == 2
-    # RUN THE VALIDATION CANDIDATES OF BOTH FOLDS (SMALL GRID)
-    candidate_pdf = pd.concat([run_validation_candidate_pdf(row, daily_pdf_in, ohlcv_array_dict_in, stop_k_list_in=[2, 4], offset_list_in=[0.0, 0.05])
-                               for _, row in fold_pdf.iterrows()], ignore_index=True)
-    assert len(candidate_pdf) == 2 * 2 * 2 * 2
-    assert candidate_pdf["valid_logistic_auc"].notna().all()
-    # SELECT AND TEST THE LAST FOLD
-    selection_pdf = get_pooled_selection_pdf(candidate_pdf)
-    test_dict = run_window_with_baseline_dict(fold_pdf.iloc[-1], selection_pdf.iloc[-1], daily_pdf_in, ohlcv_array_dict_in, "test", alert_in=False)
-    baseline_set = set(test_dict["baseline_pdf"]["baseline"])
-    assert {"model", "buy_hold", "fixed_delay_1", "fixed_delay_5", "fixed_delay_20", "trend_ma200"} <= baseline_set
-    assert len(test_dict["cost_sensitivity_pdf"]) == len(config.COST_SENSITIVITY_SLIPPAGE_LIST)
-    # EVERY TRADE IS INSIDE THE TEST WINDOW
-    transaction_pdf = test_dict["transaction_pdf"]
-    assert (transaction_pdf["buy_ts"].dt.date >= fold_pdf.iloc[-1]["test_start"]).all() and (transaction_pdf["sell_ts"].dt.date <= fold_pdf.iloc[-1]["test_end"]).all()
-    # THE PRIOR-ONLY RUNNER (WINDOW "valid") REPRODUCES EVERY VALIDATION CANDIDATE OF THE LAST FOLD EXACTLY
-    for _, candidate_row in candidate_pdf[candidate_pdf["fold_id"] == fold_pdf.iloc[-1]["fold_id"]].iterrows():
-        valid_dict = run_window_with_baseline_dict(fold_pdf.iloc[-1], candidate_row, daily_pdf_in, ohlcv_array_dict_in, "valid", alert_in=False)
-        assert np.isclose(valid_dict["metric_dict"]["total_return"], candidate_row["valid_total_return"]), (valid_dict["metric_dict"]["total_return"], candidate_row["valid_total_return"])
-        assert np.isclose(valid_dict["metric_dict"]["buy_hold_total_return"], candidate_row["valid_buy_hold_total_return"])
-    assert len([name for name in set(valid_dict["baseline_pdf"]["baseline"]) if name.startswith("random_")]) == exp_config.RANDOM_REENTRY_RUN_COUNT
-    passed(f"end-to-end fold ({len(candidate_pdf)} validation candidates, pooled selection, test with {len(baseline_set)} baselines, prior-only runner == candidates)")
+    # A CONSTANT THRESHOLD THROUGH THE NEW RULE EQUALS get_model_reentry_func
+    from so.core.reentry_simulation import get_model_reentry_func
+    volatility_arr = daily_pdf_in["daily_volatility"].to_numpy(dtype=float)
+    date1, date2 = daily_pdf_in["date"].iloc[400], daily_pdf_in["date"].iloc[520]
+    proba_arr = np.linspace(0.2, 0.8, len(daily_pdf_in))
+    threshold_arr = np.full(len(daily_pdf_in), 0.55)
+    new_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, 4.0,
+                                          get_session_threshold_reentry_func(proba_arr, threshold_arr), "model", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+    old_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, 4.0,
+                                          get_model_reentry_func(proba_arr, 0.55), "model", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+    assert np.allclose(new_dict["daily_equity_pdf"]["equity"], old_dict["daily_equity_pdf"]["equity"], atol=1e-6)
+    # AN ARRAY OF ONE K EQUALS THE SCALAR K
+    array_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, np.full(len(daily_pdf_in), 4.0),
+                                            get_model_reentry_func(proba_arr, 0.55), "model", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+    assert np.allclose(array_dict["daily_equity_pdf"]["equity"], old_dict["daily_equity_pdf"]["equity"], atol=1e-6)
+    # THE GRID AND THE TIE ORDER ARE THE PROTOCOL'S
+    assert len(CANDIDATE_LIST) == 18 and SELECTION_RULE["tie_break"] == [("stop_k", False), ("threshold_offset", False), ("train_window_months", True)]
+    # ONE CANDIDATE ON A SHORT WINDOW RETURNS A FINITE EQUITY (THE WEEKLY FIT IS THE SAME MODEL)
+    replay_dict = run_candidate_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("re-entry rule matches the original threshold rule; a constant stop array matches the scalar; 18 candidates")
 
 
 """

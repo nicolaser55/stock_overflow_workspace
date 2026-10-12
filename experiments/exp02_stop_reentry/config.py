@@ -1,16 +1,16 @@
-# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
 # IMPORT THE SHARED CONFIGURATION
 from so import config
+from so.core.rolling_retrain import TRAIN_WINDOW_MONTH_DICT as SHARED_TRAIN_WINDOW_MONTH_DICT
 
 """
-Experiment Configuration: exp02_stop_reentry (PROTOCOL.md of this folder)
+Experiment Configuration: exp02_stop_reentry_v2 (PROTOCOL.md of this folder)
 
-Every constant specific to this experiment. Shared constants (daily features, execution, costs, statistics, walk-forward
-conventions, exploration period) are READ from so.config, never copied. The trial-log configuration hash covers both
-files (so.core.trial_log.get_config_hash_str).
+Every constant specific to this experiment. Shared constants are READ from so.config, never copied. The trial-log
+configuration hash covers both files (so.core.trial_log.get_config_hash_str).
 
-Rule: once the first validation run of step 04 exists, any change to a constant below is a new protocol version with a
-new EXPERIMENT_NAME, recorded in PROTOCOL.md.
+This version re-runs protocol 1.0 under the current evaluation rules. It is not new evidence. The trading rules, the
+candidate grid, the selection rule, the tie order, the baselines, the costs and the stopping rule are the rules of
+protocol 1.0 (tag pre-port-20261012).
 """
 
 """
@@ -18,43 +18,55 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp02_stop_reentry"
-PROTOCOL_VERSION = "1.0"
+EXPERIMENT_NAME = "exp02_stop_reentry_v2"
+PROTOCOL_VERSION = "2.0"
 
 """
-Strategy Rules (PROTOCOL.md §5; trading rules identical to stop_reentry_v2)
+Rules (PROTOCOL.md of version 1.0, section 5)
 """
 
 # DEFINE THE TRAILING STOP MULTIPLIER CANDIDATES (STOP DISTANCE = k x daily_volatility)
 STOP_K_LIST = [3, 4, 5]
-# DEFINE THE RE-ENTRY THRESHOLD OFFSETS (p* = TRAINING BASE RATE + OFFSET)
+# DEFINE THE RE-ENTRY THRESHOLD OFFSETS (p* = THE REFIT'S TRAINING BASE RATE + OFFSET)
 REENTRY_THRESHOLD_OFFSET_LIST = [-0.05, 0.0, 0.05]
 # DEFINE THE MAXIMUM NUMBER OF DECISIONS IN CASH BEFORE A FORCED RE-ENTRY
 MAX_CASH_SESSIONS = 60
 
 """
-Walk-Forward (step 04; window lengths and step are the shared conventions of so.config)
+Schedule
 """
 
-# DEFINE THE EMBARGO BETWEEN WINDOWS (SESSIONS; MUST BE >= config.LABEL_HORIZON_SESSIONS)
+# DEFINE THE EMBARGO BETWEEN WINDOWS (SESSIONS; THE LABEL HORIZON)
 EMBARGO_TRADING_DAYS = 20
-# DEFINE THE LENGTH OF THE FIXED TRAINING WINDOW (YEARS; THE SCHEDULE IS BUILT WITH IT AND THE FOLD MUST FIT IT)
-FIXED_TRAIN_WINDOW_YEARS = 10
-# DEFINE THE TRAINING WINDOW CANDIDATES ("10y" = FIXED_TRAIN_WINDOW_YEARS, "all" = every session since the start of the data)
-TRAIN_WINDOW_LIST = ["10y", "all"]
-# DEFINE THE NUMBER OF VALIDATION QUARTERS POOLED FOR THE SELECTION (CURRENT FOLD + PREVIOUS FOLDS)
-SELECTION_POOLED_QUARTER_COUNT = 4
+# DEFINE THE FOLD-SCHEDULE TRAINING LENGTH (YEARS). THIS IS NOT THE MODEL'S ROLLING WINDOW
+FOLD_TRAIN_WINDOW_YEARS = 10
+# DEFINE HOW MANY COMPLETED QUARTERS ARE POOLED WHEN A CANDIDATE IS CHOSEN
+SELECTION_POOLED_QUARTER_COUNT = config.CANDIDATE_SELECTION_POOLED_QUARTERS_DEFAULT
 
 """
-Model (PROTOCOL.md §8)
+Retraining (Nicolas, 2026-10-11; the original exp02 windows, weekly)
 """
 
-# DEFINE THE PRIMARY MODEL ("logistic") AND THE DIAGNOSTIC MODEL ("lgbm")
-PRIMARY_MODEL_STR = "logistic"
-DIAGNOSTIC_MODEL_STR = "lgbm"
-# DEFINE THE LOGISTIC REGRESSION INVERSE REGULARIZATION STRENGTH (SMALLER = STRONGER REGULARIZATION)
+# DEFINE THE RETRAINING FREQUENCY
+RETRAIN_FREQUENCY_STR = config.RETRAIN_FREQUENCY_DEFAULT_STR
+# DEFINE THE OPTIONAL FREQUENCY COMPARISON (EMPTY: THIS VERSION DOES NOT PRE-REGISTER ONE)
+RETRAIN_FREQUENCY_COMPARISON_STR = ""
+# DEFINE THE ORIGINAL TRAINING-WINDOW CANDIDATES (10 YEARS, AND ALL HISTORY)
+TRAIN_WINDOW_CANDIDATE_LIST = ["10Y", "ALL"]
+# DEFINE THE MONTH-LENGTH USED ONLY AS A TIE BREAK (THE SHORTER WINDOW WINS, SO 10Y BEFORE ALL)
+TRAIN_WINDOW_TIE_DICT = {window_str: int(SHARED_TRAIN_WINDOW_MONTH_DICT[window_str]) for window_str in TRAIN_WINDOW_CANDIDATE_LIST}
+# DEFINE THE LABEL COLUMN (THE 20-SESSION SIGN OF PROTOCOL 1.0)
+LABEL_COL_STR = "y_fwd_positive"
+# DEFINE THE MINIMUM ROWS A REFIT MUST HAVE (THE SHARED WALKER REQUIRES A MINIMUM; THIS IS NOT A TUNED WINDOW)
+MIN_TRAIN_ROW_COUNT = 20
+# DEFINE THE LOGISTIC PENALTY (PROTOCOL 1.0) AND THE SEED EVERY REFIT RECEIVES
 LOGISTIC_C = 0.1
-# DEFINE THE LIGHTGBM PARAMETERS (SHALLOW, STRONGLY REGULARIZED: ABOUT 2,500 DAILY ROWS PER 10 YEARS)
+MODEL_SEED = config.RANDOM_SEED
+# DEFINE THE PRIMARY MODEL NAME (THE WEEKLY PATH IS LOGISTIC; exp08 STILL IMPORTS THE OLD FIT)
+PRIMARY_MODEL_STR = "logistic"
+# DEFINE THE DIAGNOSTIC MODEL (PROTOCOL 1.0; NOT REFIT IN THIS VERSION, NEVER USED FOR A TRADE)
+DIAGNOSTIC_MODEL_STR = "lgbm"
+# DEFINE THE LIGHTGBM PARAMETERS OF PROTOCOL 1.0
 LGBM_PARAM_DICT = {
     "n_estimators": 200,
     "learning_rate": 0.02,
@@ -70,7 +82,7 @@ LGBM_PARAM_DICT = {
 }
 
 """
-Baselines (PROTOCOL.md §10)
+Baselines (PROTOCOL.md of version 1.0, section 10)
 """
 
 # DEFINE THE FIXED-DELAY RE-ENTRY BASELINES (CASH DECISIONS BEFORE RE-ENTRY)
@@ -81,12 +93,26 @@ RANDOM_REENTRY_RUN_COUNT = 20
 TREND_RULE_MA_SESSIONS = 200
 
 """
-Signal Check (step 02, PROTOCOL.md §11.1)
+Signal check (protocol 1.0; not re-run in this version; the functions stay for the tests)
 """
 
 # DEFINE THE NUMBER OF QUANTILE BINS PER FEATURE
 DAILY_SIGNAL_CHECK_BIN_COUNT = 5
 # DEFINE THE MINIMUM NUMBER OF ROWS IN A TRAINING BIN BEFORE IT COUNTS AS A TEST
 DAILY_SIGNAL_CHECK_MIN_BIN_COUNT = 40
-# DEFINE THE MINIMUM NUMBER OF DISTINCT CALENDAR MONTHS OF A BIN, IN EACH WINDOW, BEFORE ITS PASS COUNTS (NEW IN exp02 1.0)
+# DEFINE THE MINIMUM NUMBER OF DISTINCT CALENDAR MONTHS OF A BIN, IN EACH WINDOW, BEFORE ITS PASS COUNTS
 DAILY_SIGNAL_CHECK_MIN_MONTH_COUNT = 6
+
+"""
+Trial budget
+"""
+
+# THE OLD VALIDATION GRID WAS 18 CANDIDATES ON 44 FOLDS, PLUS ONE SUMMARY ROW
+TRIAL_BUDGET = 18 * 44 + 1
+
+"""
+Holdout
+"""
+
+# THE DEVELOPMENT BOUNDARY IS NOT A DATE IN THIS FILE
+# It is the session an embargo before the active holdout start (so.core.holdout.get_development_end_date).

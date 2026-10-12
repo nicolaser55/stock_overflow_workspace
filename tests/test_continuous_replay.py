@@ -21,6 +21,7 @@ What is verified (synthetic data):
 
 import os
 import sys
+import tempfile
 import warnings
 import numpy as np
 import pandas as pd
@@ -33,7 +34,9 @@ sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "tests"))
 warnings.filterwarnings("ignore")
 
 # IMPORT WORKSPACE MODULES
-from so import config
+from so import config, paths
+# POINT THE GUARD AT AN EMPTY REGISTRY. THE REAL WINDOW IS OPEN; THIS SUITE CHECKS THE PINNED-DATE CALL ON SYNTHETIC DATES.
+paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(tempfile.mkdtemp(prefix="so_replay_registry_"), "holdout_windows.csv")
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.core.schedule import get_walk_forward_fold_pdf
