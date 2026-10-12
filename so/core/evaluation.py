@@ -37,7 +37,8 @@ def get_pooled_selection_pdf(candidate_pdf_in, key_col_str_list_in, score_col_st
     """
     Scores every candidate of fold f by the mean of score_col_str_in for the same candidate over folds
     f - pooled_quarter_count_in + 1 .. f (fewer for the first folds) and selects the best candidate per fold.
-    With pooled_quarter_count_in = 1 this is plain single-quarter selection.
+    With pooled_quarter_count_in = 1 this is plain single-quarter selection. Scores within NUMERIC_TOLERANCE of the
+    fold's best pooled score are tied, and tie_break_list_in then decides. The stored pooled score is not rounded.
 
     Args:
         candidate_pdf_in (pd.DataFrame): One row per (fold_id, candidate) with the score column
@@ -56,12 +57,49 @@ def get_pooled_selection_pdf(candidate_pdf_in, key_col_str_list_in, score_col_st
     grouped = candidate_pdf.groupby(list(key_col_str_list_in))[score_col_str_in]
     candidate_pdf["pooled_score"] = grouped.transform(lambda s: s.rolling(pooled_quarter_count_in, min_periods=1).mean())
     candidate_pdf["pooled_quarter_count"] = grouped.transform(lambda s: s.rolling(pooled_quarter_count_in, min_periods=1).count()).astype(int)
-    # SORT BY FOLD, SCORE (DESCENDING) AND THE TIE-BREAK COLUMNS
-    sort_col_list = ["fold_id", "pooled_score"] + [col for col, _ in tie_break_list_in]
+    # SCORES WITHIN NUMERIC_TOLERANCE OF THAT FOLD'S BEST SCORE ARE TIED. THE STORED POOLED SCORE STAYS EXACT.
+    best_score_series = candidate_pdf.groupby("fold_id")["pooled_score"].transform("max")
+    within_tolerance_series = (best_score_series - candidate_pdf["pooled_score"]) <= float(config.NUMERIC_TOLERANCE)
+    candidate_pdf["_selection_score"] = candidate_pdf["pooled_score"].where(~within_tolerance_series, best_score_series)
+    # SORT BY FOLD, THE TIED SCORE (DESCENDING) AND THE TIE-BREAK COLUMNS
+    sort_col_list = ["fold_id", "_selection_score"] + [col for col, _ in tie_break_list_in]
     ascending_list = [True, False] + [ascending for _, ascending in tie_break_list_in]
     candidate_pdf = candidate_pdf.sort_values(sort_col_list, ascending=ascending_list)
     # RETURN THE BEST CANDIDATE PER FOLD
-    return candidate_pdf.groupby("fold_id").head(1).reset_index(drop=True)
+    return candidate_pdf.groupby("fold_id").head(1).drop(columns=["_selection_score"]).reset_index(drop=True)
+
+
+# FUNCTION: FORMAT ONE NUMBER FOR A REPORT OR A SUMMARY PRINT
+def get_report_float_str(value_in):
+    """
+    Shows a number with REPORT_DECIMALS decimal places. The string is for display. Calculations keep the original value.
+
+    Args:
+        value_in (float): A return, an excess, or another reported number
+
+    Returns:
+        str: The display text
+    """
+    # FORMAT AT PRINT TIME ONLY
+    return f"{float(value_in):.{config.REPORT_DECIMALS}f}"
+
+
+# FUNCTION: COMPARE TWO SERIES AT THE NUMERIC TOLERANCE AND REPORT THE LARGEST GAP
+def get_tolerance_comparison_dict(left_value_list_in, right_value_list_in):
+    """
+    Counts pairs whose absolute difference is at most NUMERIC_TOLERANCE, and reports the maximum absolute difference.
+
+    Args:
+        left_value_list_in (list[float]): Left values, full precision
+        right_value_list_in (list[float]): Right values, full precision
+
+    Returns:
+        dict: match_count, row_count, max_abs_diff
+    """
+    # THE DIFFERENCE IS NOT ROUNDED BEFORE THE COMPARISON
+    diff_arr = np.abs(np.asarray(left_value_list_in, dtype=float) - np.asarray(right_value_list_in, dtype=float))
+    max_abs_diff = float(diff_arr.max()) if diff_arr.size else float("nan")
+    return {"match_count": int(np.sum(diff_arr <= float(config.NUMERIC_TOLERANCE))), "row_count": int(diff_arr.size), "max_abs_diff": max_abs_diff}
 
 # FUNCTION: EVALUATE EACH FOLD'S SELECTION ON THE NEXT FOLD'S VALIDATION QUARTER
 def get_prior_only_pdf(candidate_pdf_in, selection_pdf_in, key_col_str_list_in):

@@ -43,3 +43,4 @@ The signal check already failed. Dividends ignored, cash at 0%, informal costs. 
 |---|---|---|
 | 1.0 / 1.1 | 2026-10 | Signal check STOP (p = 0.10). Multivariate check added after the fact and could not reverse it. Code at tag `pre-port-20261012`. |
 | 2.0 | 2026-10-12 | Re-run under the new rules, not new evidence. Weekly refits, windows 3, 5 and 10 years, label purge (§2). |
+| 2.0 | 2026-10-13 | Preregister amendment, before any version 2.0 run. Scores within NUMERIC_TOLERANCE (1e-6) of the best pooled score are tied, then this protocol's tie order. A comparison counts a difference of at most 1e-6 as a match and also reports the maximum absolute difference. Summary prints show 6 decimal places. Calculations, and files later code reads, stay at full precision. |

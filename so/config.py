@@ -188,6 +188,19 @@ HOLDOUT_EVALUATION_BUDGET = 10
 HOLDOUT_MIN_WINDOW_MONTHS = 6
 
 """
+Numeric Comparisons And Reports (Nicolas, 2026-10-13)
+
+Computations keep full precision. A comparison treats two values as equal when their absolute difference is at most
+NUMERIC_TOLERANCE. A report or a summary print shows REPORT_DECIMALS decimal places. Files that later code reads
+(daily equity, scores, features) are not rounded to that display.
+"""
+
+# DEFINE THE ABSOLUTE BAND THAT COUNTS AS A TIE OR A MATCH
+NUMERIC_TOLERANCE = 1e-6
+# DEFINE HOW MANY DECIMAL PLACES A REPORT OR A SUMMARY PRINT SHOWS
+REPORT_DECIMALS = 6
+
+"""
 Daily Feature Constants (step06 TSDAY / so.features.daily_features; used by exp02, exp03 and later daily experiments)
 """
 

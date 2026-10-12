@@ -5,7 +5,7 @@ from so import config
 # IMPORT EXIT AND RE-ENTRY SIMULATION FUNCTIONS
 from so.core.reentry_simulation import get_buy_and_hold_result_dict, get_random_reentry_func
 # IMPORT THE EVALUATION FUNCTIONS (POOLED SELECTION)
-from so.core.evaluation import get_pooled_selection_pdf
+from so.core.evaluation import get_pooled_selection_pdf, get_report_float_str
 # IMPORT THE CONTINUOUS REPLAY FUNCTIONS
 from so.core.continuous_replay import simulate_continuous_replay_dict, get_period_return_pdf, get_prior_only_period_candidate_dict, \
                                       get_session_assignment_arr, get_switching_rule_dict, get_episode_scorecard_pdf, get_replay_summary_dict, \
@@ -112,8 +112,8 @@ def run_candidate_replay_dict(ohlcv_array_dict_in, period_pdf_in, candidate_dict
                                   "bought_back_lower_pct": simulation_dict["metric_dict"]["positive_episode_pct"],
                                   **{key: value for key, value in summary_dict.items() if key != "baselines_beaten"}})
         # DISPLAY INFORMATION
-        print(f"\tcandidate {candidate_idx} {candidate_dict}: total {summary_dict['strategy_total_return']:.2%} vs buy & hold {summary_dict['buy_hold_total_return']:.2%}"
-              f" | in market {summary_dict['in_market_pct']:.1%} | exits {simulation_dict['metric_dict']['signal_exit_count']}") if alert_in else None
+        print(f"\tcandidate {candidate_idx} {candidate_dict}: total {get_report_float_str(summary_dict['strategy_total_return'])} vs buy & hold {get_report_float_str(summary_dict['buy_hold_total_return'])}"
+              f" | in market {get_report_float_str(summary_dict['in_market_pct'])} | exits {simulation_dict['metric_dict']['signal_exit_count']}") if alert_in else None
     # RETURN THE RESULTS
     return {"candidate_period_pdf": pd.concat(period_pdf_list, ignore_index=True), "candidate_summary_pdf": pd.DataFrame(summary_dict_list),
             "simulation_dict_list": simulation_dict_list, "buy_hold_dict": buy_hold_dict}

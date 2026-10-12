@@ -16,8 +16,9 @@ from so.core.trade_execution import get_expected_net_return_arr
 from so.core.backtest_simulation import simulate_decision_trading_dict, \
                                        get_daily_equity_pdf, \
                                        simulate_buy_and_hold_dict
-# IMPORT PERFORMANCE METRIC FUNCTIONS
+# IMPORT PERFORMANCE METRIC FUNCTIONS AND THE REPORT FORMAT
 from so.core.performance_metrics import get_performance_metric_dict
+from so.core.evaluation import get_report_float_str
 
 """
 Walk-Forward: exp01_minute_entry (step 03, PROTOCOL.md §9-§12)
@@ -298,7 +299,7 @@ def run_window_with_baseline_dict(decision_pdf_in, window_pdf_in, ohlcv_array_di
     span_end_date = simulation_dict["daily_equity_pdf"]["date"].max() if not simulation_dict["daily_equity_pdf"].empty else pd.to_datetime(date2_in).date()
     buy_hold_dict = simulate_buy_and_hold_dict(ohlcv_array_dict_in, str(date1_in), str(span_end_date))
     # DISPLAY INFORMATION
-    print(f"\ttotal return {simulation_dict['metric_dict']['total_return']:.4%} | buy & hold {simulation_dict['metric_dict']['buy_hold_return']:.4%} | trades {simulation_dict['metric_dict']['trade_count']}") if alert_in else None
+    print(f"\ttotal return {get_report_float_str(simulation_dict['metric_dict']['total_return'])} | buy & hold {get_report_float_str(simulation_dict['metric_dict']['buy_hold_return'])} | trades {simulation_dict['metric_dict']['trade_count']}") if alert_in else None
     # RETURN THE RESULTS
     return {"metric_dict": simulation_dict["metric_dict"], "baseline_pdf": baseline_pdf, "cost_sensitivity_pdf": pd.DataFrame(cost_dict_list),
             "transaction_pdf": simulation_dict["transaction_pdf"], "daily_equity_pdf": simulation_dict["daily_equity_pdf"],
@@ -367,7 +368,7 @@ def run_walk_forward_fold_dict(fold_row_in, train_pool_pdf_in, eval_pool_pdf_in,
     # SELECT ON VALIDATION (TIES: SHORTER WINDOW, HIGHER THRESHOLD)
     best_row = selection_pdf.sort_values([f"valid_{selection_metric_str_in}", "train_years", "ev_threshold"], ascending=[False, True, False]).iloc[0]
     best_setting_dict = {"train_years": int(best_row["train_years"]), "ev_threshold": float(best_row["ev_threshold"])}
-    print(f"\t🏆 Selected on validation: {best_setting_dict} ({selection_metric_str_in}: {best_row[f'valid_{selection_metric_str_in}']:.4%})") if alert_in else None
+    print(f"\t🏆 Selected on validation: {best_setting_dict} ({selection_metric_str_in}: {get_report_float_str(best_row[f'valid_{selection_metric_str_in}'])})") if alert_in else None
     # DEFINE THE RESULT
     result_dict = {"selection_pdf": selection_pdf, "valid_decision_pdf_dict": valid_decision_pdf_dict, "valid_pdf": valid_pdf, "best_setting_dict": best_setting_dict}
     # IF THE TEST WINDOW STAYS UNSEEN

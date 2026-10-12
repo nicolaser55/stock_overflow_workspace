@@ -1,8 +1,8 @@
 import json
 import sys
 import pandas as pd
-# IMPORT THE SHARED PATHS
-from so import paths
+# IMPORT THE SHARED PATHS AND THE NUMERIC TOLERANCE
+from so import config, paths
 
 """
 Old-bounds calibration for one version-2.0 rule experiment (Nicolas, 2026-10-12).
@@ -25,8 +25,7 @@ _SPEC_DICT = {
     "exp12_vix_fear_reentry": {"old_name": "exp12_vix_fear_reentry", "folder": "step02_continuous_replay_data"},
     "exp13_e1m1_robustness": {"old_name": "exp12_vix_fear_reentry", "folder": "step02_continuous_replay_data", "only_candidate": "E1M1"},
 }
-# A FLOAT THAT SURVIVES A CSV ROUND TRIP
-_MATCH_ABS_TOLERANCE_FLOAT = 1e-9
+# A MATCH IS AN ABSOLUTE DIFFERENCE OF AT MOST so.config.NUMERIC_TOLERANCE. THE SUMMARY ALSO STORES THE MAXIMUM GAP.
 
 # FUNCTION: THE PACKAGE NAME ON THE COMMAND LINE
 def get_package_str():
@@ -140,10 +139,11 @@ def main():
     archived_pdf["replay_return"] = replay_list
     comparable_pdf = archived_pdf[archived_pdf["replay_return"].notna()].copy()
     comparable_pdf["return_diff"] = comparable_pdf["replay_return"] - comparable_pdf["valid_total_return"]
-    return_match_count = int((comparable_pdf["return_diff"].abs() <= _MATCH_ABS_TOLERANCE_FLOAT).sum())
+    from so.core.evaluation import get_tolerance_comparison_dict
+    comparison_dict = get_tolerance_comparison_dict(comparable_pdf["replay_return"], comparable_pdf["valid_total_return"])
+    return_match_count = int(comparison_dict["match_count"])
     # SELECTIONS FROM THE ARCHIVED EXCESS AND FROM THE REPLAYED EXCESS, WITH THE VERSION 2.0 RULE
-    score_column_dict = {"fold_id": "fold_id", "candidate": "candidate", "excess_return": "valid_excess_return"}
-    archived_score_pdf = comparable_pdf.rename(columns=score_column_dict)[list(score_column_dict.values())]
+    archived_score_pdf = comparable_pdf.rename(columns={"valid_excess_return": "excess_return"})[["fold_id", "candidate", "excess_return"]]
     replay_score_pdf = comparable_pdf.assign(excess_return=comparable_pdf["replay_return"] - comparable_pdf["valid_buy_hold_total_return"])[["fold_id", "candidate", "excess_return"]]
     period_pdf = comparable_pdf[["fold_id", "valid_start", "valid_end"]].drop_duplicates().rename(columns={"fold_id": "period_id", "valid_start": "period_start", "valid_end": "period_end"})
     archived_selection_pdf = get_governing_selection_pdf(design, archived_score_pdf, period_pdf)
@@ -152,11 +152,12 @@ def main():
     summary_dict = {"package": package_str, "archived_rows": int(len(archived_pdf)), "compared_rows": int(len(comparable_pdf)),
                     "returns_matched": return_match_count, "returns_total": int(len(comparable_pdf)),
                     "selections_matched": selection_match_count, "selections_total": int(len(archived_selection_pdf)),
-                    "max_abs_return_diff": float(comparable_pdf["return_diff"].abs().max()) if len(comparable_pdf) else None}
+                    "max_abs_return_diff": comparison_dict["max_abs_diff"]}
     output_folder_str = f"{paths.LOCAL_EXPERIMENTZONE_PATH_STR}{exp_config.EXPERIMENT_NAME}/old_bounds_calibration/"
     from so.core.local_file_management import write_csv_file_to_path
     write_csv_file_to_path(pd.DataFrame([summary_dict]), "summary_data.csv", output_folder_str)
     print(json.dumps(summary_dict))
+    print(f"returns matched {return_match_count}/{comparison_dict['row_count']} within {config.NUMERIC_TOLERANCE}; max abs return diff {comparison_dict['max_abs_diff']}")
     log_trial_dict(exp_config, "note", {"calibration": "old-bounds"}, summary_dict, False,
                    note_str_in="old-bounds calibration; diagnostic; informs no decision")
     print("logged one note row")

@@ -21,8 +21,8 @@ Usage: venv-main/Scripts/python.exe -u scripts/calibrate_exp03_old_bounds.py
 
 # ARCHIVED STEP 02 TABLES (READ). THE SUMMARY BELOW IS A FILE THIS SCRIPT CREATES.
 _OLD_FOLDER_STR = f"{paths.LOCAL_EXPERIMENTZONE_PATH_STR}exp03_ath_exit/step02_walk_forward_data/"
-# MATCH A FLOAT THAT SURVIVES A CSV ROUND TRIP
-_MATCH_ABS_TOLERANCE_FLOAT = 1e-9
+# THE 2026-10-12 RUN THAT WROTE THE SAVED SUMMARY USED 1e-9 AND IS NOT REPEATED.
+# FROM 2026-10-13 A MATCH IS AN ABSOLUTE DIFFERENCE OF AT MOST so.config.NUMERIC_TOLERANCE. THE MAXIMUM GAP IS ALWAYS REPORTED.
 
 # FUNCTION: THE DEVELOPMENT BARS AND THE DEVELOPMENT END
 def get_span_dict():
@@ -169,8 +169,9 @@ def get_match_bool(left_float_in, right_float_in):
     Returns:
         bool: Match
     """
-    # ABSOLUTE TOLERANCE
-    return abs(float(left_float_in) - float(right_float_in)) <= _MATCH_ABS_TOLERANCE_FLOAT
+    # ABSOLUTE TOLERANCE. THE CALLER ALSO REPORTS THE MAXIMUM ABSOLUTE DIFFERENCE.
+    from so import config
+    return abs(float(left_float_in) - float(right_float_in)) <= float(config.NUMERIC_TOLERANCE)
 
 # FUNCTION: PRIOR-ONLY CANDIDATES FROM THE NEW SCORES
 def get_new_selection_pdf(score_pdf_in, kept_fold_pdf_in):

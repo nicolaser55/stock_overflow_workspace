@@ -161,3 +161,4 @@ carries the position. The two numbers are not the same object. The old results s
 |---|---|---|
 | 1.0 | 2026-10-05 | See tag `pre-port-20261012`. Results: `docs/RESULTS_LOG.md`, exp02 (prior-only +111.66% vs +237.21%, STOP). |
 | 2.0 | 2026-10-12 | Re-run under the new rules, not new evidence (Nicolas, 2026-10-12). Machinery only, section 2. |
+| 2.0 | 2026-10-13 | Shared selection now treats scores within NUMERIC_TOLERANCE (1e-6) as tied. This experiment is not re-run. Its trials stand. |

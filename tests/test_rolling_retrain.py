@@ -36,7 +36,8 @@ from so.core.rolling_retrain import (
     get_retrain_session_list, get_training_mask_arr, get_barrier_label_known_ts_arr, get_fixed_horizon_label_known_ts_arr,
     get_label_known_ts_pdf, run_rolling_retrain_dict, run_rolling_retrain_candidate_dict, get_rolling_candidate_selection_pdf,
     fit_mean_label_dict, predict_constant_arr)
-from so.core.evaluation import get_performance_over_time_pdf, get_performance_quarter_pdf, get_turnover_switch_dict, get_refit_report_dict
+from so.core.evaluation import (get_performance_over_time_pdf, get_performance_quarter_pdf, get_turnover_switch_dict,
+                                get_refit_report_dict, get_pooled_selection_pdf, get_report_float_str, get_tolerance_comparison_dict)
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_session_decision_idx_dict
 
@@ -527,6 +528,36 @@ def test_selection():
     passed("9 selection (a one-quarter spike loses to a consistent window; a tie takes the longer window)")
     print(f"    test 9 detail: quarter 5 candidate {governed_pdf['train_window'].iloc[0]}; tie candidate 10Y")
 
+# FUNCTION: TEST 9B, SCORES WITHIN 1e-6 ARE TIED AND THE STORED SCORE STAYS EXACT
+def test_numeric_tolerance():
+    """
+    Scores within NUMERIC_TOLERANCE of the best score take the tie order. A gap of 1e-5 does not. The stored pooled
+    score is the unrounded mean. A comparison reports the maximum absolute difference.
+
+    Returns:
+        None
+    """
+    # SELECT ONE FOLD. TIE ORDER IS ASCENDING, SO THE SMALLEST tie_order WINS A TIE.
+    def get_selected_row(score_list_in, order_list_in):
+        score_pdf = pd.DataFrame({"fold_id": [1] * len(score_list_in), "candidate": [f"c{idx}" for idx in range(len(score_list_in))],
+                                  "excess_return": score_list_in, "tie_order": order_list_in})
+        return get_pooled_selection_pdf(score_pdf, ["candidate"], "excess_return", 1, [("tie_order", True)]).iloc[0]
+    # 0, +1e-16 AND -1e-16 ARE ONE TIE. THE NUMERIC MAXIMUM IS c1. THE TIE ORDER SELECTS c2.
+    noise_row = get_selected_row([0.0, 1e-16, -1e-16], [1, 2, 0])
+    assert noise_row["candidate"] == "c2" and noise_row["pooled_score"] == -1e-16
+    # 0.0123455 - 0.0123450 = 5e-7, INSIDE THE BAND. THE NUMERIC MAXIMUM IS c1. THE TIE ORDER SELECTS c0.
+    close_row = get_selected_row([0.0123450, 0.0123455], [0, 1])
+    assert close_row["candidate"] == "c0" and close_row["pooled_score"] == 0.0123450
+    # A GAP OF 1e-5 IS OUTSIDE THE BAND. THE HIGHER SCORE WINS, AND ITS STORED SCORE IS NOT ROUNDED.
+    apart_row = get_selected_row([0.0, 1e-5], [0, 1])
+    assert apart_row["candidate"] == "c1" and apart_row["pooled_score"] == 1e-5
+    # DISPLAY USES 6 DECIMAL PLACES. THE COMPARISON COUNTS A 1e-16 GAP AS A MATCH AND STILL REPORTS IT.
+    assert config.NUMERIC_TOLERANCE == 1e-6 and config.REPORT_DECIMALS == 6
+    assert get_report_float_str(0.01234549) == "0.012345"
+    comparison_dict = get_tolerance_comparison_dict([0.0, 0.0], [1e-16, 1e-5])
+    assert comparison_dict["match_count"] == 1 and comparison_dict["row_count"] == 2 and comparison_dict["max_abs_diff"] == abs(1e-5)
+    passed("9b numeric tolerance (1e-16 and 5e-7 tie; 1e-5 does not; stored score stays exact; max abs diff reported)")
+
 # FUNCTION: TEST 10, THE PERFORMANCE REPORT ON A TINY HAND-COMPUTED EXAMPLE
 def test_reporting():
     """
@@ -686,6 +717,7 @@ if __name__ == "__main__":
         test_label_leak()
         test_determinism()
         test_selection()
+        test_numeric_tolerance()
         test_reporting()
         test_fresh_design_module()
         test_template_refit_log()

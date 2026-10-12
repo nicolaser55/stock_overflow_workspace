@@ -6,7 +6,7 @@ from so import config
 from experiments.exp05_vol_scaled_exposure import config as exp_config
 # IMPORT THE WALK-FORWARD SCHEDULE, THE EVALUATION AND THE CONTINUOUS REPLAY FUNCTIONS
 from so.core.schedule import get_walk_forward_fold_pdf
-from so.core.evaluation import get_pooled_selection_pdf, get_chained_daily_return_pdf
+from so.core.evaluation import get_pooled_selection_pdf, get_chained_daily_return_pdf, get_report_float_str
 from so.core.continuous_replay import check_replay_window_bool, get_replay_period_pdf, get_period_return_pdf, get_prior_only_period_candidate_dict, \
                                       get_session_assignment_arr, get_replay_summary_dict, get_log_excess_bootstrap_dict
 # IMPORT THE BUY AND HOLD BENCHMARK AND THE FRACTIONAL EXPOSURE SIMULATOR
@@ -230,8 +230,8 @@ def run_candidate_exposure_dict(ohlcv_array_dict_in, period_pdf_in, candidate_di
                                   "rebalance_count": simulation_dict["metric_dict"]["rebalance_count"], "cost_paid": simulation_dict["metric_dict"]["cost_paid"],
                                   **{key: value for key, value in summary_dict.items() if key != "baselines_beaten"}})
         # DISPLAY INFORMATION
-        print(f"\tcandidate {candidate_idx} {candidate_dict}: total {summary_dict['strategy_total_return']:.2%} vs buy & hold {summary_dict['buy_hold_total_return']:.2%}"
-              f" | mean weight {simulation_dict['metric_dict']['mean_weight']:.1%} | rebalances {simulation_dict['metric_dict']['rebalance_count']}") if alert_in else None
+        print(f"\tcandidate {candidate_idx} {candidate_dict}: total {get_report_float_str(summary_dict['strategy_total_return'])} vs buy & hold {get_report_float_str(summary_dict['buy_hold_total_return'])}"
+              f" | mean weight {get_report_float_str(simulation_dict['metric_dict']['mean_weight'])} | rebalances {simulation_dict['metric_dict']['rebalance_count']}") if alert_in else None
     # RETURN THE RESULTS
     return {"candidate_period_pdf": pd.concat(period_pdf_list, ignore_index=True), "candidate_summary_pdf": pd.DataFrame(summary_dict_list),
             "simulation_dict_list": simulation_dict_list, "buy_hold_dict": buy_hold_dict}
