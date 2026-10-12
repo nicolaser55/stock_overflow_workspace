@@ -544,6 +544,20 @@ to 2021-07-16, 2022-01-18 to 2022-04-14, and 2022-04-18 to 2022-07-15. On those 
 2.0×10⁻¹⁶, and buy-and-hold matches exactly. The other quarters are not the same windows, so their returns are not the
 same object. The rules did not change. The date shift is the cause of every difference outside those five quarters.
 
+**Prior-only selections, same date cut (added 2026-10-12, after `29aec55`).** The rule in force is not a period score.
+It is the pooled choice of earlier quarters, applied to the next quarter (`get_governing_selection_pdf`). On the five
+shared-bound quarters the fresh-window returns match and the rule in force matches on 2 of 5: 2021-04-19 to 2021-07-16
+and 2022-01-18 to 2022-04-14 are `0.005|delay_5` in both files. The other three differ. 2016-01-19 to 2016-04-15 and
+2016-04-18 to 2016-07-15 are old `0.020|delay_5` and v2 `0.020|delay_60`. 2022-04-18 to 2022-07-15 is old
+`0.020|delay_5` and v2 `0.005|delay_20`. Old names are `ath_within` and `rule` in `prior_only_data.csv`. v2 names are
+`candidate` in `selection_data.csv`. Across the 39 old quarters that have a prior-only row and end before 2025-07-17,
+aligned by fold index with v2 periods 1 to 39 (those periods also end before 2025-07-17; starts 0 to 6 days later,
+ends 0 to 5 days later), 24 candidates match and 15 do not. Fold 0 has no prior-only row; v2 period 0 uses the first
+listed rule, `0.005|delay_5`, as protocol §2 states. One old quarter ends on 2025-07-16. The v2 period of the same
+index ends on the development end, so that pair is not in the count. Cause: the earlier quarters that the selection
+maximizes over do not share bounds with the archived quarters, so the mean excess is not the archived mean. A quarter
+can reproduce all 15 fresh-window returns and still be governed by a different rule. The verdict does not change.
+
 **Verdict: STOP.** The stopping rule is CONTINUE only when the prior-only path beats buy-and-hold and both random
 families. It loses to buy-and-hold (+111.12% vs +199.04%) and to the random buy-back median (+168.81%). It beats
 random exits. This is not a candidate result. No holdout evaluation was run. No further version may follow from this
