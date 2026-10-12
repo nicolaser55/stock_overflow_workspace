@@ -386,6 +386,15 @@ shared trial-log row.
 A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first user of this module. Proposed,
 waiting for Nicolas. It was not built.
 
+*Audit of `791b0cc` (Nicolas, 2026-10-12):* a module-level cache on the design could keep a fit from the full bars
+and hand it to a truncated or perturbed replay, so a look-ahead in that fit would not show up. Each replay now loads
+a new module object from the design file (`get_fresh_design_module`; config constants are copied the way
+`load_design_module` copies them). The full run, and every truncated and perturbed run, each get their own module.
+Period scores and the path of one replay share that module, so a cache may be reused inside the replay. The design
+hash stays the git trees plus the constants of the file, not the module object a replay filled. A synthetic design
+that caches by training-window name only, and reads one session ahead, is `invalid_lookahead`. No experiment was
+run, no holdout window was opened, and no shared trial-log row was added.
+
 ### Point-in-time data (Nicolas, 2026-10-11) — infrastructure only; no window opened
 
 Nicolas decided on 2026-10-11 that every value of every dataset has an `available_ts`, the moment it could have been
@@ -484,3 +493,4 @@ Proposed, waiting for Nicolas. It is not built, and it is not an experiment an a
 | 2026-10-11 | agent | Point-in-time data on `agent/point-in-time` from `main` `df67c25` (the perturbation check is on main). Registry and `DataContext` for SPY, VIX, VIX3M and the pipeline caches; the runner cuts and perturbs every feature source; labels use `label_known_ts`. Synthetic tests only. No window, no evaluation, no trial-log row. Rolling retraining, still unbuilt, will use these clocks | Rolling-retrain module, using `available_ts` and `label_known_ts` |
 | 2026-10-12 | agent | Audit of `d2788a7`: the evaluation script loads each design's `DATA_SOURCE_LIST` through the window end (`load_source_frame_dict`). An unregistered declaration is refused before any replay. A read outside the list is `invalid_undeclared`. Synthetic tests only. No window, no evaluation, no trial-log row | Rolling-retrain module, using `available_ts` and `label_known_ts` |
 | 2026-10-12 | agent | Rolling retraining built on `agent/rolling-retrain` from `main` `62cad32` (Nicolas, 2026-10-11). Commits `b5c5f4b` (module), `c7e95bb` (holdout ledger and template), `da4efb0` (synthetic tests). 16 test suites passed. No experiment, no window, no shared trial-log row. Archived exp01–exp13 unchanged | A daily-feature, weekly-retrained version of exp02's re-entry model is proposed, waiting for Nicolas |
+| 2026-10-12 | agent | Audit of `791b0cc`: each holdout replay loads a fresh design module, so a module-level cache cannot carry a full-run fit into the look-ahead checks. Synthetic tests only. No experiment, no window, no shared trial-log row | Same next step: the weekly-retrained exp02 re-entry model is proposed, waiting for Nicolas |

@@ -29,7 +29,8 @@ WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
 # IMPORT THE SHARED MODULES
 from so import paths, config
-from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, run_holdout_evaluation)
+from so.core.holdout import (compute_holdout_window_dict, get_active_holdout_window_dict, get_prior_only_result_dict,
+                            open_holdout_window_dict, run_holdout_evaluation)
 from so.core.point_in_time import check_feature_available_ts, get_decision_ts
 from so.core.rolling_retrain import (
     get_retrain_session_list, get_training_mask_arr, get_barrier_label_known_ts_arr, get_fixed_horizon_label_known_ts_arr,
@@ -567,6 +568,86 @@ def test_reporting():
     assert np.isclose(refit_dict["mean_prediction_move"], 0.25)
     passed("10 reporting (log excess, drawdown, turnover 50.4, one switch, purge share by hand)")
 
+# FUNCTION: LOAD THE FILE-BASED CACHE-LEAK DESIGN
+def get_cache_leak_design():
+    """
+    Loads tests/cache_leak_design.py. The runner reloads that file for every replay.
+
+    Returns:
+        module: Design
+    """
+    # A NEW MODULE OBJECT FROM THE FILE
+    import importlib.util
+    design_path_str = os.path.join(WORKSPACE_PATH_STR, "tests", "cache_leak_design.py")
+    design_spec = importlib.util.spec_from_file_location("cache_leak_design_test", design_path_str)
+    design_module = importlib.util.module_from_spec(design_spec)
+    design_spec.loader.exec_module(design_module)
+    return design_module
+
+# FUNCTION: TEST THAT A WINDOW-ONLY CACHE CANNOT HIDE A ONE-SESSION LEAK, AND THAT THE TEMPLATE CACHE IS PER REPLAY
+def test_fresh_design_module():
+    """
+    A design that caches by training window and reads one session ahead is invalid_lookahead. The template's imported
+    cache stays empty. Inside one template replay each training window is fit once.
+
+    Returns:
+        None
+    """
+    # THE SAME SPAN AS THE LABEL-LEAK TEST; OPEN A WINDOW ONLY WHEN THIS TEST RUNS ALONE
+    session_date_list = [day.date() for day in pd.bdate_range("2021-01-04", "2024-06-28")]
+    if get_active_holdout_window_dict(missing_ok_bool_in=True) is None:
+        window_dict = compute_holdout_window_dict(session_date_list)
+        open_holdout_window_dict(session_date_list, f"OPEN {window_dict['start']} {window_dict['end']}", file_path_str_in=paths.HOLDOUT_WINDOWS_FILE_PATH_STR)
+    ohlcv_array_dict = get_ohlcv_array_dict(get_four_bar_ohlcv_pdf(session_date_list, 5))
+    token_dir_str = tempfile.mkdtemp(prefix="so_retrain_token_")
+    token_path_str = os.path.join(token_dir_str, "token.txt")
+    with open(token_path_str, "w", encoding="utf-8") as token_file:
+        token_file.write("retrain-token\n")
+    results_path_str = tempfile.mkdtemp(prefix="so_retrain_results_")
+    os.environ["SO_HOLDOUT_PATH"] = results_path_str
+    os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "retrain-token"
+    git_dict = {"clean_bool": True, "on_main_bool": True, "preregister_bool": True, "commit_str": "abc123",
+                "design_tree_str": "cache-leak-design", "so_tree_str": "cache-leak-so"}
+    ledger_path_str = os.path.join(TEMP_ROOT_STR, "cache_leak_evaluations.csv")
+    trial_path_str = os.path.join(TEMP_ROOT_STR, "cache_leak_trial_log.csv")
+    # THE LEAK IS CAUGHT BECAUSE THE TRUNCATED REPLAY DOES NOT SEE THE FULL RUN'S CACHE
+    leak_stdout = StringIO()
+    saved_stdout = sys.stdout
+    sys.stdout = leak_stdout
+    try:
+        leak_module = get_cache_leak_design()
+        leak_row = run_holdout_evaluation(leak_module, "cache_leak", ohlcv_array_dict, token_path_str, git_dict,
+                                          ledger_path_str_in=ledger_path_str, trial_log_path_str_in=trial_path_str)
+    finally:
+        sys.stdout = saved_stdout
+    assert leak_row["status"] == "invalid_lookahead"
+    assert "invalid_lookahead" in leak_stdout.getvalue()
+    assert not os.path.isfile(os.path.join(results_path_str, leak_row["window_id"], "cache_leak", "strategy_daily_equity.csv"))
+    assert leak_module._fit_cache_dict == {}
+    # THE TEMPLATE: ONE FIT PER WINDOW INSIDE ONE REPLAY, AND THE IMPORTED MODULE'S CACHE STAYS EMPTY
+    from experiments._template import design as template_design
+    import so.core.rolling_retrain as rolling_retrain
+    call_dict = {"count": 0}
+    real_func = rolling_retrain.run_rolling_retrain_dict
+    def count_retrain_dict(*args, **kwargs):
+        # COUNT ONE WALK OF ONE WINDOW
+        call_dict["count"] += 1
+        return real_func(*args, **kwargs)
+    rolling_retrain.run_rolling_retrain_dict = count_retrain_dict
+    try:
+        assert template_design._retrain_cache_dict == {}
+        get_prior_only_result_dict(template_design, ohlcv_array_dict, get_active_holdout_window_dict())
+    finally:
+        rolling_retrain.run_rolling_retrain_dict = real_func
+        os.environ.pop("SO_HOLDOUT_PATH", None)
+        os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+        shutil.rmtree(token_dir_str, ignore_errors=True)
+        shutil.rmtree(results_path_str, ignore_errors=True)
+    assert call_dict["count"] == len(template_design.CANDIDATE_LIST)
+    assert template_design._retrain_cache_dict == {}
+    passed("fresh module (window-only cache -> invalid_lookahead; template fits each window once per replay)")
+    print(f"    fresh module detail: cache leak {leak_row['status']}; template retrain calls {call_dict['count']}; imported template cache empty")
+
 # FUNCTION: THE TEMPLATE'S FIRST THREE REFITS ON A SHORT SYNTHETIC SERIES
 def test_template_refit_log():
     """
@@ -604,6 +685,7 @@ if __name__ == "__main__":
         test_determinism()
         test_selection()
         test_reporting()
+        test_fresh_design_module()
         test_template_refit_log()
         assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_SIZE_INT
         print("\nAll rolling-retrain tests passed")
