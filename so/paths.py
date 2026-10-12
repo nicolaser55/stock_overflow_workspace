@@ -5,7 +5,8 @@ Stock Overflow Data Paths
 
 Forward slashes are used on purpose: they work on Windows and the file helpers (so.core.local_file_management) expect them.
 The data root can be overridden with the environment variable SO_DATA_PATH (used to run the tests and notebooks on
-another machine); by default it is the data folder on nicodesktop.
+another machine); by default it is the data folder on nicodesktop. The experiment zone can be overridden with
+SO_EXPERIMENT_ZONE_PATH (the trial log moves with it). Unset, that zone stays store04_experiments under the data root.
 
 Four zones:
     store01_rawzone         raw IBKR minute bars (corrected once for bad ticks, records/bad_tick_corrections.csv)
@@ -26,7 +27,9 @@ WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL_RAWZONE_PATH_STR = f"{LOCAL_PATH_STR}store01_rawzone/"
 LOCAL_WORKZONE_PATH_STR = f"{LOCAL_PATH_STR}store02_workzone/"
 LOCAL_GOLDZONE_PATH_STR = f"{LOCAL_PATH_STR}store03_goldzone/"
-LOCAL_EXPERIMENTZONE_PATH_STR = f"{LOCAL_PATH_STR}store04_experiments/"
+# DEFINE THE EXPERIMENT ZONE (UNSET SO_EXPERIMENT_ZONE_PATH KEEPS store04_experiments; THE TRIAL LOG IS INSIDE THIS ZONE)
+_EXPERIMENT_ZONE_OVERRIDE_STR = os.environ.get("SO_EXPERIMENT_ZONE_PATH", "").strip()
+LOCAL_EXPERIMENTZONE_PATH_STR = (_EXPERIMENT_ZONE_OVERRIDE_STR.replace("\\", "/").rstrip("/") + "/") if _EXPERIMENT_ZONE_OVERRIDE_STR else f"{LOCAL_PATH_STR}store04_experiments/"
 
 """
 Rawzone
@@ -71,7 +74,8 @@ HOLDOUT_RESULTS_PATH_STR = os.environ.get("SO_HOLDOUT_PATH") or None
 # FUNCTION: GET THE DATA FOLDER OF AN EXPERIMENT STEP
 def get_experiment_data_path_str(experiment_name_str_in, folder_name_str_in):
     """
-    Returns the folder where an experiment step writes its outputs: store04_experiments/<experiment>/<folder>/.
+    Returns the folder where an experiment step writes its outputs: <experiment zone>/<experiment>/<folder>/.
+    The zone is store04_experiments unless SO_EXPERIMENT_ZONE_PATH is set.
 
     Args:
         experiment_name_str_in (str): Experiment name, e.g. "exp02_stop_reentry"

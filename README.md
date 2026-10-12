@@ -106,6 +106,8 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 | pipeline | `store02_workzone/step06_TSDAY_data/` | pipeline step 06 (daily table, one file) | regenerated in seconds |
 | experiments | `store04_experiments/<experiment>/<stepNN_..._data>/` | the experiment's notebooks | regenerate by re-running |
 | experiments | `store04_experiments/trial_log.csv` | every experiment notebook | **never edit** |
+
+`SO_EXPERIMENT_ZONE_PATH`, when set in the process, replaces `store04_experiments` for that process. The trial log moves with it. Unset, the path is unchanged.
 | records | `records/holdout_windows.csv` | `scripts/holdout_window.py` (Nicolas only) | append-only; a retired row is filled once |
 | records | `records/holdout_evaluations.csv` | `scripts/holdout_evaluate.py` (Nicolas only) | append-only summary metrics; `status` is `valid` or `invalid_lookahead` |
 | holdout results | `SO_HOLDOUT_PATH` (no default) | the holdout evaluation | daily paths; not in git |
@@ -159,8 +161,36 @@ variable with no default: when it is unset, holdout results cannot be written. A
 python tests/run_all_tests.py
 ```
 
-Three suites on synthetic data (a few minutes): shared code + exp01, exp02 (+ daily features, simulator, evaluation,
-trial log), exp03. All must end with "passed ✅". Run them after every code change.
+Seventeen suites on synthetic data (a few minutes). All must end with "passed ✅". Run them after every code change.
+The list is the header of `tests/run_all_tests.py`.
+
+### Reproduction
+
+`scripts/reproduce_archived.py` re-executes the archived notebooks (exp01–exp08, exp12 and exp13; exp09–exp11 were
+skipped and have no notebooks) and compares the printed headline numbers with
+`records/archived_reproduction_expected.csv`. Those numbers were copied from the committed notebook outputs. Each row
+names the notebook, the cell id and the label.
+
+**Only Nicolas runs it.** It refuses to start unless `SO_ALLOW_LEGACY_REPRODUCTION` is `1` in that process. It does not
+write `store04_experiments` or the real trial log: it points `SO_EXPERIMENT_ZONE_PATH` at a temporary folder (the trial
+log moves with that folder). Raw bars and pipeline caches are read from the normal data folder. Each notebook is
+executed from a copy; the committed notebook is not overwritten. Set the flag in the shell session only, not with
+`setx`.
+
+The notebooks run in dependency order (exp01's dataset before its later steps, exp03's schedule before exp04–exp07,
+exp12 step 02 before exp13, because exp13 reads those saved periods from the experiment zone). `--list` prints that
+order. `--only exp05` runs that experiment alone. `--only exp13` also runs exp12 step 02.
+
+**Disclosure.** The run reads market data through 2026-05-13. That date sits inside the new holdout window (the last
+12 months once a window is opened; no window is registered yet). The run recomputes numbers already recorded in the
+committed notebooks. It is not a holdout evaluation, it opens no window, and it writes no shared trial-log row.
+
+From the saved cell timings, the full run is about 2.5–3 hours (exp01 is most of it: the dataset, about 22 minutes of
+signal-check nulls, and about 45 folds at about 0.9 minutes each). `--only exp05` is a few minutes. Those timings are
+inferred from the committed outputs, not from a re-run: this check has not been executed on the real data.
+
+A passing run writes `records/archived_reproduction_<YYYYMMDD_HHMM>.csv` (expected, reproduced, match) and exits 0
+only when every figure matches at the recorded precision. The temporary folder is left in place.
 
 ## 8. Conventions
 
