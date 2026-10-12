@@ -34,6 +34,7 @@ from experiments.exp05_vol_scaled_exposure import config as exp_config
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.core.reentry_simulation import get_buy_and_hold_result_dict
+from experiments.exp05_vol_scaled_exposure.design import CANDIDATE_LIST, SELECTION_RULE, run_candidate_replay_dict as run_design_replay_dict
 from experiments.exp05_vol_scaled_exposure.exposure import get_schedule_tuple, get_rule_candidate_list, get_target_volatility_arr, get_weight_arr, \
                                                            get_weight_builder_func, simulate_weight_path_dict, run_candidate_exposure_dict, \
                                                            run_prior_only_exposure_dict, get_forward_volatility_arr, get_volatility_signal_check_dict, \
@@ -169,6 +170,23 @@ def test_signal_check():
     assert len(bin_pdf) == 5 and int(bin_pdf["row_count"].sum()) == expected_count
     passed(f"signal check (forward volatility by hand; regime series: Spearman {check_dict['spearman']:.2f} [{check_dict['ci_low']:.2f}, {check_dict['ci_high']:.2f}] passes; 5 bins)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID, TIE-BREAK AND ONE REPLAY
+def test_design(ohlcv_array_dict_in, daily_pdf_in):
+    # THE FOUR NAMES AND THE PROTOCOL TIE ORDER
+    from so.core.holdout import get_governing_selection_pdf
+    from experiments.exp05_vol_scaled_exposure import design
+    assert CANDIDATE_LIST == ["0.30|0.50", "0.30|0.75", "0.50|0.50", "0.50|0.75"]
+    assert SELECTION_RULE["tie_break"] == [("floor", False), ("target_quantile", False)]
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "0.30|0.50"
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "0.50|0.75").all()
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = run_design_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("holdout design (4 candidates, ties -> floor 50% q 0.75, first period is 0.30|0.50, one finite replay)")
+
 """
 Runner
 """
@@ -186,4 +204,5 @@ if __name__ == "__main__":
     test_weight_path(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_walk_forward(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_signal_check()
+    test_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     print("\nAll exp05 tests passed ✅")
