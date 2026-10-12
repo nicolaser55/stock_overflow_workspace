@@ -20,6 +20,12 @@ No experiment was run, no holdout window was opened, and no shared trial-log row
 exp01–exp13 were not changed. A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first
 user; proposed, waiting for Nicolas.*
 
+*2026-10-12 (later): Nicolas asked for a reproduction check of the archived experiments. It is built on
+`agent/reproduce` and has not been run on real data. Only Nicolas runs `scripts/reproduce_archived.py`, with
+`SO_ALLOW_LEGACY_REPRODUCTION=1` in that process. The run reads data up to 2026-05-13, inside the new holdout window,
+to recompute numbers already recorded. It is not a holdout evaluation, it opens no window, and it writes no shared
+trial-log row. See "Reproduction of the archived experiments" below.*
+
 *The handover document for whoever continues the research (Nicolas, an agent, or the assistant). It says where the
 project stands, what has been learned, what data has been seen, and what to do next, in order. Update it at the end of
 every working session (section 8) and write a new dated copy when the roadmap changes materially.*
@@ -435,6 +441,30 @@ window was opened, and no trial-log row was added.
 A daily-feature, weekly-retrained version of exp02's re-entry model is a natural first user of `so.core.rolling_retrain`.
 Proposed, waiting for Nicolas. It is not built, and it is not an experiment an agent may start until Nicolas asks.
 
+### Reproduction of the archived experiments (Nicolas, 2026-10-12) — built; not run on real data
+
+`scripts/reproduce_archived.py` re-executes exp01–exp08, exp12 and exp13 from copies and compares the printed headline
+numbers with `records/archived_reproduction_expected.csv`. Those values were copied from the committed notebook
+outputs (notebook, cell id, label, value, precision). exp09–exp11 were skipped and have no notebooks.
+
+**Only Nicolas runs it.** It refuses to start unless `SO_ALLOW_LEGACY_REPRODUCTION` is `1`. It points
+`SO_EXPERIMENT_ZONE_PATH` at a temporary folder (`so/paths.py`; unset, the zone is still `store04_experiments` and the
+trial log stays there). Raw bars and pipeline caches are read from the normal data folder. Committed notebooks are
+not overwritten. `--list` prints the dependency order. `--only exp05` runs that experiment alone (exp04–exp07 skip
+the exp03 schedule check when that file is absent). `--only exp13` also runs exp12 step 02, because exp13 reads those
+saved periods from the experiment zone.
+
+**Disclosure.** The run reads data up to 2026-05-13, inside the new holdout window, to recompute numbers already
+recorded. No window is registered. The run is not a holdout evaluation and it writes no shared trial-log row.
+
+A passing run writes `records/archived_reproduction_<YYYYMMDD_HHMM>.csv` and exits 0 only when every figure matches at
+the recorded precision. From the committed cell timings the full run is about 2.5–3 hours; `--only exp05` is a few
+minutes. That estimate is inferred from the saved outputs, not from a re-run.
+
+Some RESULTS_LOG headlines are percentages of a printed fraction (0.5039 is the table form of +50.39%) or a decimal
+log excess (−0.0377 is −3.77%/yr). The expected table stores the printed number and the precision of the quoted
+headline, so extra printed digits still match.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -494,3 +524,4 @@ Proposed, waiting for Nicolas. It is not built, and it is not an experiment an a
 | 2026-10-12 | agent | Audit of `d2788a7`: the evaluation script loads each design's `DATA_SOURCE_LIST` through the window end (`load_source_frame_dict`). An unregistered declaration is refused before any replay. A read outside the list is `invalid_undeclared`. Synthetic tests only. No window, no evaluation, no trial-log row | Rolling-retrain module, using `available_ts` and `label_known_ts` |
 | 2026-10-12 | agent | Rolling retraining built on `agent/rolling-retrain` from `main` `62cad32` (Nicolas, 2026-10-11). Commits `b5c5f4b` (module), `c7e95bb` (holdout ledger and template), `da4efb0` (synthetic tests). 16 test suites passed. No experiment, no window, no shared trial-log row. Archived exp01–exp13 unchanged | A daily-feature, weekly-retrained version of exp02's re-entry model is proposed, waiting for Nicolas |
 | 2026-10-12 | agent | Audit of `791b0cc`: each holdout replay loads a fresh design module, so a module-level cache cannot carry a full-run fit into the look-ahead checks. Synthetic tests only. No experiment, no window, no shared trial-log row | Same next step: the weekly-retrained exp02 re-entry model is proposed, waiting for Nicolas |
+| 2026-10-12 | agent | Archived reproduction check built on `agent/reproduce` (Nicolas, 2026-10-12): `SO_EXPERIMENT_ZONE_PATH` in `so/paths.py`, `scripts/reproduce_archived.py`, `records/archived_reproduction_expected.csv` (119 numbers from the committed notebook outputs). Synthetic tests only. The script was not run on real data. No experiment, no window, no shared trial-log row | Nicolas runs `scripts/reproduce_archived.py` (flag for that session only). The weekly-retrained exp02 model and the write-up stay parked |
