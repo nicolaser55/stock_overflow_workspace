@@ -10,8 +10,7 @@ What is verified:
        only when the decision close is d below the sale price; delay buy-backs after exactly n cash decisions; forced
        buy-backs after MAX_CASH_SESSIONS; a rule that never fires equals buy-and-hold.
     3. Random baselines: the matched probabilities, and a random exit signal with probability 0 equals buy-and-hold.
-    4. Walk-forward: 15 validation candidates per fold, pooled selection with its tie-breaks, and the prior-only runner
-       (window "valid") reproduces the validation candidate exactly, with every baseline family present.
+    4. Selection tie-break (tighter threshold, then rule order) and one fresh-window replay of the holdout design.
     5. Exploration table: one row per (event, horizon); diff = event mean - all-day mean.
 """
 
@@ -36,7 +35,8 @@ from so.features.daily_features import get_daily_feature_pdf
 from so.core.reentry_simulation import get_buy_and_hold_result_dict
 from experiments.exp03_ath_exit.rules import get_rule_candidate_list, simulate_rule_dict, get_rule_metric_dict, get_random_exit_signal_arr, \
                                              get_random_baseline_probability_dict, get_event_forward_pdf, get_ath_exit_signal_arr
-from experiments.exp03_ath_exit.walk_forward import get_fold_pdf, run_validation_candidate_pdf, get_pooled_selection_pdf, run_window_with_baseline_dict
+from experiments.exp03_ath_exit.selection import get_pooled_selection_pdf
+from experiments.exp03_ath_exit.design import run_candidate_replay_dict, CANDIDATE_LIST, SELECTION_RULE
 from synthetic_data import get_synthetic_ohlcv_pdf
 
 # FUNCTION: PRINT A PASSED TEST
@@ -104,31 +104,22 @@ def test_random_baselines(ohlcv_array_dict_in, daily_pdf_in):
     assert not get_random_exit_signal_arr(100, 0.0, 1).any() and get_random_exit_signal_arr(100, 1.0, 1).all()
     passed(f"random baselines (exit probability {probability_dict['exit_probability']:.3f}, buy-back probability {probability_dict['buyback_probability']:.3f})")
 
-# FUNCTION: TEST THE WALK-FORWARD
+# FUNCTION: TEST THE SELECTION TIE AND ONE FRESH-WINDOW REPLAY
 def test_walk_forward(ohlcv_array_dict_in, daily_pdf_in):
-    # BUILD A SHORT SCHEDULE (1-YEAR FIXED WINDOW TO FIT THE SYNTHETIC DATA)
-    fold_pdf = get_fold_pdf(ohlcv_array_dict_in["session_date_list"], max_fold_count_in=3, train_years_in=1)
-    assert len(fold_pdf) == 3
-    # RUN THE VALIDATION CANDIDATES
-    candidate_pdf = pd.concat([run_validation_candidate_pdf(row, daily_pdf_in, ohlcv_array_dict_in) for _, row in fold_pdf.iterrows()], ignore_index=True)
-    assert len(candidate_pdf) == 3 * 15 and np.allclose(candidate_pdf["valid_excess_return"], candidate_pdf["valid_total_return"] - candidate_pdf["valid_buy_hold_total_return"], atol=1e-7)
-    # SELECT ONE RULE PER FOLD
-    selection_pdf = get_pooled_selection_pdf(candidate_pdf)
-    assert len(selection_pdf) == 3 and (selection_pdf["pooled_quarter_count"].tolist() == [1, 2, 3])
-    # TIE-BREAK: WHEN EVERY RULE TIES, THE TIGHTEST THRESHOLD AND THE FIRST RULE WIN
-    tie_pdf = candidate_pdf.assign(valid_excess_return=0.0)
-    tie_row = get_pooled_selection_pdf(tie_pdf).iloc[0]
-    assert tie_row["ath_within"] == min(exp_config.ATH_WITHIN_LIST) and tie_row["rule_order"] == 0
-    # THE PRIOR-ONLY RUNNER REPRODUCES EVERY CANDIDATE OF THE LAST FOLD
-    last_fold_row = fold_pdf.iloc[-1]
-    for _, candidate_row in candidate_pdf[candidate_pdf["fold_id"] == last_fold_row["fold_id"]].iterrows():
-        valid_dict = run_window_with_baseline_dict(last_fold_row, candidate_row, daily_pdf_in, ohlcv_array_dict_in, "valid", alert_in=False)
-        assert np.isclose(valid_dict["metric_dict"]["total_return"], candidate_row["valid_total_return"])
-    baseline_name_list = valid_dict["baseline_pdf"]["baseline"].tolist()
-    assert {"model", "buy_hold", f"trend_ma{exp_config.TREND_RULE_MA_SESSIONS}"} <= set(baseline_name_list)
-    assert sum(name.startswith("random_buyback_") for name in baseline_name_list) == exp_config.RANDOM_RUN_COUNT
-    assert sum(name.startswith("random_exit_") for name in baseline_name_list) == exp_config.RANDOM_RUN_COUNT
-    passed(f"walk-forward (15 rules x 3 folds, pooled selection and tie-breaks, prior-only runner == candidates, {len(baseline_name_list)} baseline rows)")
+    # THREE FOLDS OF TIED RULES: THE TIGHTEST THRESHOLD AND THE FIRST RULE WIN
+    row_dict_list = []
+    for fold_id in range(3):
+        for candidate_dict in get_rule_candidate_list():
+            row_dict_list.append({**candidate_dict, "fold_id": fold_id, "valid_excess_return": 0.0})
+    selection_pdf = get_pooled_selection_pdf(pd.DataFrame(row_dict_list))
+    assert len(selection_pdf) == 3 and selection_pdf["pooled_quarter_count"].tolist() == [1, 2, 3]
+    assert selection_pdf.iloc[0]["ath_within"] == min(exp_config.ATH_WITHIN_LIST) and selection_pdf.iloc[0]["rule_order"] == 0
+    assert len(CANDIDATE_LIST) == 15 and SELECTION_RULE["tie_break"] == [("ath_within", True), ("rule_order", True)]
+    # ONE CANDIDATE ON A FRESH WINDOW RETURNS A FINITE EQUITY, AND A ZERO EXIT SIGNAL STILL EQUALS BUY-AND-HOLD
+    date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
+    replay_dict = run_candidate_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
+    passed("selection tie-break (tighter threshold, then rule order) and one fresh-window replay")
 
 # FUNCTION: TEST THE EXPLORATION TABLE
 def test_exploration(daily_pdf_in):

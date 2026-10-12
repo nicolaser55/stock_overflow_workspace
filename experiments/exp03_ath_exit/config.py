@@ -1,16 +1,15 @@
-# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
 # IMPORT THE SHARED CONFIGURATION
 from so import config
 
 """
-Experiment Configuration: exp03_ath_exit (PROTOCOL.md of this folder)
+Experiment Configuration: exp03_ath_exit_v2 (PROTOCOL.md of this folder)
 
-Every constant specific to this experiment. Shared constants (daily features, execution, costs, statistics, walk-forward
-conventions, exploration period) are READ from so.config, never copied. The trial-log configuration hash covers both
-files (so.core.trial_log.get_config_hash_str).
+Every constant specific to this experiment. Shared constants are READ from so.config, never copied. The trial-log
+configuration hash covers both files (so.core.trial_log.get_config_hash_str).
 
-Rule: once the first validation run of step 02 exists, any change to a constant below is a new protocol version with a
-new EXPERIMENT_NAME, recorded in PROTOCOL.md.
+This version re-runs protocol 1.0 under the current evaluation rules. It is not new evidence. The trading rules, the
+candidate grid, the selection rule, the tie order, the baselines, the costs and the stopping rule are the rules of
+protocol 1.0 (tag pre-port-20261012). A change after the development run is a new version.
 """
 
 """
@@ -18,8 +17,8 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp03_ath_exit"
-PROTOCOL_VERSION = "1.0"
+EXPERIMENT_NAME = "exp03_ath_exit_v2"
+PROTOCOL_VERSION = "2.0"
 
 """
 Rules (PROTOCOL.md §4): the 15 rules of the 2026-10-04 exploration, all kept as candidates (none picked by its result)
@@ -66,3 +65,10 @@ EXPLORATION_BOOTSTRAP_ITERATION_COUNT = 2000
 EPISODE_GAP_SESSIONS = 20
 # DEFINE THE 52-WEEK HIGH EVENT (WITHIN THIS FRACTION OF THE 250-SESSION HIGH)
 HIGH250_WITHIN = 0.01
+
+"""
+Trial budget (protocol 1.0 grid: 15 rules x 44 quarters, plus one summary row)
+"""
+
+# DEFINE THE TRIAL BUDGET OF THIS VERSION
+TRIAL_BUDGET = 15 * 44 + 1
