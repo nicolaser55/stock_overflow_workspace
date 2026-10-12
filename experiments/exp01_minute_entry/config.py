@@ -1,4 +1,4 @@
-# ARCHIVED 2026-10-11: pinned to the old untouched window 2026-05-14; superseded by so.core.holdout; re-run only by Nicolas with SO_ALLOW_LEGACY_REPRODUCTION=1
+# VERSION 2.0 (2026-10-12): re-run under the current rules, not new evidence. Weekly refits. Protocol 1.1 code is at tag pre-port-20261012.
 # IMPORT THE SHARED CONFIGURATION
 from so import config
 
@@ -22,8 +22,13 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp01_minute_entry"
-PROTOCOL_VERSION = "1.1"
+EXPERIMENT_NAME = "exp01_minute_entry_v2"
+PROTOCOL_VERSION = "2.0"
+# DEFINE THE TRIAL BUDGET (12 CANDIDATES x 44 QUARTERS + 1 SUMMARY; THE SIGNAL CHECK IS NOT REPEATED)
+TRIAL_BUDGET = 12 * 44 + 1
+# DEFINE THE WEEKLY REFIT AND THE MINIMUM ROWS A REFIT MUST HAVE
+RETRAIN_FREQUENCY_STR = "weekly"
+MIN_TRAIN_ROW_COUNT = 200
 
 """
 Sampling And Weights (step 01 / model_dataset.py)

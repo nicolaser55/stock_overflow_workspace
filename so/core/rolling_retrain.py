@@ -34,9 +34,9 @@ Features are checked with so.core.point_in_time.check_feature_available_ts. This
 # DEFINE THE FREQUENCIES A PROTOCOL MAY PRE-REGISTER
 RETRAIN_FREQUENCY_ALLOWED_LIST = ["daily", "weekly", "monthly", "quarterly"]
 # DEFINE THE TRAINING WINDOWS THE MASK ACCEPTS (ALL IS EXPANDING)
-TRAIN_WINDOW_ALLOWED_LIST = ["6M", "2Y", "10Y", "ALL"]
+TRAIN_WINDOW_ALLOWED_LIST = ["6M", "2Y", "3Y", "5Y", "10Y", "ALL"]
 # DEFINE THE LENGTH OF EACH NAMED WINDOW IN MONTHS (ALL HAS NO CALENDAR CUT; THE TIE BREAK TREATS IT AS THE LONGEST)
-TRAIN_WINDOW_MONTH_DICT = {"6M": 6, "2Y": 24, "10Y": 120, "ALL": 10 ** 9}
+TRAIN_WINDOW_MONTH_DICT = {"6M": 6, "2Y": 24, "3Y": 36, "5Y": 60, "10Y": 120, "ALL": 10 ** 9}
 # DEFINE HOW MANY CORES A CANDIDATE POOL MAY USE
 MAX_JOB_COUNT = 8
 
@@ -250,13 +250,12 @@ def get_train_window_start_ts(retrain_decision_ts_in, train_window_str_in):
     # ALL STARTS AT THE FIRST SESSION THE CALLER PASSED
     if train_window_str_in == "ALL":
         return None
-    # 6 MONTHS, OR 2 AND 10 YEARS, MEASURED BACK FROM THE RETRAIN DAY
+    # 6 MONTHS, OR A WHOLE NUMBER OF YEARS, MEASURED BACK FROM THE RETRAIN DAY
     day_ts = get_clock_ts(retrain_decision_ts_in).normalize()
     if train_window_str_in == "6M":
         return day_ts - pd.DateOffset(months=6)
-    if train_window_str_in == "2Y":
-        return day_ts - pd.DateOffset(years=2)
-    return day_ts - pd.DateOffset(years=10)
+    year_dict = {"2Y": 2, "3Y": 3, "5Y": 5, "10Y": 10}
+    return day_ts - pd.DateOffset(years=year_dict[train_window_str_in])
 
 # FUNCTION: ROWS THAT MAY TRAIN A REFIT
 def get_training_mask_arr(row_ts_arr_in, label_known_ts_arr_in, retrain_decision_ts_in, train_window_str_in):

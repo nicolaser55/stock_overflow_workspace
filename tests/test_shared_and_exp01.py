@@ -611,6 +611,28 @@ def test_bad_tick_rule(ohlcv_pdf_in):
     # DISPLAY INFORMATION
     passed("bad tick rule (3 planted wicks cut to the body, a real 5% drop kept, neighbours within the session, idempotent)")
 
+# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID, TIE-BREAK AND LABEL PURGE
+def test_design_v2():
+    # TIES: THE SHORTER WINDOW, THEN THE HIGHER THRESHOLD. A LABEL KNOWN AFTER THE REFIT IS DROPPED.
+    from so.core.holdout import get_governing_selection_pdf
+    from so.core.point_in_time import get_ny_timestamp
+    from so.core.rolling_retrain import get_training_mask_arr
+    from experiments.exp01_minute_entry import design
+    assert len(design.CANDIDATE_LIST) == 12 and design.CANDIDATE_LIST[0] == "3Y|0.0000" and design.CANDIDATE_LIST[-1] == "10Y|0.0010"
+    assert design.SELECTION_RULE["tie_break"] == [("years", True), ("threshold", False)]
+    assert design.RETRAIN_FREQUENCY_STR == "weekly"
+    assert design.DATA_SOURCE_LIST == ["SPY_1MIN", "TSIND", "TSSEG", "TSCTX", "TSBAR"]
+    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in design.CANDIDATE_LIST]
+    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
+    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
+    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "3Y|0.0000"
+    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "3Y|0.0010").all()
+    row_ts = [get_ny_timestamp("2022-01-04"), get_ny_timestamp("2024-07-14")]
+    known_ts = [get_ny_timestamp("2022-01-05"), get_ny_timestamp("2024-07-16 16:00")]
+    mask_arr = get_training_mask_arr(row_ts, known_ts, get_ny_timestamp("2024-07-15 10:00"), "3Y")
+    assert list(mask_arr) == [True, False]
+    passed("holdout design (12 candidates, ties -> 3Y at 0.10%, a label known after the refit is dropped)")
+
 """
 Runner
 """
@@ -641,4 +663,5 @@ if __name__ == "__main__":
     synthetic_snapshot_pdf = test_snapshot_features(synthetic_ohlcv_pdf)
     test_plot_utils(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_TSBAR_pdf, synthetic_snapshot_pdf)
     test_bad_tick_rule(synthetic_ohlcv_pdf)
+    test_design_v2()
     print("\nAll tests passed ✅")

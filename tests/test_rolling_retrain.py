@@ -243,6 +243,8 @@ def test_windows():
     expected_dict = {
         "6M": ["2024-01-15", "2024-07-14"],
         "2Y": ["2022-07-15", "2024-01-14", "2024-01-15", "2024-07-14"],
+        "3Y": ["2022-07-14", "2022-07-15", "2024-01-14", "2024-01-15", "2024-07-14"],
+        "5Y": ["2022-07-14", "2022-07-15", "2024-01-14", "2024-01-15", "2024-07-14"],
         "10Y": ["2014-07-15", "2022-07-14", "2022-07-15", "2024-01-14", "2024-01-15", "2024-07-14"],
         "ALL": day_list,
     }
@@ -251,7 +253,7 @@ def test_windows():
         mask_arr = get_training_mask_arr(row_pdf["row_ts"], row_pdf["label_known_ts"], decision_ts, window_str)
         kept_list = [str(day) for day, keep in zip(row_pdf["session"], mask_arr) if keep]
         assert kept_list == expected_list, (window_str, kept_list)
-    passed("4 windows (6M, 2Y, 10Y, ALL keep exactly the boundary dates)")
+    passed("6 windows (6M, 2Y, 3Y, 5Y, 10Y, ALL keep exactly the boundary dates)")
 
 # FUNCTION: TEST 5, THE MODEL BETWEEN REFITS
 def test_model_id_held():
