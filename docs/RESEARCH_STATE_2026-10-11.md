@@ -498,6 +498,10 @@ quarters whose bounds match the old run and end before the development end, all 
 No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp03_ath_exit_v2`. The partial exp04 port stays
 uncommitted. Stop here, as Nicolas asked.
 
+*2026-10-12 (later the same day):* the exp03 old-bounds calibration finished at 22:54:26 +0300. Returns 615/615,
+selections 36/40. The four gaps are exact-zero ties broken by a one-ulp difference. One note row. Details in
+`docs/RESULTS_LOG.md`, section `exp03_ath_exit_v2`. The calibration was not re-run.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -562,3 +566,4 @@ uncommitted. Stop here, as Nicolas asked.
 | 2026-10-12 | agent | Replace-with-ports, exp02 gaps and exp03. exp02 v2 documentation only (`5a88633`): 539 saved refits, weekly, windows 10Y and ALL, purge 21 rows each, first refit 2015-04-20, last 2025-07-14; budget 739 inside 793. Notebook runner (`1787be1`) saves a failed notebook. exp03 v2 pre-registered `26700e0` (17:52:39 +0300) and run once: 616 trials at 20:03:46, prior-only +111.12% vs +199.04%, STOP. Five shared quarters match the old returns exactly. No holdout evaluation. Workspace trial log 5,006 rows (5,006 + 4,089 legacy = 9,095). exp04's partial port left uncommitted | Stop, as Nicolas asked on 2026-10-12. Do not re-run exp02 or exp03 |
 | 2026-10-12 | agent | exp03 v2 selection note added to `docs/RESULTS_LOG.md` after `29aec55`. Shared-bound fresh-window returns already matched. The rule in force matches on 2 of those 5 quarters and on 24 of 39 index-aligned quarters that end before the development end. Cause: selection uses earlier quarters, and those bounds are shifted. Verdict unchanged (STOP). No new trials. exp04's partial port left uncommitted | Next session: exp04_trend_exit_v2. Do not re-run exp02 or exp03 |
 | 2026-10-12 | agent | exp03 v2 old-bounds calibration launched at 2026-10-12 20:51:36 +0300 (`logs/exp03_ath_exit_v2_20261012_2051.log`, stderr `logs/exp03_ath_exit_v2_20261012_2051.err`). 41 archived quarters that end before 2025-07-17: 615 candidate returns and 40 prior-only selections. One note row when it finishes. Not a second validation run. exp04's partial port left uncommitted | Next session: if that log has finished, record the note in RESULTS_LOG and do not re-run the calibration. Do not re-run exp02 or exp03 validation |
+| 2026-10-12 | agent | exp03 v2 old-bounds calibration finished at 2026-10-12T22:54:26. Returns 615/615 matched (max abs diff 1.80e-16). Selections 36/40 matched. The 4 gaps are folds 31-34, governed by choosing folds where all 15 pooled excesses are exactly 0; a one-ulp return difference made the tie-break not run (`0.005|delay_5` archived, `0.010|delay_60` replay). One note row. Verdict unchanged (STOP). Not re-run | Continue the replace-with-ports task: exp04 through exp01, no experiment run |

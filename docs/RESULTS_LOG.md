@@ -558,6 +558,12 @@ index ends on the development end, so that pair is not in the count. Cause: the 
 maximizes over do not share bounds with the archived quarters, so the mean excess is not the archived mean. A quarter
 can reproduce all 15 fresh-window returns and still be governed by a different rule. The verdict does not change.
 
+**Old-bounds calibration (2026-10-12, one note row, not a second validation run).** `scripts/calibrate_exp03_old_bounds.py` replayed the version 2.0 rules on the archived quarter bounds, and only on quarters that end before 2025-07-17. It finished at 2026-10-12T22:54:26. The log is `logs/exp03_ath_exit_v2_20261012_2051.log`. The summary is `exp03_ath_exit_v2/old_bounds_calibration/summary_data.csv`. One trial-log row, stage `note`, note `old-bounds calibration; diagnostic; informs no decision`. It informs no decision and was not repeated.
+
+41 archived quarters were kept (2015-04-17 to 2025-07-16). 3 quarters end on or after the development end and were not read. **Returns: 615 / 615 matched.** Buy-and-hold matched on the same 615 rows. No row failed to join. The largest absolute difference of total return is 1.80×10⁻¹⁶.
+
+**Prior-only selections: 36 / 40 matched.** The 4 that differ are folds 31, 32, 33 and 34 (`selection_mismatch_data.csv`): the archived rule in force is `0.005|delay_5` and the replay's rule in force is `0.010|delay_60`. Those four quarters are governed by the choices made at folds 30, 31, 32 and 33. On each of those choosing folds the archived pooled excess is exactly 0 for all 15 rules, so the protocol tie-break (tighter threshold, then rule order) selects `0.005|delay_5`. Applying that same function to the archived scores reproduces all 40 archived selections. The replay's returns differ by at most one unit in the last place. On a fold where every pooled excess is exactly 0, that difference makes the scores unequal, the tie-break does not run, and `0.010|delay_60` wins. The next choosing fold (34) has a pooled excess of about 0.005, which is far above that difference, and the selections match again. The rules did not change. The verdict does not change.
+
 **Verdict: STOP.** The stopping rule is CONTINUE only when the prior-only path beats buy-and-hold and both random
 families. It loses to buy-and-hold (+111.12% vs +199.04%) and to the random buy-back median (+168.81%). It beats
 random exits. This is not a candidate result. No holdout evaluation was run. No further version may follow from this
