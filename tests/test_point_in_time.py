@@ -31,7 +31,7 @@ from so import paths, config
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, run_holdout_evaluation,
                              get_prior_only_result_dict, get_lookahead_difference_str, get_perturbed_ohlcv_dict,
                              get_truncation_cut_date_list)
-from so.core.point_in_time import (add_available_ts_pdf, get_as_of_pdf, get_minute_bar_available_ts, get_decision_ts,
+from so.core.point_in_time import (add_available_ts_pdf, add_tsbar_label_known_ts_pdf, get_as_of_pdf, get_minute_bar_available_ts, get_decision_ts,
                                    get_vix_daily_available_ts, get_derived_available_ts, get_swing_available_ts,
                                    get_cut_clock_dict, check_feature_available_ts, DataContext, register_source_dict,
                                    unregister_source, raise_if_direct_read_blocked, SOURCE_SPEC_DICT)
@@ -189,6 +189,36 @@ def test_labels():
     none_pdf = context.get_labels("TSBAR", early_ts)
     assert list(early_pdf["y"]) == [1] and len(none_pdf) == 0
     passed("labels (TSBAR refused through get; get_labels keeps label_known_ts before the cutoff)")
+
+# FUNCTION: TEST THAT A STORED TSBAR CELL BECOMES label_known_ts
+def test_tsbar_cell_clock():
+    """
+    Distance cells have no label_known_ts column. The row clock is the end of the latest exit bar on a synthetic
+    minute index. An unresolved cell, a missing entry, and an exit past the index stay unfinished. A frame that
+    already has label_known_ts or exit_ts keeps that clock.
+
+    Returns:
+        None
+    """
+    # FIVE MINUTE BARS, 10:00 THROUGH 10:04. THE LATEST CELL EXITS THREE BARS AFTER 10:00.
+    bar_list = [get_label_ts(10, minute) for minute in range(5)]
+    cell_pdf = pd.DataFrame({
+        "entry_ts": [get_label_ts(10, 0), get_label_ts(10, 1), get_label_ts(10, 0), get_label_ts(11, 0)],
+        "0.0010": ["1|1|TP", "1|1|TP", "1|1|TP", "1|1|TP"],
+        "0.0200": ["3|1|SL", "-1|nan|NA", "9|1|TL", "1|1|TP"],
+    })
+    stamped_pdf = add_tsbar_label_known_ts_pdf(cell_pdf, timestamp_index_in=bar_list)
+    assert pd.Timestamp(stamped_pdf["label_known_ts"].iloc[0]) == get_label_ts(10, 4)
+    assert pd.Timestamp(stamped_pdf["available_ts"].iloc[0]) == get_label_ts(10, 4)
+    assert pd.isna(stamped_pdf["label_known_ts"].iloc[1])
+    assert pd.isna(stamped_pdf["label_known_ts"].iloc[2])
+    assert pd.isna(stamped_pdf["label_known_ts"].iloc[3])
+    # AN EXISTING CLOCK IS KEPT. exit_ts IS THE BAR START, KNOWABLE ONE MINUTE LATER.
+    kept_pdf = add_tsbar_label_known_ts_pdf(pd.DataFrame({"label_known_ts": [get_label_ts(15, 0)], "y": [1]}))
+    assert pd.Timestamp(kept_pdf["label_known_ts"].iloc[0]) == get_label_ts(15, 0)
+    exit_pdf = add_tsbar_label_known_ts_pdf(pd.DataFrame({"exit_ts": [get_label_ts(10, 1)]}))
+    assert pd.Timestamp(exit_pdf["label_known_ts"].iloc[0]) == get_minute_bar_available_ts(get_label_ts(10, 1))
+    passed("TSBAR cells (latest exit bar; unresolved, missing and out-of-index rows stay unfinished)")
 
 # FUNCTION: TEST THAT AN UNKNOWN SOURCE RAISES
 def test_unregistered():
@@ -688,6 +718,7 @@ if __name__ == "__main__":
         test_derived()
         test_vintage()
         test_labels()
+        test_tsbar_cell_clock()
         test_unregistered()
         test_vix_regression()
         test_runner()

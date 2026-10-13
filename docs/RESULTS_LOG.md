@@ -139,6 +139,26 @@ Every new version is labelled **re-run under the new rules, not new evidence**: 
 data. No holdout evaluation is run by the agent. The exp05 version is prepared so Nicolas can run an end-to-end
 evaluation himself. No further version may follow from these results.
 
+## Port queue, 2026-10-13 (development finished; calibrations and exp01 did not)
+
+The queue in `logs/port_queue_status.csv` ran from 2026-10-13T01:01:15 to 2026-10-13T06:17:33. `logs/port_queue.err` and `logs/port_queue.out` are empty. Trial-log counts below are from `read_trial_log_pdf()` on 2026-10-13. Headline returns of the six finished development notebooks are in those notebooks and are not copied here.
+
+| Experiment | Development | Validation rows | Summary rows | Note rows |
+|---|---|---:|---:|---:|
+| `exp04_trend_exit_v2` | finished 01:01:15–02:16:52 | 369 | 1 | 0 |
+| `exp05_vol_scaled_exposure_v2` | finished 02:17:19–02:49:47 | 164 | 1 | 0 |
+| `exp06_capped_regret_reentry_v2` | finished 02:50:14–04:28:41 | 492 | 1 | 0 |
+| `exp07_warning_lights_exit_v2` | finished 04:29:07–04:54:09 | 123 | 1 | 0 |
+| `exp12_vix_fear_reentry_v2` | finished 04:54:35–05:59:48 | 246 | 1 | 0 |
+| `exp13_e1m1_robustness_v2` | finished 06:00:15–06:09:50 | 41 | 1 | 0 |
+| `exp01_minute_entry_v2` | failed 06:10:17–06:17:33 | 0 | 0 | 0 |
+
+**Calibrations.** All six failed after about 27 seconds with the same `TypeError: tuple indices must be integers or slices, not str` in `get_replay_return_float` (`row_in["valid_start"]`). `DataFrame.itertuples` returns a named tuple. No calibration reached `log_trial_dict`, so none wrote its note row. Logs: `logs/exp04_trend_exit_calibration_20261013_0216.log`, `logs/exp05_vol_scaled_exposure_calibration_20261013_0249.log`, `logs/exp06_capped_regret_reentry_calibration_20261013_0428.log`, `logs/exp07_warning_lights_exit_calibration_20261013_0454.log`, `logs/exp12_vix_fear_reentry_calibration_20261013_0559.log`, `logs/exp13_e1m1_robustness_calibration_20261013_0609.log`.
+
+A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bounds 2015-04-17 → 2015-07-16, called `get_replay_return_float` and did not call `log_trial_dict`. The return was `nan`. The trial log stayed at 6,448 rows and `exp04_trend_exit_v2` still had 0 note rows. The quarter is not a development period. Development periods in that load run 2015-03-19 → 2015-06-18 through 2025-03-19 → 2025-06-18 (41 periods). The archived quarters run 2015-04-17 → 2015-07-16 through 2025-04-17 → 2025-07-16 (41 quarters). Zero start dates coincide. The calibration leaves a non-matching quarter unmatched and does not substitute a fresh window. A re-run will therefore compare 0 rows and then log one note. That note is the script's "run once" lock.
+
+**exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
+
 ## How to add an entry
 
 For every notebook run: date, experiment and step, protocol version, config hash (printed in the header cell), the trial-log

@@ -36,7 +36,9 @@ config.PA_EXTREMA_ORDER bars later (add_minima_col needs `order` bars on each si
 once those bars exist). A swing stored on its own bar is therefore knowable only at the end of the confirmation bar.
 TSCTX states that the row of bar t uses only bars <= t. TSDAY features are the decision bar of the session; the
 forward-return columns on that row are labels and are not served on the feature path. TSBAR is a label: label_known_ts
-is the end of the bar where TP or SL was hit, or the end of the horizon.
+is the end of the bar where TP or SL was hit, or the end of the horizon. The files store that bar as exit_bar_count
+on each distance cell (minute bars from entry_ts). The row clock is the latest of those bars. An unresolved cell,
+or an exit bar that is not in the loaded minute bars, leaves the row unfinished.
 """
 
 # DEFINE THE NEW YORK TIME ZONE USED ON EVERY TIMESTAMP
@@ -256,14 +258,109 @@ def add_cache_available_ts_pdf(cache_pdf_in):
     stamped_pdf["available_ts"] = [get_minute_bar_available_ts(label_ts) for label_ts in stamped_pdf["timestamp"]]
     return stamped_pdf
 
+# COLUMNS THAT ARE NOT A DISTANCE CELL
+_TSBAR_META_COLUMN_SET = {"decision_ts", "entry_ts", "entry_price", "horizon_complete", "rr_ratio", "date", "timestamp",
+                          "available_ts", "label_known_ts", "exit_ts"}
+
+# FUNCTION: THE LATEST STORED EXIT, IN BARS FROM THE ENTRY BAR
+def get_tsbar_latest_exit_count_arr(label_pdf_in):
+    """
+    Reads every distance cell ("exit_bar_count|exit_price|exit_reason"). The row's count is the latest exit. Any
+    unresolved cell (a missing count, a negative count, or reason NA) marks the whole row unfinished.
+
+    Args:
+        label_pdf_in (pd.DataFrame): TSBAR rows as stored
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Exit-bar counts, and a bool per row that is True when the row is unfinished
+    """
+    # EVERY DISTANCE CELL ON THE ROW. A SLOWER DISTANCE CAN ONLY DELAY THE CLOCK.
+    count_arr, unresolved_arr, found_bool = None, None, False
+    for column_str in label_pdf_in.columns:
+        if column_str in _TSBAR_META_COLUMN_SET:
+            continue
+        cell_series = label_pdf_in[column_str]
+        sample_str = ""
+        for value in cell_series:
+            if pd.notna(value) and str(value) != "":
+                sample_str = str(value)
+                break
+        if sample_str.count("|") < 2:
+            continue
+        split_pdf = cell_series.astype(str).str.split("|", n=2, expand=True)
+        count_series = pd.to_numeric(split_pdf[0], errors="coerce")
+        reason_series = split_pdf[2].astype(str)
+        cell_unresolved_arr = (count_series.isna() | (count_series < 0) | reason_series.eq("NA")).to_numpy(dtype=bool)
+        found_bool = True
+        if count_arr is None:
+            count_arr = count_series.to_numpy(dtype=float)
+            unresolved_arr = cell_unresolved_arr
+        else:
+            count_arr = np.fmax(count_arr, count_series.to_numpy(dtype=float))
+            unresolved_arr = unresolved_arr | cell_unresolved_arr
+    if not found_bool:
+        raise ValueError("TSBAR needs label_known_ts or exit_ts (the bar where TP or SL was hit, or the horizon end).")
+    return count_arr, unresolved_arr
+
+# FUNCTION: BAR-START LABELS IN BAR ORDER
+def get_bar_label_index(timestamp_index_in):
+    """
+    The minute-bar start labels, sorted, in America/New_York. exit_bar_count walks this order.
+
+    Args:
+        timestamp_index_in (array-like): Bar-start labels
+
+    Returns:
+        pd.DatetimeIndex: Sorted bar starts
+    """
+    # SORT SO A BAR COUNT IS THE NEXT TRADING MINUTE, NOT A FILE ORDER
+    label_index = pd.DatetimeIndex(pd.to_datetime(timestamp_index_in, utc=True)).tz_convert(NY_TZ_STR)
+    return label_index.sort_values()
+
+# FUNCTION: label_known_ts FROM THE STORED CELLS AND THE MINUTE BARS
+def get_tsbar_cell_label_known_ts_arr(label_pdf_in, timestamp_index_in):
+    """
+    The end of the latest exit bar. A row is unfinished when any cell is unresolved, the entry bar is missing, or the
+    exit bar is outside the loaded minute bars. An unfinished clock is NaT, and a training mask drops that row.
+
+    Args:
+        label_pdf_in (pd.DataFrame): TSBAR rows with entry_ts and distance cells
+        timestamp_index_in (array-like): SPY minute-bar start labels, in bar order
+
+    Returns:
+        list: label_known_ts per row (NaT when unfinished)
+    """
+    # THE EXIT BAR IS entry_ts PLUS exit_bar_count TRADING MINUTES
+    if "entry_ts" not in label_pdf_in.columns:
+        raise ValueError("TSBAR cells need entry_ts so the exit bar can be found.")
+    count_arr, unresolved_arr = get_tsbar_latest_exit_count_arr(label_pdf_in)
+    label_index = get_bar_label_index(timestamp_index_in)
+    entry_index = pd.DatetimeIndex(pd.to_datetime(label_pdf_in["entry_ts"], utc=True)).tz_convert(NY_TZ_STR)
+    entry_pos_arr = label_index.get_indexer(entry_index)
+    row_count = len(label_pdf_in)
+    ok_arr = (~unresolved_arr) & (entry_pos_arr >= 0) & np.isfinite(count_arr)
+    exit_pos_arr = np.full(row_count, -1, dtype=int)
+    if ok_arr.any():
+        exit_pos_arr[ok_arr] = entry_pos_arr[ok_arr] + np.rint(count_arr[ok_arr]).astype(int)
+    ok_arr = ok_arr & (exit_pos_arr >= 0) & (exit_pos_arr < len(label_index))
+    known_list = [pd.NaT] * row_count
+    if ok_arr.any():
+        exit_label_index = label_index[exit_pos_arr[ok_arr]] + MINUTE_BAR_TIMEDELTA
+        for slot_idx, known_ts in zip(np.flatnonzero(ok_arr), exit_label_index):
+            known_list[int(slot_idx)] = pd.Timestamp(known_ts)
+    return known_list
+
 # FUNCTION: ADD label_known_ts TO BARRIER TARGETS
-def add_tsbar_label_known_ts_pdf(label_pdf_in):
+def add_tsbar_label_known_ts_pdf(label_pdf_in, timestamp_index_in=None):
     """
     Copies a TSBAR frame. label_known_ts is kept when the caller already set it (the hit bar or the horizon end).
-    An exit_ts column is the start label of that bar, and the label is knowable at the end of the bar.
+    An exit_ts column is the start label of that bar, and the label is knowable at the end of the bar. Stored
+    distance cells are placed on timestamp_index_in (the SPY minute bars). The row is knowable at the end of the
+    latest exit bar. An unresolved cell leaves the row unfinished.
 
     Args:
         label_pdf_in (pd.DataFrame): Barrier rows
+        timestamp_index_in (array-like | None): Bar-start labels. None loads SPY through the frame's last date.
 
     Returns:
         pd.DataFrame: Copy with label_known_ts and available_ts
@@ -275,7 +372,17 @@ def add_tsbar_label_known_ts_pdf(label_pdf_in):
     elif "exit_ts" in stamped_pdf.columns:
         stamped_pdf["label_known_ts"] = [get_minute_bar_available_ts(label_ts) for label_ts in stamped_pdf["exit_ts"]]
     else:
-        raise ValueError("TSBAR needs label_known_ts or exit_ts (the bar where TP or SL was hit, or the horizon end).")
+        # THE FILES HAVE NO CLOCK COLUMN. PLACE THE STORED EXIT BAR ON THE MINUTE INDEX.
+        if timestamp_index_in is None:
+            if "date" in stamped_pdf.columns:
+                end_date = pd.to_datetime(stamped_pdf["date"]).dt.date.max()
+            else:
+                end_date = pd.to_datetime(stamped_pdf["entry_ts"], utc=True).dt.tz_convert(NY_TZ_STR).dt.date.max()
+            spy_pdf = get_registry_frame_pdf("SPY_1MIN", end_date)
+            if spy_pdf is None or len(spy_pdf) == 0 or "timestamp" not in spy_pdf.columns:
+                raise ValueError("SPY minute bars are required to place a TSBAR exit bar.")
+            timestamp_index_in = spy_pdf["timestamp"]
+        stamped_pdf["label_known_ts"] = get_tsbar_cell_label_known_ts_arr(stamped_pdf, timestamp_index_in)
     # THE LABEL ROW ITSELF IS KNOWABLE AT THAT SAME MOMENT
     stamped_pdf["available_ts"] = stamped_pdf["label_known_ts"]
     return stamped_pdf
@@ -1018,7 +1125,13 @@ def load_source_frame_dict(source_name_list_in, end_date_in):
             # AN UNREGISTERED NAME RAISES BEFORE ANY FILE IS USED FOR THAT NAME
             get_source_spec_dict(source_name_str)
             loaded_pdf = get_frame_through_end_date_pdf(get_registry_frame_pdf(source_name_str, end_date), end_date)
-            frame_dict[source_name_str] = add_available_ts_pdf(source_name_str, loaded_pdf) if len(loaded_pdf) else loaded_pdf
+            if source_name_str == "TSBAR" and len(loaded_pdf):
+                # PLACE THE STORED EXIT BARS ON THE SPY MINUTES ALREADY LOADED FOR THIS CONTEXT
+                spy_pdf = frame_dict.get("SPY_1MIN")
+                timestamp_index = spy_pdf["timestamp"] if spy_pdf is not None and len(spy_pdf) and "timestamp" in spy_pdf.columns else None
+                frame_dict[source_name_str] = add_tsbar_label_known_ts_pdf(loaded_pdf, timestamp_index_in=timestamp_index)
+            else:
+                frame_dict[source_name_str] = add_available_ts_pdf(source_name_str, loaded_pdf) if len(loaded_pdf) else loaded_pdf
         return frame_dict
     finally:
         # RESTORE THE FLAG THE CALLER HAD

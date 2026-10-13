@@ -21,6 +21,7 @@ Stopping, from protocol 1.0 §13 step 03: STOP if the prior-only path does not b
 - The development end is the session an embargo of 10 before the registered holdout start.
 - Features (TSIND, TSSEG, TSCTX) and barrier labels (TSBAR) are read through `DataContext`, with SPY minute bars.
 - The model is refit on the first session of each ISO week, on rows inside the candidate's window whose `label_known_ts` is strictly before that refit's first decision. An unfinished label is dropped and counted out of the fit. It is not filled with 0. There is no fallback window. A refit with fewer than 200 rows raises.
+- The TSBAR files do not store `label_known_ts`. Each distance cell stores `exit_bar_count` (minute bars from `entry_ts` to the exit bar). The row clock is the end of the latest of those bars, including distances the model does not train. A slower unused distance can only delay the row. A cell with reason `NA`, a negative count, a missing entry bar, or an exit bar outside the loaded minute bars leaves the whole row unfinished.
 - A quarter's score is that quarter's simulation, using the weekly models. The prior-only path is one simulation that switches window and threshold at period boundaries.
 - The first period uses the first listed candidate (`3Y|0.0000`). Protocol 1.0 started the prior-only path at the second quarter.
 - No holdout evaluation is run by the agent.
@@ -44,3 +45,4 @@ The signal check already failed. Dividends ignored, cash at 0%, informal costs. 
 | 1.0 / 1.1 | 2026-10 | Signal check STOP (p = 0.10). Multivariate check added after the fact and could not reverse it. Code at tag `pre-port-20261012`. |
 | 2.0 | 2026-10-12 | Re-run under the new rules, not new evidence. Weekly refits, windows 3, 5 and 10 years, label purge (§2). |
 | 2.0 | 2026-10-13 | Preregister amendment, before any version 2.0 run. Scores within NUMERIC_TOLERANCE (1e-6) of the best pooled score are tied, then this protocol's tie order. A comparison counts a difference of at most 1e-6 as a match and also reports the maximum absolute difference. Summary prints show 6 decimal places. Calculations, and files later code reads, stay at full precision. |
+| 2.0 | 2026-10-13 | Preregister amendment, before any version 2.0 run. The development run of 2026-10-13 06:10 failed before any trial row: the stored TSBAR cells have no `label_known_ts`. The clock is the end of the latest stored exit bar; an unresolved cell leaves the row unfinished (§2). No grid, threshold, window, cost, baseline, selection, or stopping rule changes. |
