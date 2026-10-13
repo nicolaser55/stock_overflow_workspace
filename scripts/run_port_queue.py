@@ -8,9 +8,10 @@ from pathlib import Path
 """
 Queue for the version-2.0 development replays (Nicolas, 2026-10-12).
 
-Runs one step at a time. A finished step is skipped, so the queue can be restarted after an interruption. A failed
-step is recorded and the queue continues with the next experiment. It does not retry. exp01 is last. A run longer
-than 24 hours is started anyway, and the log receives a progress line at least every 30 minutes while that step runs.
+Runs one step at a time. A finished step is skipped, so the queue can be restarted after an interruption. A step that
+failed before it finished is run again on the next start. During one pass, a failure still skips the rest of that
+experiment and the queue continues with the next experiment. exp01 is last. A run longer than 24 hours is started
+anyway, and the log receives a progress line at least every 30 minutes while that step runs.
 
 Usage, from the workspace root:
     venv-main/Scripts/python.exe -u scripts/run_port_queue.py
@@ -188,12 +189,8 @@ def run_queue(step_dict_list_in=None, trial_pdf_in=None, status_path_in=None, ru
     else:
         trial_pdf = trial_pdf_in
     written_list = []
-    # A STEP THAT ALREADY FAILED IS NOT RETRIED WHEN THE QUEUE IS STARTED AGAIN
+    # A FAILURE IN THIS PASS SKIPS THE REST OF THAT EXPERIMENT. A LATER START RUNS A STEP THAT NEVER FINISHED.
     failed_experiment_set = set()
-    if status_path.is_file():
-        status_pdf = pd.read_csv(status_path)
-        latest_pdf = status_pdf.groupby(["experiment", "step"], sort=False).tail(1)
-        failed_experiment_set = set(latest_pdf.loc[latest_pdf["status"] == "failed", "experiment"].astype(str))
     for step_dict in step_list:
         # A FAILED STEP SKIPS THE REST OF THAT EXPERIMENT AND CONTINUES WITH THE NEXT ONE
         if step_dict["experiment"] in failed_experiment_set:

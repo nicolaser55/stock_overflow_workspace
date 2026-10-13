@@ -84,6 +84,23 @@ def get_archived_pdf(spec_dict_in, development_end_in, candidate_list_in):
         kept_pdf["candidate"] = kept_pdf["candidate_idx"].map(lambda idx: candidate_list_in[int(idx)])
     return kept_pdf.reset_index(drop=True)
 
+# FUNCTION: ONE FIELD OF A ROW, WHETHER IT IS A SERIES OR THE TUPLE itertuples RETURNS
+def get_row_field(row_in, column_str_in):
+    """
+    Reads one column. DataFrame.itertuples returns a named tuple, which has no string index.
+
+    Args:
+        row_in (pd.Series | tuple): One archived quarter
+        column_str_in (str): Column name
+
+    Returns:
+        The field
+    """
+    # A NAMED TUPLE IS INDEXED BY ATTRIBUTE. A SERIES IS INDEXED BY THE COLUMN NAME.
+    if isinstance(row_in, tuple):
+        return getattr(row_in, column_str_in)
+    return row_in[column_str_in]
+
 # FUNCTION: REPLAY ONE ARCHIVED QUARTER WHEN IT IS A DEVELOPMENT PERIOD
 def get_replay_return_float(design_module_in, ohlcv_array_dict_in, data_context_in, row_in):
     """
@@ -93,7 +110,7 @@ def get_replay_return_float(design_module_in, ohlcv_array_dict_in, data_context_
         design_module_in (module): Design
         ohlcv_array_dict_in (dict): Bars
         data_context_in (DataContext): Point-in-time context
-        row_in (pd.Series): Archived quarter
+        row_in (pd.Series | tuple): Archived quarter (a Series, or one row from DataFrame.itertuples)
 
     Returns:
         float: Return, or NaN when the quarter is not a development period
@@ -101,12 +118,13 @@ def get_replay_return_float(design_module_in, ohlcv_array_dict_in, data_context_
     # THE CONTINUOUS SLICE WHEN THE DATES MATCH A DEVELOPMENT PERIOD; OTHERWISE DO NOT FALL BACK TO A FRESH WINDOW
     from so.core.holdout import get_equity_total_return_float
     period_pdf = design_module_in.get_bar_period_pdf(ohlcv_array_dict_in)
-    start_date, end_date = pd.Timestamp(row_in["valid_start"]).date(), pd.Timestamp(row_in["valid_end"]).date()
+    start_value, end_value = get_row_field(row_in, "valid_start"), get_row_field(row_in, "valid_end")
+    start_date, end_date = pd.Timestamp(start_value).date(), pd.Timestamp(end_value).date()
     match_pdf = period_pdf[(period_pdf["period_start"].map(lambda value: pd.Timestamp(value).date()) == start_date)
                            & (period_pdf["period_end"].map(lambda value: pd.Timestamp(value).date()) == end_date)]
     if len(match_pdf) != 1:
         return float("nan")
-    replay_dict = design_module_in.run_candidate_replay_dict(ohlcv_array_dict_in, row_in["valid_start"], row_in["valid_end"], row_in["candidate"], data_context_in)
+    replay_dict = design_module_in.run_candidate_replay_dict(ohlcv_array_dict_in, start_value, end_value, get_row_field(row_in, "candidate"), data_context_in)
     return get_equity_total_return_float(replay_dict["daily_equity_pdf"])
 
 # FUNCTION: RUN THE CALIBRATION
