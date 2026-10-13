@@ -510,6 +510,10 @@ development runs are not re-run. A one-quarter exp04 probe returned nan and wrot
 archived bounds equal a development period, and a fresh window is not substituted. Details:
 `docs/RESULTS_LOG.md`, section "Port queue, 2026-10-13".
 
+*2026-10-13 (later):* that probe was the shared-bound gate. The old-bounds script now replays on the archived bounds.
+A one-quarter check of 2015-04-17 → 2015-07-16 matched every candidate (exp04 9/9 through exp13 1/1). No note row.
+The queue was not launched.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -578,3 +582,4 @@ archived bounds equal a development period, and a fresh window is not substitute
 | 2026-10-12 | agent | Replace-with-ports, preregister only. exp04 `efbae03` 23:36:41, exp05 `7731824` 23:40:20, exp06 `2f98edd` 23:45:15, exp07 `aeb8de5` 23:45:31, exp12 `f5eb885` 23:50:19, exp13 `a670d65` 23:53:16, then exp01. Queue `scripts/run_port_queue.py` written and tested on synthetic notebooks. No development notebook and no calibration was run. No holdout evaluation | Nicolas launches the queue. Do not re-run exp02 or exp03 |
 | 2026-10-13 | agent | Preregister amendment before any port run: scores within 1e-6 are tied, then the protocol tie order; reports show 6 decimal places; calculations stay at full precision. exp03 v2 is not re-run. On the saved scores the tolerance rule would have put `0.005|delay_5` in force for folds 31-34. No development notebook, no calibration, no holdout evaluation | Nicolas launches the queue. Do not re-run exp02 or exp03 |
 | 2026-10-13 | agent | Port queue: six development runs finished (notebooks `714cebd`). Six calibrations failed on an itertuples row; no note rows. exp01 failed with 0 trial rows (`logs/exp01_minute_entry_development_20261013_0610.log`). Fix `a3fa9aa` (tuple field read; queue retries an unfinished step). Amendment `1af2ad5` stamps TSBAR `label_known_ts` from the stored exit bar; no rule change. One exp04 quarter probed, return nan, trial log unchanged at 6,448. Full test suite passed. No holdout evaluation. The queue was not launched | Nicolas launches the restarted queue (six calibrations, then exp01). Do not re-run the six finished development runs, exp02, or exp03 |
+| 2026-10-13 | agent | Old-bounds calibration rewritten to replay on the archived bounds (continuous slice, warmup history, point-in-time read). A 0-row or nan comparison writes no note. One-quarter check 2015-04-17 → 2015-07-16 matched exp04 9/9, exp05 4/4, exp06 12/12, exp07 3/3, exp12 6/6, exp13 1/1 (max abs diff at most 7.29e-17). Trial log stayed at 6,448. Full calibration not run. Queue not launched | Nicolas launches the queue. Do not re-run the six finished development runs, exp02, or exp03 |

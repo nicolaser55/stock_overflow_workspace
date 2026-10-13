@@ -157,6 +157,19 @@ The queue in `logs/port_queue_status.csv` ran from 2026-10-13T01:01:15 to 2026-1
 
 A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bounds 2015-04-17 → 2015-07-16, called `get_replay_return_float` and did not call `log_trial_dict`. The return was `nan`. The trial log stayed at 6,448 rows and `exp04_trend_exit_v2` still had 0 note rows. The quarter is not a development period. Development periods in that load run 2015-03-19 → 2015-06-18 through 2025-03-19 → 2025-06-18 (41 periods). The archived quarters run 2015-04-17 → 2015-07-16 through 2025-04-17 → 2025-07-16 (41 quarters). Zero start dates coincide. The calibration leaves a non-matching quarter unmatched and does not substitute a fresh window. A re-run will therefore compare 0 rows and then log one note. That note is the script's "run once" lock.
 
+*Correction 2026-10-13, before the queue was relaunched.* The paragraph above describes the shared-bound gate, which is not the old-bounds check. `scripts/calibrate_port_old_bounds.py` now replays each candidate with the version 2.0 code on the archived bounds, as a slice of one continuous path (the same score the archived runs stored). Quarters that end on or after the development end are dropped before the replay. The bars start in 2005, so the moving average, the volatility and the VIX features are known at the first decision; they are read through the point-in-time context. A comparison of 0 rows, or any nan, raises and writes no note row. A one-quarter check of 2015-04-17 → 2015-07-16, with the path continued through the next quarter so that quarter is not liquidated, matched the archived returns and wrote no trial-log row (the log stayed at 6,448). The check is `get_one_quarter_match_dict`. Counts are matches within `NUMERIC_TOLERANCE` (1e-6), and the maximum absolute difference:
+
+| Experiment | Returns matched | Max absolute difference |
+|---|---:|---:|
+| exp04 | 9/9 | 2.21e-17 |
+| exp05 | 4/4 | 3.47e-18 |
+| exp06 | 12/12 | 7.29e-17 |
+| exp07 | 3/3 | 6.51e-17 |
+| exp12 | 6/6 | 2.21e-17 |
+| exp13 | 1/1 | 2.21e-17 |
+
+The full old-bounds calibration was not run. No note row was written.
+
 **exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
 
 ## How to add an entry

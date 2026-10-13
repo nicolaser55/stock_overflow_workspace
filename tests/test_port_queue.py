@@ -18,7 +18,7 @@ sys.path.insert(0, WORKSPACE_PATH_STR)
 
 # IMPORT THE QUEUE AND THE CALIBRATION ROW READER
 from scripts.run_port_queue import get_notebook_finished_bool, run_queue
-from scripts.calibrate_port_old_bounds import get_replay_return_float
+from scripts.calibrate_port_old_bounds import get_kept_fold_id_set, get_replayed_return_pdf, publish_calibration_dict
 
 # FUNCTION: PRINT A PASSED TEST
 def passed(message_str_in):
@@ -118,41 +118,123 @@ def test_queue():
         assert (status_pdf["status"] == "finished").sum() == 1
     passed("queue (skip finished steps, continue after a failure, retry a step that did not finish)")
 
-# FUNCTION: TEST THAT AN itertuples ROW CAN BE REPLAYED
-def test_calibration_namedtuple_row():
+# A DEVELOPMENT-PERIOD TABLE THE REAL DESIGNS WOULD USE. THE CALIBRATION MUST NOT REPLAY THESE DATES.
+_DEVELOPMENT_PERIOD_PDF = pd.DataFrame([{"period_id": 0, "period_start": "2020-01-02", "period_end": "2020-03-31"}])
+# CALLS MADE WHILE THE OLD PERIODS ARE INSTALLED
+_REPLAY_CALL_LIST = []
+_cache_dict = {}
+
+# FUNCTION: THE PERIOD TABLE A DEVELOPMENT RUN WOULD BUILD
+def get_bar_period_pdf(ohlcv_array_dict_in):
     """
-    The calibration loop passes DataFrame.itertuples rows. Those rows have no string index. A quarter that is not a
-    development period is left unmatched and the replay is not called.
+    Development periods. The calibration replaces this for the duration of a replay.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+
+    Returns:
+        pd.DataFrame: Development periods
+    """
+    # RETURN THE DEVELOPMENT BOUNDS
+    return _DEVELOPMENT_PERIOD_PDF.copy()
+
+# FUNCTION: RECORD THE BOUNDS AND THE PERIOD TABLE THE REPLAY ACTUALLY SAW
+def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in, data_context_in=None):
+    """
+    Records one replay. The dates and the installed period table are what the calibration passed.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Bounds
+        candidate_in (str): Candidate
+        data_context_in: Point-in-time context
+
+    Returns:
+        dict: A finite equity curve
+    """
+    # THE LOOKUP IS THE MODULE GLOBAL, WHICH IS WHAT A DESIGN MODULE DOES
+    period_pdf = get_bar_period_pdf(ohlcv_array_dict_in)
+    _REPLAY_CALL_LIST.append((str(pd.Timestamp(date1_in).date()), str(pd.Timestamp(date2_in).date()), candidate_in,
+                               str(pd.Timestamp(period_pdf["period_start"].iloc[0]).date())))
+    from so import config
+    equity_pdf = pd.DataFrame({"equity": [float(config.INITIAL_CAPITAL), float(config.INITIAL_CAPITAL) * 1.1]})
+    return {"daily_equity_pdf": equity_pdf}
+
+# FUNCTION: TEST THAT THE REPLAY USES THE OLD BOUNDS
+def test_replay_uses_old_bounds():
+    """
+    A quarter that is not a development period is still replayed, on its own start and end. The tail period is not
+    requested. The development period table is restored afterwards.
 
     Returns:
         None
     """
-    # ONE ARCHIVED QUARTER, THE SAME OBJECT THE CALIBRATION LOOP BUILDS
+    # ONE SCORED QUARTER AND A TAIL. THE DEVELOPMENT TABLE HAS DIFFERENT DATES.
+    import sys
     from so import config
     from so.core.holdout import get_equity_total_return_float
-    archived_pdf = pd.DataFrame([{"fold_id": 1, "valid_start": "2015-01-02", "valid_end": "2015-03-31", "candidate": "c1"}])
-    row = next(archived_pdf.itertuples(index=False))
-    called_list = []
-    class Design:
-        def get_bar_period_pdf(self, ohlcv_array_dict_in):
-            return pd.DataFrame([{"period_start": "2015-01-02", "period_end": "2015-03-31"}])
-        def run_candidate_replay_dict(self, ohlcv_array_dict_in, date1_in, date2_in, candidate_str_in, data_context_in):
-            called_list.append(candidate_str_in)
-            equity_pdf = pd.DataFrame({"equity": [float(config.INITIAL_CAPITAL), float(config.INITIAL_CAPITAL) * 1.1]})
-            return {"daily_equity_pdf": equity_pdf}
-    # THE NAMED TUPLE USED TO RAISE TypeError: tuple indices must be integers or slices, not str
-    replay_float = get_replay_return_float(Design(), {}, None, row)
+    _REPLAY_CALL_LIST.clear()
+    period_pdf = pd.DataFrame([
+        {"period_id": 7, "period_start": "2015-04-17", "period_end": "2015-07-16"},
+        {"period_id": -1, "period_start": "2015-07-17", "period_end": "2015-10-14"},
+    ])
+    module = sys.modules[__name__]
+    replay_pdf = get_replayed_return_pdf(module, {}, None, period_pdf, ["c1"])
     expected_float = get_equity_total_return_float(pd.DataFrame({"equity": [float(config.INITIAL_CAPITAL), float(config.INITIAL_CAPITAL) * 1.1]}))
-    assert called_list == ["c1"]
-    assert replay_float == expected_float
-    # A QUARTER THAT IS NOT A DEVELOPMENT PERIOD DOES NOT CALL THE REPLAY
-    class EmptyDesign:
-        def get_bar_period_pdf(self, ohlcv_array_dict_in):
-            return pd.DataFrame([{"period_start": "2016-01-04", "period_end": "2016-03-31"}])
-        def run_candidate_replay_dict(self, ohlcv_array_dict_in, date1_in, date2_in, candidate_str_in, data_context_in):
-            raise AssertionError("an unmatched quarter was replayed")
-    assert pd.isna(get_replay_return_float(EmptyDesign(), {}, None, row))
-    passed("calibration (an itertuples row replays; an unmatched quarter does not)")
+    assert _REPLAY_CALL_LIST == [("2015-04-17", "2015-07-16", "c1", "2015-04-17")]
+    assert list(replay_pdf["replay_return"]) == [expected_float]
+    assert str(pd.Timestamp(get_bar_period_pdf({})["period_start"].iloc[0]).date()) == "2020-01-02"
+    passed("calibration (replay uses the old quarter bounds, not the development periods)")
+
+# FUNCTION: TEST THAT A QUARTER ENDING ON THE DEVELOPMENT END IS DROPPED
+def test_quarter_on_development_end_is_dropped():
+    """
+    A quarter that ends on the development end is not a kept fold. A quarter that ends the day before is kept.
+
+    Returns:
+        None
+    """
+    # TWO FOLDS, ONE ON THE BOUNDARY
+    import datetime
+    date_pdf = pd.DataFrame([
+        {"fold_id": 1, "valid_end": "2015-07-16"},
+        {"fold_id": 2, "valid_end": datetime.date(2025, 7, 17)},
+    ])
+    assert get_kept_fold_id_set(date_pdf, datetime.date(2025, 7, 17)) == {1}
+    passed("calibration (a quarter ending on the development end is dropped before a replay)")
+
+# FUNCTION: TEST THAT AN EMPTY COMPARISON AND A NAN DO NOT PUBLISH
+def test_calibration_refuses_empty_and_nan():
+    """
+    Zero compared rows, and a nan return, raise before the summary writer and before the note. A complete comparison
+    calls both once.
+
+    Returns:
+        None
+    """
+    # STUBS STAND IN FOR THE SUMMARY FILE AND THE TRIAL LOG
+    call_list = []
+    def log_func(*args, **kwargs):
+        call_list.append(("log", kwargs.get("note_str_in")))
+    def write_func(summary_dict_in):
+        call_list.append(("write", summary_dict_in))
+    empty_pdf = pd.DataFrame(columns=["replay_return", "valid_total_return"])
+    try:
+        publish_calibration_dict(empty_pdf, {"compared_rows": 0}, None, log_func, write_func)
+        raise AssertionError("an empty comparison was published")
+    except RuntimeError as error:
+        assert "0 rows" in str(error)
+    nan_pdf = pd.DataFrame({"replay_return": [float("nan")], "valid_total_return": [0.01]})
+    try:
+        publish_calibration_dict(nan_pdf, {"compared_rows": 1}, None, log_func, write_func)
+        raise AssertionError("a nan comparison was published")
+    except RuntimeError as error:
+        assert "nan" in str(error)
+    assert call_list == []
+    finite_pdf = pd.DataFrame({"replay_return": [0.01, 0.02], "valid_total_return": [0.01, 0.02]})
+    publish_calibration_dict(finite_pdf, {"compared_rows": 2}, None, log_func, write_func)
+    assert call_list == [("write", {"compared_rows": 2}), ("log", "old-bounds calibration; diagnostic; informs no decision")]
+    passed("calibration (0 rows and nan publish nothing; a complete comparison writes the note)")
 
 # FUNCTION: TEST THAT A FINISHED DEVELOPMENT STAYS SKIPPED AND A FAILED CALIBRATION RUNS AGAIN
 def test_retry_unfinished_calibration():
@@ -198,6 +280,8 @@ def test_retry_unfinished_calibration():
 # IF THE FILE IS RUN DIRECTLY
 if __name__ == "__main__":
     test_queue()
-    test_calibration_namedtuple_row()
+    test_replay_uses_old_bounds()
+    test_quarter_on_development_end_is_dropped()
+    test_calibration_refuses_empty_and_nan()
     test_retry_unfinished_calibration()
     print("\nAll port-queue tests passed")
