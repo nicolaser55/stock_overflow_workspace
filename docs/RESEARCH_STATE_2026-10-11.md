@@ -502,6 +502,14 @@ uncommitted. Stop here, as Nicolas asked.
 selections 36/40. The four gaps are exact-zero ties broken by a one-ulp difference. One note row. Details in
 `docs/RESULTS_LOG.md`, section `exp03_ath_exit_v2`. The calibration was not re-run.
 
+*2026-10-13:* the port queue finished the development runs of exp04, exp05, exp06, exp07, exp12 and exp13. Their
+old-bounds calibrations failed on a named tuple (`itertuples`), and none wrote a note row. exp01's development run
+failed before any trial row: stored TSBAR cells have no `label_known_ts`. Notebooks `714cebd`. Calibration and queue
+retry `a3fa9aa`. exp01 amendment `1af2ad5` (the clock is the latest stored exit bar; no rule change). The six
+development runs are not re-run. A one-quarter exp04 probe returned nan and wrote no trial row: none of the 41
+archived bounds equal a development period, and a fresh window is not substituted. Details:
+`docs/RESULTS_LOG.md`, section "Port queue, 2026-10-13".
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -569,3 +577,4 @@ selections 36/40. The four gaps are exact-zero ties broken by a one-ulp differen
 | 2026-10-12 | agent | exp03 v2 old-bounds calibration finished at 2026-10-12T22:54:26. Returns 615/615 matched (max abs diff 1.80e-16). Selections 36/40 matched. The 4 gaps are folds 31-34, governed by choosing folds where all 15 pooled excesses are exactly 0; a one-ulp return difference made the tie-break not run (`0.005|delay_5` archived, `0.010|delay_60` replay). One note row. Verdict unchanged (STOP). Not re-run | Continue the replace-with-ports task: exp04 through exp01, no experiment run |
 | 2026-10-12 | agent | Replace-with-ports, preregister only. exp04 `efbae03` 23:36:41, exp05 `7731824` 23:40:20, exp06 `2f98edd` 23:45:15, exp07 `aeb8de5` 23:45:31, exp12 `f5eb885` 23:50:19, exp13 `a670d65` 23:53:16, then exp01. Queue `scripts/run_port_queue.py` written and tested on synthetic notebooks. No development notebook and no calibration was run. No holdout evaluation | Nicolas launches the queue. Do not re-run exp02 or exp03 |
 | 2026-10-13 | agent | Preregister amendment before any port run: scores within 1e-6 are tied, then the protocol tie order; reports show 6 decimal places; calculations stay at full precision. exp03 v2 is not re-run. On the saved scores the tolerance rule would have put `0.005|delay_5` in force for folds 31-34. No development notebook, no calibration, no holdout evaluation | Nicolas launches the queue. Do not re-run exp02 or exp03 |
+| 2026-10-13 | agent | Port queue: six development runs finished (notebooks `714cebd`). Six calibrations failed on an itertuples row; no note rows. exp01 failed with 0 trial rows (`logs/exp01_minute_entry_development_20261013_0610.log`). Fix `a3fa9aa` (tuple field read; queue retries an unfinished step). Amendment `1af2ad5` stamps TSBAR `label_known_ts` from the stored exit bar; no rule change. One exp04 quarter probed, return nan, trial log unchanged at 6,448. Full test suite passed. No holdout evaluation. The queue was not launched | Nicolas launches the restarted queue (six calibrations, then exp01). Do not re-run the six finished development runs, exp02, or exp03 |
