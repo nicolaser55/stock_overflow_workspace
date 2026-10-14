@@ -170,6 +170,8 @@ A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bou
 
 The full old-bounds calibration was not run. No note row was written.
 
+*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`.
+
 **exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
 
 ## How to add an entry
@@ -189,6 +191,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp03_ath_exit` | 1.0 | **STOP** (2026-10-05) | Prior-only +143.05% vs +237.21%; beats random exits (19/20) but loses to random buy-backs (19/20 beat it) |
 | `exp03_ath_exit_v2` | 2.0 | **STOP** (2026-10-12) | Re-run under the new rules, not new evidence. Prior-only +111.12% vs +199.04% over 41 development periods. Beats random exits (20/20) and loses to random buy-backs (1/20) |
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
+| `exp04_trend_exit_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +41.51% vs +199.04% over 41 development periods. Below buy-and-hold and below both random medians |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
 | `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
@@ -652,7 +655,38 @@ Design choices (the conservative option, documented in each protocol that uses t
   as the primary interval (long exits create dependence across months; longer blocks give wider, more honest intervals),
   the 1-month version printed alongside.
 
+## exp04_trend_exit_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `efbae03` (2026-10-12 23:36:41 +0300). The numeric-tolerance amendment `98115f0` (2026-10-13 00:36:32 +0300) is in the code that ran. Config hash `39c1919563`, printed in the header cell of `step01_development.ipynb`. One development run, saved by the queue at 2026-10-13T02:16:52. 369 validation trials and 1 summary (370), note `re-run under new rules`, `test_window_touched` false on every row. The protocol budget is 9 × 44 + 1 = **397**. The development span has 41 periods, so the run logged 9 × 41 + 1 = 370, inside the budget. The 2005-2014 exploration was not re-run. The run was not repeated.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** Development end **2025-07-17**. Last price date loaded before the cut **2025-08-13**. Both are printed in the notebook. The session count is the sum of `session_count` in `period_data.csv`. Numbers below are the notebook's 6-decimal prints unless a file is named.
+- **Prior-only path: printed 0.415088 vs buy-and-hold 1.990442** (+41.51% vs +199.04%). About 3.45% a year vs 11.31% a year, from those two printed total returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Time in the market printed 0.847826 (84.78%). 12 exits. 11 of 41 periods beat buy-and-hold (sign-test p = 0.999275); mean period excess −0.017709 (SD 0.043552, t = −2.60), from `summary_data.csv`. MDE printed 0.019045 per quarter (0.076178 per year). Annualized log excess printed **−0.072409**, 6-month block interval [−0.140352, −0.017098] (124 months, `summary_data.csv`). The interval lies below 0. The saved `log_supported` flag is false.
+- Maximum drawdown −0.346944 vs −0.342106, the minima of `performance_over_time_data.csv`. The printed success flags are all false (`primary_success`, `secondary_success`, `comparable_return`, `all_baselines_beaten`). Comparable return would require 90% of 1.990442, which is 1.791398. The path is 0.415088.
+- Baselines on the same span, printed: random-exit median **1.517796**, random-re-entry median **0.553211**. The path beats a printed fraction 0.000000 of the 20 random exits (0 of 20) and 0.100000 of the 20 random re-entries (2 of 20). It is below both medians. The information test fails.
+- Optimistic, labelled after the fact: candidate `0.03|1` chains to printed **1.160337** against printed buy-and-hold **1.990442**. That chain is not the prior-only path.
+- Activity, printed: turnover 2.444703 per year, 26 trades, 14 candidate switches (1.369034 per year in `summary_data.csv`).
+
+**Calibration (i), shared bounds.** Computation on the saved files only. No replay and no new trial. A quarter is shared when `valid_start` and `valid_end` are equal and the quarter ends before 2025-07-17. v2 dates are `period_data.csv`. Archived dates are `exp04_trend_exit/step02_continuous_replay_data/candidate_period_data.csv`. 40 v2 periods and 41 archived quarters end before that date. Three quarters match on both ends: 2016-01-19 → 2016-04-15, 2021-01-19 → 2021-04-16, 2022-01-18 → 2022-04-14. On those three, all 9 candidates (27 rows) are compared at `NUMERIC_TOLERANCE` 1e-6.
+
+**Returns: 0 / 27 matched.** Maximum absolute difference of total return **0.0159446775694723**. Buy-and-hold on the same 27 rows: 0 / 27 matched, maximum absolute difference 4.771406598820527e-5.
+
+**Prior-only selections: 1 / 3 matched.** The archived `selection_data.csv` row at fold f is the choice made at that fold; the old notebook says it governs fold f + 1. The v2 `selection_data.csv` row is the candidate in force. On the three shared quarters the rule in force is archived `0.03|5` vs v2 `0.03|1` (2016-01-19), both `0.03|1` (2021-01-19), and archived `0.03|1` vs v2 `0.05|10` (2022-01-18).
+
+Cause: the other aligned quarters differ by 0 to 6 sessions. Version 2.0 steps back from the development end 2025-07-17. The archived quarters step back from 2026-04-15. A period score is a slice of one continuous path, so the position carried into a shared quarter was built on earlier quarters that do not share bounds. Those return gaps are far above 1e-6, so the tolerance tie order is not what splits the selections. The rules are the same rules. The schedule is the difference.
+
+**Calibration (ii), old bounds.** `scripts/calibrate_port_old_bounds.py` replayed the version 2.0 rules on the archived bounds. It finished at 2026-10-13T13:28:12. The log is `logs/exp04_trend_exit_calibration_20261013_1216.log`. The summary is `exp04_trend_exit_v2/old_bounds_calibration/summary_data.csv`. One trial-log row, stage `note`, note `old-bounds calibration; diagnostic; informs no decision`, `test_window_touched` false. It was not repeated. The morning run of 2026-10-13T02:17 failed before any note row; that failure is the port-queue note above.
+
+41 archived quarters were kept (warmup 2,588 sessions). **Returns: 369 / 369 matched** within 1e-6. Buy-and-hold matched on the same 369 rows. **Prior-only selections: 41 / 41 matched.** Maximum absolute difference of total return **2.0122792321330962e-16**. That gap is floating-point rounding of the same rules on the same bounds. No selection changed.
+
+**Verdict: STOP.** The stopping rule is STOP when the prior-only path does not beat buy-and-hold, or does not beat the median of both random families. Printed path 0.415088 is below printed buy-and-hold 1.990442 and below both printed medians (1.517796 and 0.553211). This is not a candidate result. No holdout evaluation was run. No further version may follow from this result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold below the 200-session average and bought back above it got to +42%. It was in the market about five sessions in six, and it still finished behind a coin-flip exit and behind a coin-flip buy-back. The best rule chosen after seeing every period (`0.03|1`, +116%) could not have been selected in advance; the path that could have been is the +42% one.
+
+Mathematically: the prior-only total return is 0.415088 and buy-and-hold is 1.990442, so the difference of total returns is −1.575354. The annualized log excess is −0.072409 per year. Its 6-month block interval [−0.140352, −0.017098] does not contain 0.
+
 ## exp04_trend_exit
+
+*2026-10-14.* The version 2.0 re-run is recorded in `exp04_trend_exit_v2`. This protocol 1.0 entry is unchanged.
 
 **Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §11). Pre-registered in commit `preregister exp04`
 (before any run); config hash `8f4c178319`. Trials: 9 exploration (2026-10-06T14:22:35), 396 validation and 1 summary

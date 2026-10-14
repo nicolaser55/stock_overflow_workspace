@@ -514,6 +514,8 @@ archived bounds equal a development period, and a fresh window is not substitute
 A one-quarter check of 2015-04-17 → 2015-07-16 matched every candidate (exp04 9/9 through exp13 1/1). No note row.
 The queue was not launched.
 
+*2026-10-14:* the second queue finished the old-bounds calibrations. `exp04_trend_exit_v2` is recorded: prior-only +41.51% vs +199.04%, STOP. Old-bounds returns 369/369, selections 41/41. The development run was not repeated. No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp04_trend_exit_v2`.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -583,3 +585,4 @@ The queue was not launched.
 | 2026-10-13 | agent | Preregister amendment before any port run: scores within 1e-6 are tied, then the protocol tie order; reports show 6 decimal places; calculations stay at full precision. exp03 v2 is not re-run. On the saved scores the tolerance rule would have put `0.005|delay_5` in force for folds 31-34. No development notebook, no calibration, no holdout evaluation | Nicolas launches the queue. Do not re-run exp02 or exp03 |
 | 2026-10-13 | agent | Port queue: six development runs finished (notebooks `714cebd`). Six calibrations failed on an itertuples row; no note rows. exp01 failed with 0 trial rows (`logs/exp01_minute_entry_development_20261013_0610.log`). Fix `a3fa9aa` (tuple field read; queue retries an unfinished step). Amendment `1af2ad5` stamps TSBAR `label_known_ts` from the stored exit bar; no rule change. One exp04 quarter probed, return nan, trial log unchanged at 6,448. Full test suite passed. No holdout evaluation. The queue was not launched | Nicolas launches the restarted queue (six calibrations, then exp01). Do not re-run the six finished development runs, exp02, or exp03 |
 | 2026-10-13 | agent | Old-bounds calibration rewritten to replay on the archived bounds (continuous slice, warmup history, point-in-time read). A 0-row or nan comparison writes no note. One-quarter check 2015-04-17 → 2015-07-16 matched exp04 9/9, exp05 4/4, exp06 12/12, exp07 3/3, exp12 6/6, exp13 1/1 (max abs diff at most 7.29e-17). Trial log stayed at 6,448. Full calibration not run. Queue not launched | Nicolas launches the queue. Do not re-run the six finished development runs, exp02, or exp03 |
+| 2026-10-14 | agent | Recorded `exp04_trend_exit_v2` from the saved development notebook and the finished old-bounds calibration. Prior-only +41.51% vs +199.04%, STOP. Trials 370 inside budget 397, plus 1 calibration note. Shared bounds 0/27 returns, 1/3 selections. Old bounds 369/369 and 41/41. No re-run, no holdout evaluation. Trial-log snapshot copied | Record exp05 the same way. Do not re-run a finished development run or calibration |
