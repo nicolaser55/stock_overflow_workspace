@@ -633,6 +633,24 @@ def test_design_v2():
     assert list(mask_arr) == [True, False]
     passed("holdout design (12 candidates, ties -> 3Y at 0.10%, a label known after the refit is dropped)")
 
+# FUNCTION: UNUSED WEEKS STAY OFF THE WALK, AND THE CALENDAR IS NOT REBUILT ON THE SHORTENED LIST
+def test_kept_refit_sessions():
+    # A WEDNESDAY SCORE START KEEPS THE PREVIOUS MONDAY'S MODEL. REBUILDING THE CALENDAR WOULD REFIT ON THAT WEDNESDAY.
+    from so.core.rolling_retrain import get_retrain_session_list
+    from experiments.exp01_minute_entry.design import get_kept_session_list
+    session_list = list(pd.bdate_range("2014-01-01", "2015-08-31").date)
+    retrain_set = set(get_retrain_session_list(session_list, session_list[0], session_list[-1], "weekly"))
+    score_start, score_end = pd.Timestamp("2015-02-04").date(), pd.Timestamp("2015-07-31").date()
+    kept_list = get_kept_session_list(session_list, retrain_set, score_start, score_end)
+    governing = max(session_date for session_date in retrain_set if session_date <= score_start)
+    assert kept_list[0] == governing == pd.Timestamp("2015-02-02").date()
+    assert kept_list[-1] <= score_end and pd.Timestamp("2015-08-03").date() not in kept_list
+    assert score_start not in retrain_set and score_start in kept_list
+    short_list = [session_date for session_date in session_list if session_date >= score_start]
+    rebuilt_set = set(get_retrain_session_list(short_list, short_list[0], short_list[-1], "weekly"))
+    assert score_start in rebuilt_set
+    passed("kept refits (governing Monday kept, later weeks dropped, a rebuilt calendar would refit the Wednesday)")
+
 # FUNCTION: STORED TSBAR TIMESTAMPS ARE STRINGS; SAMPLING NEEDS THE NEW YORK CLOCK
 def test_csv_entry_ts_is_parsed_before_sampling():
     raw_pdf = pd.DataFrame({
@@ -676,5 +694,6 @@ if __name__ == "__main__":
     test_plot_utils(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_TSBAR_pdf, synthetic_snapshot_pdf)
     test_bad_tick_rule(synthetic_ohlcv_pdf)
     test_design_v2()
+    test_kept_refit_sessions()
     test_csv_entry_ts_is_parsed_before_sampling()
     print("\nAll tests passed ✅")

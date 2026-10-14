@@ -31,7 +31,10 @@ def get_development_score_pdf(ohlcv_array_dict_in, period_pdf_in, data_context_i
     from so.core.holdout import get_equity_total_return_float
     row_dict_list = []
     for period_row in period_pdf_in.itertuples(index=False):
-        print(f"period {int(period_row.period_id)} {period_row.period_start} -> {period_row.period_end}")
+        # THE PROGRESS LINE NAMES THIS PERIOD. THE PRINT DOES NOT CHANGE THE SCORE.
+        design.set_progress_period_str(f"{int(period_row.period_id)} {period_row.period_start} -> {period_row.period_end}")
+        design.print_progress_line()
+        print(f"period {int(period_row.period_id)} {period_row.period_start} -> {period_row.period_end}", flush=True)
         for candidate in design.CANDIDATE_LIST:
             replay_dict = design.run_candidate_replay_dict(ohlcv_array_dict_in, period_row.period_start, period_row.period_end, candidate, data_context_in)
             total_float = get_equity_total_return_float(replay_dict["daily_equity_pdf"])
@@ -101,12 +104,18 @@ def run_development_dict():
     from so.core.evaluation import (get_chained_daily_return_pdf, get_performance_over_time_pdf, get_performance_quarter_pdf,
                                     get_turnover_switch_dict, get_window_return_summary_dict, get_success_criteria_dict)
     from so.core.continuous_replay import get_log_excess_bootstrap_dict, get_period_return_pdf
+    # A LINE AT LEAST EVERY 30 MINUTES, INCLUDING THE LOAD BEFORE THE FIRST REFIT
+    design.start_progress_thread()
     span_dict = get_development_ohlcv_dict(exp_config.EMBARGO_TRADING_DAYS)
     ohlcv_array_dict = span_dict["ohlcv_array_dict"]
     period_pdf, fold_pdf = get_development_period_pdf(span_dict["anchor_session_list"], ohlcv_array_dict, exp_config.EMBARGO_TRADING_DAYS, max(exp_config.TRAIN_WINDOW_YEARS_LIST))
+    # REFITS BEFORE THE MODEL IN FORCE ON THE FIRST PERIOD, AND REFITS AFTER THE LAST PERIOD, ARE NOT EXECUTED
+    design.set_score_span(period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1])
     data_context = design.get_development_data_context(span_dict["anchor_session_list"])
     score_pdf = get_development_score_pdf(ohlcv_array_dict, period_pdf, data_context)
     selection_pdf = get_governing_selection_pdf(design, score_pdf, period_pdf)
+    design.set_progress_period_str("prior-only")
+    design.print_progress_line()
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
     baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
@@ -131,6 +140,8 @@ def run_development_dict():
     beats_buy_hold_bool = path_return > buy_hold_dict["metric_dict"]["total_return"]
     beats_random_bool = path_return > baseline_dict["random_entry_median"]
     verdict_str = "CONTINUE" if beats_buy_hold_bool and beats_random_bool else "STOP"
+    design.print_progress_line()
+    design.stop_progress_thread()
     return {"span_dict": span_dict, "period_pdf": period_pdf, "fold_pdf": fold_pdf, "score_pdf": score_pdf,
             "selection_pdf": selection_pdf, "path_dict": path_dict, "buy_hold_dict": buy_hold_dict,
             "baseline_dict": baseline_dict, "optimistic_dict": get_optimistic_dict(score_pdf),
