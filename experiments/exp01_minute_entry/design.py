@@ -122,7 +122,7 @@ def get_dataset_pdf(ohlcv_array_dict_in, data_context_in):
         return _cache_dict[cache_key]
     if data_context_in is None:
         raise ValueError("exp01 reads its features and labels through the DataContext.")
-    from so.features.barrier_labels import add_TSBAR_label_cols
+    from so.features.barrier_labels import add_TSBAR_label_cols, format_TSBAR_pdf
     from experiments.exp01_minute_entry.model_dataset import apply_sampling_pdf, get_model_feature_col_str_list
     decision_ts = get_last_decision_ts(ohlcv_array_dict_in)
     data_context_in.set_decision_ts(decision_ts)
@@ -140,6 +140,8 @@ def get_dataset_pdf(ohlcv_array_dict_in, data_context_in):
         feature_col_list = [column_str for column_str in step_pdf.columns if column_str not in ("decision_ts", "available_ts", "date", "label_known_ts")]
         dataset_pdf = dataset_pdf.merge(step_pdf[["decision_ts"] + feature_col_list], on="decision_ts", how="left", suffixes=("", f"_{name_str}"))
     dataset_pdf = add_TSBAR_label_cols(dataset_pdf, list(exp_config.MODEL_DELTA_LIST), drop_cell_cols_in=True)
+    # STORED TIMESTAMPS ARE STRINGS. SAMPLING READS THE NEW YORK MINUTE, THE SAME CONVERSION PROTOCOL 1.0 USED.
+    dataset_pdf = format_TSBAR_pdf(dataset_pdf)
     dataset_pdf = apply_sampling_pdf(dataset_pdf, exp_config.SAMPLING_MODE, exp_config.SAMPLE_EVERY_N_MINUTES).reset_index(drop=True)
     if "label_known_ts" not in dataset_pdf.columns:
         raise ValueError("TSBAR rows have no label_known_ts.")
@@ -182,6 +184,9 @@ def get_weekly_prediction_pdf(ohlcv_array_dict_in, data_context_in, window_str_i
             mask_arr = get_training_mask_arr(row_pdf["row_ts"], row_pdf["label_known_ts"], refit_ts, window_str_in)
             train_pdf = row_pdf.loc[mask_arr]
             if len(train_pdf) < int(exp_config.MIN_TRAIN_ROW_COUNT):
+                # THE FIRST SESSIONS OF THE FILE HAVE NO 200 KNOWABLE ROWS YET. DO NOT SHORTEN THE WINDOW.
+                if model is None:
+                    continue
                 raise ValueError(f"refit on {session_date} ({window_str_in}) has {len(train_pdf)} rows, below {exp_config.MIN_TRAIN_ROW_COUNT}.")
             model = fit_tp_model_dict(train_pdf, feature_col_list, ohlcv_array_dict_in, alert_in=False)
             model_id += 1

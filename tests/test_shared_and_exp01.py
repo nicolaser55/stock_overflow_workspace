@@ -42,7 +42,7 @@ from so.core.datetime_utils import get_date_range_market_schedule_pdf
 from so.core.trade_execution import get_ohlcv_array_dict, resolve_barrier_exit_dict, resolve_entry_trade_dict, get_horizon_window_dict, \
                             calculate_side_fee, get_affordable_share_count, get_net_return_arr, get_breakeven_tp_rate_arr, \
                             get_expected_net_return_arr, get_trade_result_str
-from so.features.barrier_labels import get_date_TSBAR_pdf, get_date_market_open_ts_dict, add_TSBAR_label_cols, parse_TSBAR_cell_pdf, get_delta_col_str
+from so.features.barrier_labels import get_date_TSBAR_pdf, get_date_market_open_ts_dict, add_TSBAR_label_cols, parse_TSBAR_cell_pdf, get_delta_col_str, format_TSBAR_pdf
 from so.features.context_features import add_cum_max_col, get_session_summary_pdf, get_relative_volume_reference_pdf, get_date_TSCTX_pdf
 from experiments.exp01_minute_entry import config as exp_config
 from experiments.exp01_minute_entry.model_dataset import apply_sampling_pdf, get_uniqueness_weight_arr, encode_feature_pdf
@@ -633,6 +633,18 @@ def test_design_v2():
     assert list(mask_arr) == [True, False]
     passed("holdout design (12 candidates, ties -> 3Y at 0.10%, a label known after the refit is dropped)")
 
+# FUNCTION: STORED TSBAR TIMESTAMPS ARE STRINGS; SAMPLING NEEDS THE NEW YORK CLOCK
+def test_csv_entry_ts_is_parsed_before_sampling():
+    raw_pdf = pd.DataFrame({
+        "decision_ts": ["2005-01-03 09:59:00-05:00", "2005-01-03 10:00:00-05:00", "2005-01-03 10:14:00-05:00"],
+        "entry_ts": ["2005-01-03 10:00:00-05:00", "2005-01-03 10:01:00-05:00", "2005-01-03 10:15:00-05:00"],
+    })
+    formatted_pdf = format_TSBAR_pdf(raw_pdf)
+    sampled_pdf = apply_sampling_pdf(formatted_pdf, "interval", 15)
+    assert list(sampled_pdf["entry_ts"].dt.hour) == [10, 10]
+    assert list(sampled_pdf["entry_ts"].dt.minute) == [0, 15]
+    passed("csv entry_ts strings become New York timestamps before interval sampling")
+
 """
 Runner
 """
@@ -664,4 +676,5 @@ if __name__ == "__main__":
     test_plot_utils(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_TSBAR_pdf, synthetic_snapshot_pdf)
     test_bad_tick_rule(synthetic_ohlcv_pdf)
     test_design_v2()
+    test_csv_entry_ts_is_parsed_before_sampling()
     print("\nAll tests passed ✅")
