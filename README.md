@@ -44,7 +44,7 @@ stock_overflow_workspace/
 | Experiment | Status | Protocol |
 |---|---|---|
 | Pipeline steps 00-06 | Built and kept (5,436 sessions, 2005-01-03 -> 2026-08-13, bad ticks corrected) | `pipeline/README.md` |
-| exp01_minute_entry | **pre-registered** 2026-10-12 (protocol 2.0, weekly refit, not yet run). Protocol 1.0/1.1 (signal check p = 0.10) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp01_minute_entry/PROTOCOL.md` |
+| exp01_minute_entry | **running** (development notebook launched 2026-10-14 18:29, protocol 2.0, not finished). Protocol 1.0/1.1 (signal check p = 0.10) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp01_minute_entry/PROTOCOL.md` |
 | exp02_stop_reentry | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +61.82% vs +199.04%). Protocol 1.0 (+111.66% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp02_stop_reentry/PROTOCOL.md` |
 | exp03_ath_exit | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +111.12% vs +199.04%). Protocol 1.0 (+143.05% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp03_ath_exit/PROTOCOL.md` |
 | exp04_trend_exit | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +41.51% vs +199.04%). Protocol 1.0 (+70.84% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp04_trend_exit/PROTOCOL.md` |
