@@ -54,7 +54,7 @@ stock_overflow_workspace/
 | exp08_vix_signal_check | **archived** (was DONE, VIX line STOP; no gate opens: G1, G2, G4 fail; G3 passes) | `experiments/exp08_vix_signal_check/PROTOCOL.md` |
 | exp09-exp11 (VIX) | **archived** (was SKIPPED by exp08's pre-registered gates) | `docs/RESEARCH_STATE_2026-10-11.md` §6 |
 | exp12_vix_fear_reentry | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +126.51% vs +199.04%). Protocol 1.0 (+119.24% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp12_vix_fear_reentry/PROTOCOL.md` |
-| exp13_e1m1_robustness | **pre-registered** 2026-10-12 (protocol 2.0, frozen E1M1 only, not yet run). Protocol 1.0 (E1M1 IS NOT ROBUST) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
+| exp13_e1m1_robustness | **candidate pending review** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +273.85% vs +199.04%; 6-month interval contains 0). Not a success claim. Holdout evaluation is parked. Protocol 1.0 (E1M1 IS NOT ROBUST) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
 | Rolling holdout | Infrastructure in place. A window is registered. The agent does not read it and does not evaluate it | `so/core/holdout.py` |
 | Text / qualitative data | Blocked: new data source (parked decision for Nicolas) | `docs/RESEARCH_STATE_2026-10-11.md` |
 
@@ -69,7 +69,7 @@ random baselines" means it beat the median of each random family (19/20, 15/20; 
 Earlier results (stopped v1 and v2, the step 13 exploration) are summarized in `docs/history/RESULTS_LOG_2026-10-05.md`.
 **A holdout window is registered. It has not been evaluated, and no archived test window was evaluated as a holdout.** The 2015-2026 validation quarters have
 been looked at many times (they are development data, not out-of-sample data); see `docs/history/AUDIT_2026-10-05.md` §F6.
-exp01 and exp03–exp13 are still the archived code (pinned to the old untouched window 2026-05-14). exp02's folder is protocol 2.0 as of 2026-10-12. The evaluation design from 2026-10-11 is the
+exp01's development run has not finished. exp02–exp07, exp12 and exp13 are protocol 2.0. The evaluation design from 2026-10-11 is the
 rolling 12-month holdout (`so.core.holdout`).
 
 ## 3. Setup (once per machine)
