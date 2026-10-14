@@ -170,7 +170,7 @@ A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bou
 
 The full old-bounds calibration was not run. No note row was written.
 
-*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`.
+*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`. exp05 is recorded in `exp05_vol_scaled_exposure_v2`.
 
 **exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
 
@@ -193,6 +193,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp04_trend_exit` | 1.0 | **STOP** (2026-10-06) | Continuous replay: prior-only +70.84% vs +229.74%; all 12 exits bought back higher; beats 0/20 random exits and 4/20 random re-entries |
 | `exp04_trend_exit_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +41.51% vs +199.04% over 41 development periods. Below buy-and-hold and below both random medians |
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
+| `exp05_vol_scaled_exposure_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +142.59% vs +199.04% over 41 development periods. Below buy-and-hold, the constant exposure, and the random-shift median (5 of 20) |
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
 | `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
 | `exp08_vix_signal_check` | 1.0 | **DONE, VIX line STOP** (2026-10-09) | Gate: G1 0 signal bins (null max 0, p = 1.00); G2 dAUC +0.0359 vs null max +0.0563 (p = 0.15); G3 PASS (D +0.1165 [+0.0441, +0.2227]); G4 FAIL (top VIX quintile mean forward return +1.91% / +2.82%). No gate opens: exp09-exp11 skipped |
@@ -734,9 +735,38 @@ What this supports: on 2015-2026, the 200-session trend exit (with buffers and c
 and its timing is worse than random. What it does not support: a statement about deep, slow bear markets (only one
 in the exploration decade, none in the validation decade) or about other trend measures (not tested).
 
+## exp05_vol_scaled_exposure_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `7731824` (2026-10-12 23:40:20 +0300). The numeric-tolerance amendment `98115f0` (2026-10-13 00:36:32 +0300) is in the code that ran. Config hash `dedf424c5a`, printed in the header cell of `step01_development.ipynb`. One development run, saved by the queue at 2026-10-13T02:49:47. 164 validation trials and 1 summary (165), note `re-run under new rules`, `test_window_touched` false on every row. The protocol budget is 4 × 44 + 1 = **177**. The development span has 41 periods, so the run logged 4 × 41 + 1 = 165, inside the budget. The signal check and the 2005-2014 exploration were not re-run. The run was not repeated.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** Development end **2025-07-17**. Last price date loaded before the cut **2025-08-13**. Both are printed in the notebook. The session count is the sum of `session_count` in `period_data.csv`. Numbers below are the notebook's 6-decimal prints unless a file is named.
+- **Prior-only path: printed 1.425930 vs buy-and-hold 1.990442** (+142.59% vs +199.04%). About 9.05% a year vs 11.31% a year, from those two printed total returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Mean weight printed 0.854666. 27 rebalances. 8 of 41 periods beat buy-and-hold (sign-test p = 0.999987); mean period excess −0.005887 (SD 0.014285, t = −2.64), from `summary_data.csv`. MDE printed 0.006246 per quarter (0.024986 per year). Annualized log excess printed **−0.020246**, 6-month block interval [−0.036110, −0.002161] (124 months, `summary_data.csv`). The 1-month interval is printed [−0.046115, 0.007598]. The 6-month interval lies below 0. The saved `log_supported` flag is false.
+- Maximum drawdown −0.233226 vs −0.342106, the minima of `performance_over_time_data.csv`. The printed success flags are all false. Comparable return would require 90% of 1.990442, which is 1.791398. The path is 1.425930, so the smaller drawdown does not count.
+- Baselines on the same span, printed: constant exposure **1.701911** at weight 0.854666; random-shift median **1.575069**. The path beats a printed fraction 0.250000 of the 20 random shifts (5 of 20). It is below buy-and-hold, below the constant exposure, and below the median. Protocol §6 still records that the 20-point band makes this constant baseline close to buying a fraction and holding. The stopping rule also fails on buy-and-hold and on the random shifts, so the verdict does not rest on that baseline alone.
+- Optimistic, labelled after the fact: candidate `0.50|0.75` chains to printed **1.580618** against printed buy-and-hold **1.990442**. That chain is not the prior-only path.
+- Activity, printed: turnover 0.999446 per year, 28 trades, 9 candidate switches (0.880093 per year in `summary_data.csv`).
+
+**Calibration (i), shared bounds.** Computation on the saved files only. No replay and no new trial. Same date rule as exp04. Three quarters match on both ends: 2016-01-19 → 2016-04-15, 2021-01-19 → 2021-04-16, 2022-01-18 → 2022-04-14. All 4 candidates (12 rows) are compared at `NUMERIC_TOLERANCE` 1e-6.
+
+**Returns: 0 / 12 matched.** Maximum absolute difference of total return **0.020042389090589204**. Buy-and-hold on the same 12 rows: 0 / 12 matched, maximum absolute difference 4.771406598820527e-5.
+
+**Prior-only selections: 2 / 3 matched.** The rule in force is archived `0.50|0.75` vs v2 `0.30|0.50` (2016-01-19), and both `0.50|0.75` on 2021-01-19 and on 2022-01-18. Cause: the same schedule shift as exp04. A period score is a slice of one continuous path, and the earlier quarters that the selection pools do not share bounds. The return gaps are far above 1e-6, so the tolerance tie order is not what splits the 2016 selection.
+
+**Calibration (ii), old bounds.** Finished at 2026-10-13T13:59:59. Log `logs/exp05_vol_scaled_exposure_calibration_20261013_1328.log`. Summary `exp05_vol_scaled_exposure_v2/old_bounds_calibration/summary_data.csv`. One note row, `old-bounds calibration; diagnostic; informs no decision`, `test_window_touched` false. It was not repeated. The morning run failed before any note row.
+
+41 archived quarters were kept (warmup 2,588 sessions). **Returns: 164 / 164 matched** within 1e-6. Buy-and-hold matched on the same 164 rows. **Prior-only selections: 41 / 41 matched.** Maximum absolute difference of total return **1.97758476261356e-16**. That gap is floating-point rounding of the same rules on the same bounds. No selection changed.
+
+**Verdict: STOP.** The stopping rule is STOP when the prior-only path does not beat buy-and-hold, or does not beat the constant exposure, the median random shift, and more than half of the random shifts. Printed path 1.425930 is below printed buy-and-hold 1.990442, below the constant exposure 1.701911, and below the median 1.575069. It beats 5 of 20 shifts. This is not a candidate result. No holdout evaluation was run. No further version may follow from this result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that held about 85% of its money in SPY and moved the weight with recent volatility got to +143%. Holding that same average weight without the volatility timing got to +170%. Shuffling the same target weights beat the rule on 15 of the 20 draws. The smaller loss from the worst peak (−23% against −34%) does not rescue a path that finished well behind staying invested.
+
+Mathematically: the prior-only total return is 1.425930 and buy-and-hold is 1.990442, so the difference of total returns is −0.564512. The annualized log excess is −0.020246 per year. Its 6-month block interval [−0.036110, −0.002161] does not contain 0.
+
 ## exp05_vol_scaled_exposure
 
-**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9). Pre-registered in commit `5305b83` (`preregister
+*2026-10-14.* The version 2.0 re-run is recorded in `exp05_vol_scaled_exposure_v2`. This protocol 1.0 entry is unchanged.
+
+**Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9). Pre-registered in commit `5305b83` (`preregister`
 exp05`, before any run); config hash `b1763b5981`. Trials: 1 signal check and 4 exploration (2026-10-06T14:34:52 /
 14:34:54), 176 validation and 1 summary (step 02, same day), 182 in total against a budget of 185. Numbers below are
 copied from the saved outputs of `step01_exploration.ipynb` and `step02_continuous_replay.ipynb`.
