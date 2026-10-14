@@ -170,7 +170,7 @@ A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bou
 
 The full old-bounds calibration was not run. No note row was written.
 
-*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`. exp05 is recorded in `exp05_vol_scaled_exposure_v2`.
+*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`. exp05 is recorded in `exp05_vol_scaled_exposure_v2`. exp06 is recorded in `exp06_capped_regret_reentry_v2`.
 
 **exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
 
@@ -195,6 +195,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp05_vol_scaled_exposure` | 1.0 | **STOP** (2026-10-06) | Signal check passes (ρ 0.593); prior-only +165.69% vs +229.74% (mean weight 86.3%); constant exposure +198.52%, beats 3/20 random shifts; drawdown −23.20% vs −34.21% |
 | `exp05_vol_scaled_exposure_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +142.59% vs +199.04% over 41 development periods. Below buy-and-hold, the constant exposure, and the random-shift median (5 of 20) |
 | `exp06_capped_regret_reentry` | 1.0 | **STOP** (2026-10-06) | Data-dependent follow-up of exp03. Prior-only +147.38% vs +229.74%; information test passed (beats 19/20 random exits, 15/20 random re-entries) but 37 of 45 exits ended on the buy-stop |
+| `exp06_capped_regret_reentry_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +132.25% vs +199.04%. Beats both random medians (18/20 exits, 15/20 re-entries) and loses to buy-and-hold |
 | `exp07_warning_lights_exit` | 1.0 | **STOP** (2026-10-06) | Exploration: k = 5 +136.41% vs +69.02% (one 2008 exit). Validation: every k loses (best k = 4 +115.60% vs +235.39%); prior-only +49.09% vs +229.74%, all 12 exits bought back higher; beats 0/20 random exits, 7/20 random re-entries |
 | `exp08_vix_signal_check` | 1.0 | **DONE, VIX line STOP** (2026-10-09) | Gate: G1 0 signal bins (null max 0, p = 1.00); G2 dAUC +0.0359 vs null max +0.0563 (p = 0.15); G3 PASS (D +0.1165 [+0.0441, +0.2227]); G4 FAIL (top VIX quintile mean forward return +1.91% / +2.82%). No gate opens: exp09-exp11 skipped |
 | `exp09_vix_reentry`, `exp10_vix_vol_scaled_exposure`, `exp11_vix_model_exit` | — | **SKIPPED** (2026-10-09) | Not run, by exp08's pre-registered gates (exp09 needs G1 or G2, exp10 G3 and G4, exp11 G2) |
@@ -836,7 +837,36 @@ What this supports: on 2015-2026, unlevered volatility scaling with this σ̂ do
 adds no return over an uninformed exposure; it does lower the drawdown. What it does not support: anything about levered
 volatility management (excluded by the project), about implied volatility (VIX, new data, parked), or about other σ̂.
 
+## exp06_capped_regret_reentry_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Data-dependent follow-up of exp03, as protocol 1.0. Pre-registered in commit `2f98edd` (2026-10-12 23:45:15 +0300). The numeric-tolerance amendment `98115f0` (2026-10-13 00:36:32 +0300) is in the code that ran. Config hash `ffca9e30e1`, printed in the header cell of `step01_development.ipynb`. One development run, saved by the queue at 2026-10-13T04:28:40. 492 validation trials and 1 summary (493), note `re-run under new rules`, `test_window_touched` false on every row. The protocol budget is 12 × 44 + 1 = **529**. The development span has 41 periods, so the run logged 12 × 41 + 1 = 493, inside the budget. The 2005-2014 exploration was not re-run. The run was not repeated.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** Development end **2025-07-17**. Last price date loaded before the cut **2025-08-13**. Both are printed in the notebook. The session count is the sum of `session_count` in `period_data.csv`. Numbers below are the notebook's 6-decimal prints unless a file is named.
+- **Prior-only path: printed 1.322490 vs buy-and-hold 1.990442** (+132.25% vs +199.04%). About 8.59% a year vs 11.31% a year, from those two printed total returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Time in the market printed 0.694876 (69.49%). 36 exits. 15 of 41 periods beat buy-and-hold (sign-test p = 0.970208); mean period excess −0.007286 (SD 0.042152, t = −1.11), from `summary_data.csv`. MDE printed 0.018432 per quarter (0.073729 per year). Annualized log excess printed **−0.024463**, 6-month block interval [−0.063152, 0.018654] (124 months, `summary_data.csv`). The 1-month interval is printed [−0.083492, 0.036033]. The 6-month interval contains 0 and extends below 0. The saved `log_supported` flag is false.
+- Maximum drawdown −0.288505 vs −0.342106, the minima of `performance_over_time_data.csv`. Printed flags: `primary_success` false, `secondary_success` false, `comparable_return` false, `all_baselines_beaten` true. Comparable return would require 1.791398. The path is 1.322490, so the smaller drawdown does not count. `all_baselines_beaten` here is the two random medians.
+- Baselines on the same span, printed: random-exit median **0.980501**, random-re-entry median **1.137882**. The path beats a printed fraction 0.900000 of the 20 random exits (18 of 20) and 0.750000 of the 20 random re-entries (15 of 20). It beats both medians. The same reading as protocol 1.0 applies: beating 18 of 20 and 15 of 20, on a data-dependent design with 12 candidates, is consistent with weak timing information and is not statistical support.
+- Optimistic, labelled after the fact: candidate `ath_1pct|0.01|20` chains to printed **1.435236** against printed buy-and-hold **1.990442**. That chain is not the prior-only path, and it is also below buy-and-hold.
+- Activity, printed: turnover 7.138533 per year, 74 trades, 16 candidate switches (1.564610 per year in `summary_data.csv`).
+
+**Calibration (i), shared bounds.** Computation on the saved files only. No replay and no new trial. Three quarters match on both ends: 2016-01-19 → 2016-04-15, 2021-01-19 → 2021-04-16, 2022-01-18 → 2022-04-14. All 12 candidates (36 rows) are compared at `NUMERIC_TOLERANCE` 1e-6.
+
+**Returns: 0 / 36 matched.** Maximum absolute difference of total return **0.0430891693241582**. Buy-and-hold on the same 36 rows: 0 / 36 matched, maximum absolute difference 4.771406598820527e-5.
+
+**Prior-only selections: 1 / 3 matched.** Both `ath_1pct|0.02|20` on 2016-01-19. Archived `ath_1pct|0.01|20` vs v2 `ath_1pct|0.01|0` on 2021-01-19. Archived `trend_ma200|0.01|0` vs v2 `trend_ma200|0.01|20` on 2022-01-18. Cause: the same schedule shift as exp04. The return gaps are far above 1e-6, so the tolerance tie order is not what splits the selections.
+
+**Calibration (ii), old bounds.** Finished at 2026-10-13T15:36:55. Log `logs/exp06_capped_regret_reentry_calibration_20261013_1359.log`. Summary `exp06_capped_regret_reentry_v2/old_bounds_calibration/summary_data.csv`. One note row, `old-bounds calibration; diagnostic; informs no decision`, `test_window_touched` false. It was not repeated.
+
+41 archived quarters were kept (warmup 2,588 sessions). **Returns: 492 / 492 matched** within 1e-6. Buy-and-hold matched on the same 492 rows. **Prior-only selections: 41 / 41 matched.** Maximum absolute difference of total return **2.0816681711721685e-16**. That gap is floating-point rounding of the same rules on the same bounds. No selection changed.
+
+**Verdict: STOP.** The stopping rule is STOP when the prior-only path does not beat buy-and-hold, or does not beat the median of both random families. It beats both medians. Printed path 1.322490 is below printed buy-and-hold 1.990442, so the primary criterion fails. This is not a candidate result. No holdout evaluation was run. No further version may follow from this result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold on a trend break or near the high and bought back on a capped rise got to +132%. Selling at a random moment and using the same buy-back finished at +98%, so the decision to sell beat random sell timing on 18 of the 20 draws. Buying back at random after those same sales finished at +114%, and the rule beat 15 of those 20. The timing comparison is the same shape as protocol 1.0, and it still does not pay for the time in cash. The best rule chosen after seeing every period (`ath_1pct|0.01|20`, +144%) is also behind staying invested.
+
+Mathematically: the prior-only total return is 1.322490 and buy-and-hold is 1.990442, so the difference of total returns is −0.667952. The annualized log excess is −0.024463 per year. Its 6-month block interval [−0.063152, 0.018654] contains 0.
+
 ## exp06_capped_regret_reentry
+
+*2026-10-14.* The version 2.0 re-run is recorded in `exp06_capped_regret_reentry_v2`. This protocol 1.0 entry is unchanged.
 
 **Protocol 1.0. Status: STOP** (stopping rule of PROTOCOL.md §9: the primary criterion fails). **Data-dependent
 follow-up of exp03** (disclosed in the protocol). Pre-registered in commit `1bac3b4` (`preregister exp06`, before any
