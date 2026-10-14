@@ -170,7 +170,7 @@ A one-quarter probe of exp04 after the tuple fix, fold 0 candidate `0.00|1`, bou
 
 The full old-bounds calibration was not run. No note row was written.
 
-*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`. exp05 is recorded in `exp05_vol_scaled_exposure_v2`. exp06 is recorded in `exp06_capped_regret_reentry_v2`. exp07 is recorded in `exp07_warning_lights_exit_v2`.
+*Correction 2026-10-14.* The second queue (`logs/port_queue_status.csv`, 12:16–17:15) skipped the six finished development runs and finished each old-bounds calibration. Each wrote one note row. Those development notebooks were not run again. exp04 is recorded in `exp04_trend_exit_v2`. exp05 is recorded in `exp05_vol_scaled_exposure_v2`. exp06 is recorded in `exp06_capped_regret_reentry_v2`. exp07 is recorded in `exp07_warning_lights_exit_v2`. exp12 is recorded in `exp12_vix_fear_reentry_v2`.
 
 **exp01.** `logs/exp01_minute_entry_development_20261013_0610.log`. The notebook was saved with the error. Cell 4 calls `run_development_dict()`, which calls `get_development_data_context`, which loads TSBAR. `add_tsbar_label_known_ts_pdf` raised `ValueError: TSBAR needs label_known_ts or exit_ts`. The stored cells are `exit_bar_count|exit_price|exit_reason` plus `entry_ts`. No `exp01_minute_entry_v2` row was logged (0 validation, 0 summary, 0 note). Nothing was deleted. The run was not repeated. The clock is now the end of the latest stored exit bar; an unresolved cell stays unfinished. That does not change the grid, the thresholds, the windows, the costs, the baselines, the selection rule, or the stopping rule. Protocol 2.0 change log, 2026-10-13.
 
@@ -201,6 +201,7 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
 | `exp08_vix_signal_check` | 1.0 | **DONE, VIX line STOP** (2026-10-09) | Gate: G1 0 signal bins (null max 0, p = 1.00); G2 dAUC +0.0359 vs null max +0.0563 (p = 0.15); G3 PASS (D +0.1165 [+0.0441, +0.2227]); G4 FAIL (top VIX quintile mean forward return +1.91% / +2.82%). No gate opens: exp09-exp11 skipped |
 | `exp09_vix_reentry`, `exp10_vix_vol_scaled_exposure`, `exp11_vix_model_exit` | — | **SKIPPED** (2026-10-09) | Not run, by exp08's pre-registered gates (exp09 needs G1 or G2, exp10 G3 and G4, exp11 G2) |
 | `exp12_vix_fear_reentry` | 1.0 | **STOP** (2026-10-09) | Data-dependent follow-up of exp08 (Nicolas), exp09's rules. Prior-only +119.24% vs +229.74% (log excess −3.77%/yr [−7.95%, −0.37%]); unmodified path +82.88%; beats 0/20 random exits, 13/20 random re-entries. Optimistic best E1M1 +314.80% vs +235.39%. VIX line closed |
+| `exp12_vix_fear_reentry_v2` | 2.0 | **STOP** (2026-10-14) | Re-run under the new rules, not new evidence. Prior-only +126.51% vs +199.04%. Beats the unmodified path and loses to the random-exit median (1/20). VIX line stays closed |
 | `exp13_e1m1_robustness` | 1.0 | **E1M1 IS NOT ROBUST** (2026-10-09) | Data-dependent robustness of exp12's after-the-fact E1M1. R1–R4 fail, R5 holds. Stress +53.32% vs +73.09%; 11/36 variants beat B&H on DEV, 3/36 on STRESS; p2 = 0.088; without the best episode equity ratio 0.9775. Delayed +306.15% and 5-cent +310.85% still beat +235.39%. VIX line closed |
 *Corrections 2026-10-06, after the independent audit (`docs/AUDIT_2026-10-06_agent_session.md`), for the rows above:*
 - *exp05 (I3): "constant exposure +198.52%" is not a constant exposure: with the 20-point dead band it never rebalanced,
@@ -1171,7 +1172,36 @@ a high or inverted VIX) is not tested and is not a trading result: it rests on f
   overlapping training sessions, every null run S1 = 0). The descriptive pattern (higher mean returns after a high or
   inverted VIX) was not tested by exp08.*
 
+## exp12_vix_fear_reentry_v2
+
+**Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Data-dependent follow-up of exp08, as protocol 1.0. Pre-registered in commit `f5eb885` (2026-10-12 23:50:19 +0300). The numeric-tolerance amendment `98115f0` (2026-10-13 00:36:32 +0300) is in the code that ran. Config hash `ce0c36109b`, printed in the header cell of `step01_development.ipynb`. One development run, saved by the queue at 2026-10-13T05:59:47. 246 validation trials and 1 summary (247), note `re-run under new rules`, `test_window_touched` false on every row. The protocol budget is 6 × 44 + 1 = **265**. The development span has 41 periods, so the run logged 6 × 41 + 1 = 247, inside the budget. The 2009-2014 exploration was not re-run. The run was not repeated.
+
+**Step 01, development replay, 41 periods, 2015-04-20 → 2025-07-17 (2,577 sessions).** Development end **2025-07-17**. Last price date loaded before the cut **2025-08-13**. Both are printed in the notebook. The session count is the sum of `session_count` in `period_data.csv`. Numbers below are the notebook's 6-decimal prints unless a file is named.
+- **Prior-only path: printed 1.265069 vs buy-and-hold 1.990442** (+126.51% vs +199.04%). About 8.32% a year vs 11.31% a year, from those two printed total returns and 2,577 sessions: (1 + R)^(252 / 2577) − 1. Time in the market printed 0.918090 (91.81%). 25 exits. 16 of 41 periods beat buy-and-hold (sign-test p = 0.941362); mean period excess −0.007683 (SD 0.034024, t = −1.45), from `summary_data.csv`. MDE printed 0.014878 per quarter (0.059514 per year). Annualized log excess printed **−0.026885**, 6-month block interval [−0.070945, 0.018952] (124 months, `summary_data.csv`). The 1-month interval is printed [−0.068653, 0.020902]. The 6-month interval contains 0 and extends below 0. The saved `log_supported` flag is false.
+- Maximum drawdown −0.256088 vs −0.342106, the minima of `performance_over_time_data.csv`. The printed success flags are all false. Comparable return would require 1.791398. The path is 1.265069.
+- Baselines on the same span, printed: unmodified path **0.687545**; random-exit median **1.702518**; random-re-entry median **0.805662**. The path beats a printed fraction 0.050000 of the 20 random exits (1 of 20) and 0.850000 of the 20 random re-entries (17 of 20). Printed information test **False**. The path is above the unmodified path and above the re-entry median, and below the exit median. Printed equity ratio 0.757436 over 25 episodes.
+- Optimistic, labelled after the fact: candidate `E1M1` chains to printed **2.225343** against printed buy-and-hold **1.990442**. That chain is not the prior-only path. It is the same after-the-fact reading protocol 1.0 already recorded, on the shorter development span.
+- Activity, printed: turnover 4.987194 per year, 52 trades, 17 candidate switches (1.662398 per year in `summary_data.csv`).
+
+**Calibration (i), shared bounds.** Computation on the saved files only. No replay and no new trial. Three quarters match on both ends: 2016-01-19 → 2016-04-15, 2021-01-19 → 2021-04-16, 2022-01-18 → 2022-04-14. All 6 candidates (18 rows) are compared at `NUMERIC_TOLERANCE` 1e-6.
+
+**Returns: 0 / 18 matched.** Maximum absolute difference of total return **0.013568205204357399**. Buy-and-hold on the same 18 rows: 0 / 18 matched, maximum absolute difference 4.771406598820527e-5.
+
+**Prior-only selections: 3 / 3 matched.** The rule in force is `E2M3` on 2016-01-19, `E1M1` on 2021-01-19, and `E2M3` on 2022-01-18, in both the archived file and the v2 file. The candidate returns on those quarters still differ. Cause of the return gap: the same schedule shift as exp04. A period score is a slice of one continuous path, and the earlier quarters do not share bounds. The selection happened to agree on these three quarters. The return gaps are far above 1e-6.
+
+**Calibration (ii), old bounds.** Finished at 2026-10-13T16:48:49. Log `logs/exp12_vix_fear_reentry_calibration_20261013_1601.log`. Summary `exp12_vix_fear_reentry_v2/old_bounds_calibration/summary_data.csv`. One note row, `old-bounds calibration; diagnostic; informs no decision`, `test_window_touched` false. It was not repeated.
+
+41 archived quarters were kept (warmup 2,588 sessions). **Returns: 246 / 246 matched** within 1e-6. Buy-and-hold matched on the same 246 rows. **Prior-only selections: 41 / 41 matched.** Maximum absolute difference of total return **1.97758476261356e-16**. That gap is floating-point rounding of the same rules on the same bounds. No selection changed.
+
+**Verdict: STOP.** The protocol says: if the prior-only path does not beat buy-and-hold, STOP, and the VIX line stays closed. Printed path 1.265069 is below printed buy-and-hold 1.990442. This is not a candidate result. No holdout evaluation was run. No further version may follow from this result.
+
+In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold on the trend or the warning lights and bought back when the previous session's VIX had fallen got to +127%. The same exits without the VIX modifications got to +69%, so the VIX rules added something on this span. A random exit with the same buy-back finished at +170%, ahead of the VIX path on 19 of the 20 draws. The VIX modification did not beat chance at choosing when to sell. The rule chosen after seeing every period, E1M1 at +223% against +199%, could not have been selected in advance. The path that could have been is the +127% one. The VIX line stays closed.
+
+Mathematically: the prior-only total return is 1.265069 and buy-and-hold is 1.990442, so the difference of total returns is −0.725373. The annualized log excess is −0.026885 per year. Its 6-month block interval [−0.070945, 0.018952] contains 0.
+
 ## exp12_vix_fear_reentry
+
+*2026-10-14.* The version 2.0 re-run is recorded in `exp12_vix_fear_reentry_v2`. This protocol 1.0 entry is unchanged.
 
 **2026-10-09, protocol 1.0, config hash `eec3977199`, agent (autonomous mode). Status: STOP; the VIX line is closed
 definitively.**
