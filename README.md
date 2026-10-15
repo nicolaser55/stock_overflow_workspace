@@ -44,7 +44,7 @@ stock_overflow_workspace/
 | Experiment | Status | Protocol |
 |---|---|---|
 | Pipeline steps 00-06 | Built and kept (5,436 sessions, 2005-01-03 -> 2026-08-13, bad ticks corrected) | `pipeline/README.md` |
-| exp01_minute_entry | **running** (development notebook launched 2026-10-14 18:29, protocol 2.0, not finished). Protocol 1.0/1.1 (signal check p = 0.10) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp01_minute_entry/PROTOCOL.md` |
+| exp01_minute_entry | **STOP** (2026-10-15, protocol 2.0, re-run under the new rules: prior-only +136.53% vs +217.35%). Protocol 1.0/1.1 (signal check p = 0.10) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp01_minute_entry/PROTOCOL.md` |
 | exp02_stop_reentry | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +61.82% vs +199.04%). Protocol 1.0 (+111.66% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp02_stop_reentry/PROTOCOL.md` |
 | exp03_ath_exit | **STOP** (2026-10-12, protocol 2.0, re-run under the new rules: prior-only +111.12% vs +199.04%). Protocol 1.0 (+143.05% vs +237.21%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp03_ath_exit/PROTOCOL.md` |
 | exp04_trend_exit | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +41.51% vs +199.04%). Protocol 1.0 (+70.84% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp04_trend_exit/PROTOCOL.md` |
@@ -69,7 +69,7 @@ random baselines" means it beat the median of each random family (19/20, 15/20; 
 Earlier results (stopped v1 and v2, the step 13 exploration) are summarized in `docs/history/RESULTS_LOG_2026-10-05.md`.
 **A holdout window is registered. It has not been evaluated, and no archived test window was evaluated as a holdout.** The 2015-2026 validation quarters have
 been looked at many times (they are development data, not out-of-sample data); see `docs/history/AUDIT_2026-10-05.md` §F6.
-exp01's development run has not finished. exp02–exp07, exp12 and exp13 are protocol 2.0. The evaluation design from 2026-10-11 is the
+exp01–exp07, exp12 and exp13 are protocol 2.0. The evaluation design from 2026-10-11 is the
 rolling 12-month holdout (`so.core.holdout`).
 
 ## 3. Setup (once per machine)
