@@ -518,6 +518,8 @@ The queue was not launched.
 
 *2026-10-15:* `exp01_minute_entry_v2` development finished (launched 2026-10-14 18:29, saved 2026-10-15 02:03). Prior-only +136.53% vs +217.35%, STOP. The signal-check STOP stands. The run was not repeated. No holdout evaluation. Details: `docs/RESULTS_LOG.md`, section `exp01_minute_entry_v2`.
 
+*2026-10-15 (later):* exposure check from the saved development files only. No new run and no new trial. A constant hold of each path's time in the market, one entry, cash at 0%, is above the prior-only path for exp01–exp07 and exp12. exp13 is above that hold (2.738521 vs 1.869197) and stays a candidate pending review. exp01's random-entry and fixed-time activity was not saved; their total returns were. The path 1.365326 is below the hold 1.793207. Details: `docs/BENCHMARK_2026-10-12.md`.
+
 ### Then: text / qualitative data (new data, needs Nicolas)
 
 ## 7. Open items and parked decisions
@@ -601,3 +603,4 @@ The queue was not launched.
 | 2026-10-14 | agent | exp01 v2 compute amendment: the weekly calendar starts at the first sampled session, 2005-01-03. 526 refits before the 2015-02-02 model are not executed. First two periods, all 12 candidates, max absolute difference 0 versus the unskipped loop. Trial log unchanged (6,455 lines). Full test suite passed | Launch the exp01 development notebook once, detached. Do not re-run a finished development run or calibration |
 | 2026-10-14 | agent | Launched the exp01 v2 development notebook once, detached: `logs/exp01_minute_entry_development_20261014_1829.out` and `.err`. No trial row at launch. Do not start it again | When the out log ends with `saved experiments/exp01_minute_entry/step01_development.ipynb`, record the result. Do not re-run |
 | 2026-10-15 | agent | Recorded `exp01_minute_entry_v2`. Prior-only +136.53% vs +217.35%, printed STOP. Trials 505 inside budget 529. Beats the random-entry median (20/20) and the fixed-time baseline, loses to buy-and-hold. 6-month interval contains 0. Signal-check STOP stands. No re-run, no new trial, no holdout evaluation | Holdout baselines for the v2 designs (report only, no rule change). Do not re-run a finished development run |
+| 2026-10-15 | agent | Exposure check from saved development files. No new run, no new trial. Constant hold of each path's time in the market is above the prior-only path for exp01–exp07 and exp12. exp01 path 1.365326 vs hold 1.793207; random-entry and fixed-time time-in-market, trades and costs were not saved. exp13 is above its hold (2.738521 vs 1.869197) and stays pending review. Column in `docs/BENCHMARK_2026-10-12.md` | Holdout baselines for the v2 designs (report only, no rule change). Do not re-run a finished development run |

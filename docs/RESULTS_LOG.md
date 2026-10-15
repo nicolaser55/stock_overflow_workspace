@@ -220,6 +220,11 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
   information; not statistically supported" (data-dependent design, 12 candidates, about 7,400 trials).*
 - *exp07 (I4): "all 12 exits bought back higher" = 11 closed episodes, all bought back higher, plus 1 episode open at
   the end (valued at the last close, also higher).*
+- *2026-10-15, exposure check (no new run, no new trial).* A constant hold of each prior-only path's saved time in the
+  market, cash at 0%, one entry, is above the path for every v2 experiment except `exp13_e1m1_robustness_v2`. exp01's
+  printed `all_baselines_beaten` compares the path with the random-entry median and the fixed-time entry. The path,
+  1.365326, is below that hold, 1.793207. Time in the market, trade count, and costs of those two baselines were not
+  saved; their total returns were. Method and the nine rows: `docs/BENCHMARK_2026-10-12.md`. Verdicts are unchanged.
 
 ## Reproduction checks for the re-run
 
@@ -416,6 +421,10 @@ In plain words: over these ten years the account that stayed in SPY more than tr
 
 Mathematically: the prior-only total return is 1.365326 and buy-and-hold is 2.173509, so the difference of total returns is −0.808183. The annualized log excess is −0.027993 per year. Its 6-month block interval [−0.068826, 0.013928] contains 0.
 
+*2026-10-15, exposure check.* No new run. No new trial. The saved outputs give the total returns of the two baselines and do not give their time in the market, their trade counts, or their costs. `summary_data.csv` has random-entry median **0.276782** and fixed-time entry **0.175908**. `get_path_baseline_dict` stores those returns and drops the rest of each simulation. The path's time in the market is **0.825000**, the mean of `in_position` over all 2,640 rows of `prior_only_daily_equity_data.csv` (2,178 sessions). The path's trade count, 5,404, is in that summary. The path's dollar costs are not in the saved files.
+
+The constant-exposure hold of that fraction is **1.793207**. The method, the entry of 7.53 dollars, and the exit of 7.53 dollars that is added back, are in `docs/BENCHMARK_2026-10-12.md`. The prior-only path, 1.365326, is 0.427882 below that hold. The random-entry median and the fixed-time entry are below it as well. `all_baselines_beaten` is the comparison with those two returns. The path was in the market on 82.5% of sessions and finished behind a constant 82.5% hold. The shortfall of the two baselines relative to that hold stays unsplit, because their time in the market and their costs were not saved. The verdict stays STOP.
+
 ## exp02_stop_reentry
 
 **Protocol 1.0. Status: STOP.** Run 2026-10-05 14:47-14:50, hash `53a86cd30f` (14 exploration, 1 signal-check, 792
@@ -575,6 +584,8 @@ Mathematically: the prior-only total return is 0.6182 and buy-and-hold is 1.9904
 is −1.372. The annualized log excess is −0.0594 per year. Its 6-month block interval [−0.1164, −0.0062] does not
 contain 0.
 
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.735248, the constant-exposure hold is **1.463522** (`docs/BENCHMARK_2026-10-12.md`). The prior-only path, 0.618215, is 0.845307 below it. The path was already below every saved baseline. The verdict stays STOP.
+
 ## exp03_ath_exit_v2
 
 **Protocol 2.0. Status: STOP.** Label: re-run under the new rules, not new evidence. Pre-registered in commit `26700e0`
@@ -664,6 +675,8 @@ Mathematically: the prior-only total return is 1.1112 and buy-and-hold is 1.9904
 is −0.879. The annualized log excess is −0.0337 per year. Its 6-month block interval [−0.0694, −0.0024] does not
 contain 0.
 
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.604037, the constant-exposure hold is **1.202344**. The prior-only path, 1.111234, is 0.091110 below it. The saved random-exit median is 0.381923 and the saved random-buyback median is 1.688064. The path beats the random-exit median. The constant hold and the random-buyback median are both above the path. The verdict stays STOP.
+
 ## exp03_ath_exit
 
 **Protocol 1.0. Status: STOP.** Run 2026-10-05 14:55-14:56, hash `b8523207d1` (15 exploration, 660 validation and 1
@@ -726,6 +739,8 @@ Cause: the other aligned quarters differ by 0 to 6 sessions. Version 2.0 steps b
 In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold below the 200-session average and bought back above it got to +42%. It was in the market about five sessions in six, and it still finished behind a coin-flip exit and behind a coin-flip buy-back. The best rule chosen after seeing every period (`0.03|1`, +116%) could not have been selected in advance; the path that could have been is the +42% one.
 
 Mathematically: the prior-only total return is 0.415088 and buy-and-hold is 1.990442, so the difference of total returns is −1.575354. The annualized log excess is −0.072409 per year. Its 6-month block interval [−0.140352, −0.017098] does not contain 0.
+
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847826, the constant-exposure hold is **1.687609**. The prior-only path, 0.415088, is 1.272521 below it. The path was already below both random medians. The verdict stays STOP.
 
 ## exp04_trend_exit
 
@@ -803,6 +818,8 @@ in the exploration decade, none in the validation decade) or about other trend m
 In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that held about 85% of its money in SPY and moved the weight with recent volatility got to +143%. Holding that same average weight without the volatility timing got to +170%. Shuffling the same target weights beat the rule on 15 of the 20 draws. The smaller loss from the worst peak (−23% against −34%) does not rescue a path that finished well behind staying invested.
 
 Mathematically: the prior-only total return is 1.425930 and buy-and-hold is 1.990442, so the difference of total returns is −0.564512. The annualized log excess is −0.020246 per year. Its 6-month block interval [−0.036110, −0.002161] does not contain 0.
+
+*2026-10-15, exposure check.* No new run. No new trial. This protocol already includes a constant-exposure baseline. The saved figure is **1.701911** at weight 0.854666. The prior-only path, 1.425930, is 0.275981 below it. The one-entry blend used for the other experiments, at the same weight, is 1.701224, which is 0.000687 from that saved simulation. The stopping rule used the saved simulation. The verdict stays STOP.
 
 ## exp05_vol_scaled_exposure
 
@@ -905,6 +922,8 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 1.322490 and buy-and-hold is 1.990442, so the difference of total returns is −0.667952. The annualized log excess is −0.024463 per year. Its 6-month block interval [−0.063152, 0.018654] contains 0.
 
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.694876, the constant-exposure hold is **1.383159**. The prior-only path, 1.322490, is 0.060669 below it. The path beats the saved random-exit median 0.980501 and the saved random-reentry median 1.137882. Those two wins are wins over those medians. The constant hold of the path's own time in the market is higher than the path. The verdict stays STOP.
+
 ## exp06_capped_regret_reentry
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp06_capped_regret_reentry_v2`. This protocol 1.0 entry is unchanged.
@@ -999,6 +1018,8 @@ the median of both random families) while failing the primary criterion.*
 In plain words: over these ten years the account that stayed in SPY almost tripled (+199%), and the account that sold when enough warning lights were on got to +41%. It was in the market about five sessions in six. A random exit with the same buy-back finished at +165%, ahead of the lights on every one of the 20 draws. Buying back at random after the lights' own sales finished at +27%, and the rule beat 18 of those 20. The lights did not improve the sale. They mostly sat through the declines and then gave ground while waiting to buy back.
 
 Mathematically: the prior-only total return is 0.409471 and buy-and-hold is 1.990442, so the difference of total returns is −1.580971. The annualized log excess is −0.072794 per year. Its 6-month block interval [−0.126870, −0.028487] does not contain 0.
+
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847438, the constant-exposure hold is **1.686836**. The prior-only path, 0.409472, is 1.277365 below it. The saved random-reentry median is 0.274653 and the saved random-exit median is 1.653326. The path beats the random-reentry median. The constant hold and the random-exit median are both above the path. The verdict stays STOP.
 
 ## exp07_warning_lights_exit
 
@@ -1238,6 +1259,8 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 1.265069 and buy-and-hold is 1.990442, so the difference of total returns is −0.725373. The annualized log excess is −0.026885 per year. Its 6-month block interval [−0.070945, 0.018952] contains 0.
 
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.918090, the constant-exposure hold is **1.827470**. The prior-only path, 1.265069, is 0.562401 below it. The verdict stays STOP.
+
 ## exp12_vix_fear_reentry
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp12_vix_fear_reentry_v2`. This protocol 1.0 entry is unchanged.
@@ -1385,6 +1408,8 @@ ends.
 In plain words: on this shorter span the frozen rule, sell on the textbook trend break and buy back when the previous session's VIX has fallen from its high since the sale, finished at +274% while staying in SPY finished at +199%. The same sale without the VIX buy-back finished at +93%. Random sales and random buy-backs both finished behind the rule on all 20 draws of each. The average year still cannot be separated from noise: the 6-month interval runs from about −1.0% a year to about +6.2% a year. The earlier robustness study, which this run did not repeat, already found that this rule fails when the window, the neighbours, and the placebos move. A higher number on the development span does not undo that study, and it is not a claim that the rule works.
 
 Mathematically: the prior-only total return is 2.738521 and buy-and-hold is 1.990442, so the difference of total returns is +0.748079. The annualized log excess is +0.021607 per year. Its 6-month block interval [−0.010373, 0.061984] contains 0.
+
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.939053, the constant-exposure hold is **1.869197**. The prior-only path, 2.738521, is 0.869324 above it, so the path's lead over buy-and-hold comes with a lead over a constant hold of the same time in the market. The 6-month interval still contains 0. The status stays a candidate result pending review. Protocol 1.0's verdict, E1M1 IS NOT ROBUST, stands. No holdout evaluation was run.
 
 ## exp13_e1m1_robustness
 
