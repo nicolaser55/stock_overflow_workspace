@@ -7,16 +7,18 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 """
 Look-ahead audit on development bars (Nicolas, 2026-10-16).
 
-For one design, replay the prior-only path, then replay it again at each cut date under the two checks the holdout
-runner uses: sessions after the cut dropped, and every bar after the cut session's decision bar perturbed. Decisions
-through the cut must match, including refits on or before the cut. Prices on or after the holdout start are not read.
-A finished design writes logs/lookahead_audit/<folder>.json and one trial-log note. A check that fails is a finding:
-the rules are not changed.
+The reference is the saved development path (decisions, and the refit log when that file exists). There is no fresh
+full replay. At each cut the path is replayed twice and stops on the cut session: once with sessions after the cut
+removed, once with the full bar span perturbed after the cut session's decision bar. The perturbed context keeps that
+full span. The refit schedule stops on the cut. Prices on or after the holdout start are not read. A finished design
+writes logs/lookahead_audit/<folder>.json and one trial-log note. A check that fails is a finding: the rules are not
+changed.
 
 Usage, from the workspace root:
     venv-main/Scripts/python.exe -u scripts/lookahead_audit.py --design exp03_ath_exit --cuts 4
@@ -295,36 +297,189 @@ def get_cut_context(data_context_in, ohlcv_array_dict_in, cut_ohlcv_dict_in, cut
     seed_int = int(get_date(cut_date_in).strftime("%Y%m%d"))
     return data_context_in.get_perturbed_context(clock_dict["decision_ts"], seed_int, cut_ohlcv_dict_in)
 
+# FUNCTION: STOP REFITS AND ROLLING DECISIONS AFTER THE CUT
+def stop_decision_schedule(design_module_in, period_pdf_in, cut_date_in):
+    """
+    The bars and the context may still hold later rows. The refit schedule and the rolling decision list stop on the
+    cut. A design without those hooks is unchanged; its path still ends where the clipped periods end.
+
+    Args:
+        design_module_in (module): The fresh module this replay will call
+        period_pdf_in (pd.DataFrame): Periods that include the cut
+        cut_date_in (datetime.date): Last decision session
+
+    Returns:
+        None
+    """
+    # THE SCORED SPAN AND THE DECISION LIST BOTH END ON THE CUT
+    from so.core.holdout import get_date
+    cut_date = get_date(cut_date_in)
+    start_date = get_date(period_pdf_in["period_start"].iloc[0])
+    if hasattr(design_module_in, "set_score_span"):
+        design_module_in.set_score_span(start_date, cut_date)
+    if hasattr(design_module_in, "get_decision_session_list"):
+        original_func = design_module_in.get_decision_session_list
+
+        def stopped_decision_session_list(row_pdf_in, original_func_in=original_func, end_date_in=cut_date):
+            return [session_date for session_date in original_func_in(row_pdf_in) if get_date(session_date) <= end_date_in]
+
+        design_module_in.get_decision_session_list = stopped_decision_session_list
+
+# FUNCTION: REPLAY THE SAVED SELECTION THROUGH THE CUT ONLY
+def get_cut_replay_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in, cut_date_in):
+    """
+    One fresh module. Periods that start after the cut are dropped. The open period ends on the cut. The saved
+    candidate stays in force. Nothing after the cut is decided.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars for this check
+        period_pdf_in (pd.DataFrame): Saved periods
+        selection_pdf_in (pd.DataFrame): Saved candidate in force
+        data_context_in (DataContext | None): Context for this check
+        cut_date_in (datetime.date): Last decision session
+
+    Returns:
+        dict: period_pdf, selection_pdf, path_dict
+    """
+    # A FRESH MODULE, THEN THE SCHEDULE STOPS ON THE CUT
+    from so.core.holdout import call_design_replay, get_fresh_design_module
+    design_module = get_fresh_design_module(design_module_in)
+    clipped_pdf = get_clipped_period_pdf(period_pdf_in, cut_date_in)
+    stop_decision_schedule(design_module, clipped_pdf, cut_date_in)
+    kept_id_set = set(clipped_pdf["period_id"].astype(int))
+    kept_pdf = selection_pdf_in[selection_pdf_in["period_id"].astype(int).isin(kept_id_set)].copy()
+    path_dict = call_design_replay(design_module.run_prior_only_path_dict, [ohlcv_array_dict_in, clipped_pdf, kept_pdf], data_context_in)
+    return {"period_pdf": clipped_pdf, "selection_pdf": kept_pdf, "path_dict": path_dict}
+
+# FUNCTION: TRUE WHEN THE CUT SESSION'S TARGET IS THE FORCED END-OF-WINDOW SALE
+def get_terminal_target_bool(path_dict_in, cut_date_in):
+    """
+    True when the path ends on the cut, an END trade is on that session, and the target weights are the equity
+    weights. That last weight is the liquidation, not a decision.
+
+    Args:
+        path_dict_in (dict): Path
+        cut_date_in (datetime.date): Cut session
+
+    Returns:
+        bool: The cut target is the liquidation
+    """
+    # AN INDEPENDENT TARGET (A PREDICTION, A LEAK) IS NOT THE LIQUIDATION
+    from so.core.holdout import get_date
+    if "target_weight_arr" not in path_dict_in or "daily_equity_pdf" not in path_dict_in:
+        return False
+    equity_pdf = path_dict_in["daily_equity_pdf"]
+    if "weight" not in equity_pdf.columns or "date" not in equity_pdf.columns or len(equity_pdf) == 0:
+        return False
+    if get_date(equity_pdf["date"].iloc[-1]) != get_date(cut_date_in):
+        return False
+    target_arr = np.asarray(path_dict_in["target_weight_arr"], dtype=float)
+    weight_arr = equity_pdf["weight"].to_numpy(dtype=float)
+    if len(target_arr) != len(weight_arr) or not np.allclose(target_arr, weight_arr, equal_nan=True):
+        return False
+    trade_pdf = path_dict_in.get("trade_pdf")
+    if trade_pdf is None or len(trade_pdf) == 0:
+        return False
+    reason_str = "reason" if "reason" in trade_pdf.columns else ("exit_reason" if "exit_reason" in trade_pdf.columns else "")
+    if not reason_str or not (trade_pdf[reason_str].astype(str) == "END").any():
+        return False
+    return True
+
+# FUNCTION: DECISIONS THROUGH THE CUT AGAINST THE REFERENCE
+def get_decision_difference_str(reference_result_dict_in, short_result_dict_in, cut_date_in):
+    """
+    None when the decisions through the cut match the reference. A forced sale on the cut session is not a decision.
+    Signals are compared when the reference has them. Refits are compared when the reference has a refit log.
+
+    Args:
+        reference_result_dict_in (dict): Saved path, or the test's stand-in
+        short_result_dict_in (dict): Replay that stops on the cut
+        cut_date_in (datetime.date): Cut session
+
+    Returns:
+        str | None: The first difference, or None
+    """
+    # THE RUNNER'S COMPARE, WITH THE TERMINAL SALE AND A MISSING TRADE TABLE TAKEN OUT
+    from so.core.holdout import get_date, get_lookahead_difference_str, get_signal_difference_str
+    reference_path_dict = dict(reference_result_dict_in["path_dict"])
+    short_path_dict = dict(short_result_dict_in["path_dict"])
+    if get_terminal_target_bool(short_result_dict_in["path_dict"], cut_date_in) and "target_weight_arr" in reference_path_dict:
+        reference_date_list = [get_date(session_date) for session_date in reference_path_dict["decision_session_list"]]
+        cut_date = get_date(cut_date_in)
+        if cut_date in reference_date_list:
+            target_arr = np.array(short_path_dict["target_weight_arr"], dtype=float, copy=True)
+            target_arr[-1] = float(reference_path_dict["target_weight_arr"][reference_date_list.index(cut_date)])
+            short_path_dict["target_weight_arr"] = target_arr
+    if reference_result_dict_in["path_dict"].get("trade_pdf") is None:
+        empty_pdf = pd.DataFrame(columns=["trade_ts", "delta_share_count", "reason"])
+        reference_path_dict["trade_pdf"] = empty_pdf
+        short_path_dict["trade_pdf"] = empty_pdf
+    difference_str = get_lookahead_difference_str({**reference_result_dict_in, "path_dict": reference_path_dict},
+                                                  {**short_result_dict_in, "path_dict": short_path_dict}, cut_date_in)
+    if difference_str is not None:
+        return difference_str
+    # A SIGNAL THE REFERENCE DOES NOT CARRY IS NOT A DIFFERENCE
+    if "signal_arr" in reference_result_dict_in["path_dict"]:
+        difference_str = get_signal_difference_str(reference_result_dict_in, short_result_dict_in, cut_date_in)
+        if difference_str is not None:
+            return difference_str
+    reference_refit_pdf = reference_result_dict_in["path_dict"].get("refit_log_pdf")
+    if reference_refit_pdf is None or len(reference_refit_pdf) == 0 or "retrain_session" not in getattr(reference_refit_pdf, "columns", []):
+        return None
+    return get_refit_difference_str(reference_result_dict_in, short_result_dict_in, cut_date_in)
+
+# FUNCTION: THE SAVED DEVELOPMENT PATH
+def get_saved_reference_dict(experiment_name_str_in):
+    """
+    Periods, the candidate in force, the daily equity, and the refit log when the development run saved one.
+
+    Args:
+        experiment_name_str_in (str): Experiment name, including the _v2 suffix
+
+    Returns:
+        dict: period_pdf, selection_pdf, path_dict
+    """
+    # READ THE DEVELOPMENT FOLDER. THE EQUITY WEIGHT IS THE SAVED DECISION.
+    from so.core.holdout import get_date
+    from so.paths import get_experiment_data_path_str
+    folder_str = get_experiment_data_path_str(experiment_name_str_in, "step01_development_data")
+    period_pdf = pd.read_csv(folder_str + "period_data.csv")
+    selection_pdf = pd.read_csv(folder_str + "selection_data.csv")
+    equity_pdf = pd.read_csv(folder_str + "prior_only_daily_equity_data.csv")
+    equity_pdf["date"] = equity_pdf["date"].map(get_date)
+    path_dict = {"daily_equity_pdf": equity_pdf, "target_weight_arr": equity_pdf["weight"].to_numpy(dtype=float),
+                 "decision_session_list": list(equity_pdf["date"])}
+    refit_path = Path(folder_str + "refit_log_data.csv")
+    if refit_path.is_file():
+        path_dict["refit_log_pdf"] = pd.read_csv(refit_path)
+    return {"period_pdf": period_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
+
 # FUNCTION: RUN BOTH CHECKS AT EVERY CUT
 def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in, cut_count_in,
-                          development_end_date_in=None):
+                          reference_result_dict_in, development_end_date_in=None):
     """
-    The full prior-only path, then truncation and perturbation at each cut. The first difference stops the audit.
+    Truncation and perturbation at each cut, compared with the reference. The reference is not recomputed. Each
+    replay stops on the cut. The perturbed bars and context keep the full span.
 
     Args:
         design_module_in (module): Design
         ohlcv_array_dict_in (dict): Development bars
-        period_pdf_in (pd.DataFrame): Development periods
+        period_pdf_in (pd.DataFrame): Periods (the saved periods for a real design)
         data_context_in (DataContext | None): Development context
         cut_count_in (int): How many cuts
+        reference_result_dict_in (dict): Saved path, or the test's stand-in
         development_end_date_in (datetime.date | None): Development end (None = the last bar session)
 
     Returns:
         dict: passed, cut_date_list, first_difference, check
     """
-    # IMPORT THE RUNNER'S CHECKS HERE
-    from so.core.holdout import (get_date, get_lookahead_difference_str, get_perturbed_ohlcv_dict,
-                                 get_signal_difference_str, get_truncated_ohlcv_dict)
-    # THE FULL PATH, WITH A HEARTBEAT SO A LONG FIT STILL WRITES THE LOG
-    say("full replay")
-    stop_event = start_heartbeat_event()
-    try:
-        full_result_dict = get_replay_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in)
-    finally:
-        stop_event.set()
-    decision_list = list(full_result_dict["path_dict"]["decision_session_list"])
+    # IMPORT THE RUNNER'S BAR EDITS HERE
+    from so.core.holdout import get_date, get_perturbed_ohlcv_dict, get_truncated_ohlcv_dict
+    # CUTS COME FROM THE REFERENCE'S FIRST DECISION, NOT FROM A NEW FULL REPLAY
+    decision_list = list(reference_result_dict_in["path_dict"]["decision_session_list"])
     if not decision_list:
-        raise ValueError("the prior-only path has no decision session.")
+        raise ValueError("the reference path has no decision session.")
     first_decision_date = get_date(decision_list[0])
     session_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
     development_end_date = get_date(development_end_date_in) if development_end_date_in is not None else session_list[-1]
@@ -334,18 +489,14 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
     for cut_date in cut_date_list:
         say(f"truncation {cut_date}")
         truncated_dict = get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date)
-        clipped_pdf = get_clipped_period_pdf(period_pdf_in, cut_date)
         stop_event = start_heartbeat_event()
         try:
-            short_result_dict = get_replay_result_dict(design_module_in, truncated_dict, clipped_pdf,
-                                                       get_cut_context(data_context_in, ohlcv_array_dict_in, truncated_dict, cut_date, "truncation"))
+            short_result_dict = get_cut_replay_result_dict(
+                design_module_in, truncated_dict, period_pdf_in, reference_result_dict_in["selection_pdf"],
+                get_cut_context(data_context_in, ohlcv_array_dict_in, truncated_dict, cut_date, "truncation"), cut_date)
         finally:
             stop_event.set()
-        difference_str = get_lookahead_difference_str(full_result_dict, short_result_dict, cut_date)
-        if difference_str is None:
-            difference_str = get_signal_difference_str(full_result_dict, short_result_dict, cut_date)
-        if difference_str is None:
-            difference_str = get_refit_difference_str(full_result_dict, short_result_dict, cut_date)
+        difference_str = get_decision_difference_str(reference_result_dict_in, short_result_dict, cut_date)
         if difference_str is not None:
             return {"passed": False, "cut_date_list": [str(cut) for cut in cut_date_list],
                     "first_difference": f"truncation {difference_str}", "check": "truncation"}
@@ -353,15 +504,12 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
         perturbed_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date)
         stop_event = start_heartbeat_event()
         try:
-            perturbed_result_dict = get_replay_result_dict(design_module_in, perturbed_dict, period_pdf_in,
-                                                           get_cut_context(data_context_in, ohlcv_array_dict_in, perturbed_dict, cut_date, "perturbation"))
+            perturbed_result_dict = get_cut_replay_result_dict(
+                design_module_in, perturbed_dict, period_pdf_in, reference_result_dict_in["selection_pdf"],
+                get_cut_context(data_context_in, ohlcv_array_dict_in, perturbed_dict, cut_date, "perturbation"), cut_date)
         finally:
             stop_event.set()
-        difference_str = get_lookahead_difference_str(full_result_dict, perturbed_result_dict, cut_date)
-        if difference_str is None:
-            difference_str = get_signal_difference_str(full_result_dict, perturbed_result_dict, cut_date)
-        if difference_str is None:
-            difference_str = get_refit_difference_str(full_result_dict, perturbed_result_dict, cut_date)
+        difference_str = get_decision_difference_str(reference_result_dict_in, perturbed_result_dict, cut_date)
         if difference_str is not None:
             return {"passed": False, "cut_date_list": [str(cut) for cut in cut_date_list],
                     "first_difference": f"perturbation {difference_str}", "check": "perturbation"}
@@ -422,25 +570,22 @@ def get_finished_bool(package_str_in):
 # FUNCTION: LOAD DEVELOPMENT BARS, PERIODS AND THE CONTEXT
 def get_development_audit_dict(design_module_in):
     """
-    Bars through the development end, the development periods, and the design's development context. The holdout
-    start is a date on the anchor list. Its prices are not loaded.
+    Bars through the development end and the design's development context. Periods come from the saved development
+    run. The holdout start is a date on the anchor list. Its prices are not loaded.
 
     Args:
         design_module_in (module): Design
 
     Returns:
-        dict: ohlcv_array_dict, period_pdf, data_context, development_end
+        dict: ohlcv_array_dict, data_context, development_end
     """
     # IMPORT THE DEVELOPMENT SPAN HERE
-    from so.core.development_span import get_development_ohlcv_dict, get_development_period_pdf
-    # THE EMBARGO AND THE FOLD LENGTH ARE THE DESIGN'S PERIOD RULE
+    from so.core.development_span import get_development_ohlcv_dict
+    # THE EMBARGO IS THE DESIGN'S PERIOD RULE. PRICES STOP AT THE DEVELOPMENT END.
     embargo_int = int(design_module_in.PERIOD_RULE["embargo_sessions"])
-    train_years_int = int(max(design_module_in.PERIOD_RULE["train_years"]))
     span_dict = get_development_ohlcv_dict(embargo_int)
-    period_pdf, _fold_pdf = get_development_period_pdf(span_dict["anchor_session_list"], span_dict["ohlcv_array_dict"],
-                                                       embargo_int, train_years_int)
     data_context = design_module_in.get_development_data_context(span_dict["anchor_session_list"])
-    return {"ohlcv_array_dict": span_dict["ohlcv_array_dict"], "period_pdf": period_pdf, "data_context": data_context,
+    return {"ohlcv_array_dict": span_dict["ohlcv_array_dict"], "data_context": data_context,
             "development_end": span_dict["development_end"]}
 
 # FUNCTION: AUDIT ONE DESIGN, WRITE THE FILE, THEN THE NOTE
@@ -464,8 +609,9 @@ def run_design_audit(package_str_in, cut_count_in):
     say(f"start {package_str} {datetime.now().isoformat(timespec='seconds')}")
     design_module = importlib.import_module(f"experiments.{package_str}.design")
     loaded_dict = get_development_audit_dict(design_module)
-    result_dict = get_audit_result_dict(design_module, loaded_dict["ohlcv_array_dict"], loaded_dict["period_pdf"],
-                                        loaded_dict["data_context"], cut_count_in, loaded_dict["development_end"])
+    reference_dict = get_saved_reference_dict(design_module.EXPERIMENT_NAME)
+    result_dict = get_audit_result_dict(design_module, loaded_dict["ohlcv_array_dict"], reference_dict["period_pdf"],
+                                        loaded_dict["data_context"], cut_count_in, reference_dict, loaded_dict["development_end"])
     result_dict.update({"experiment": design_module.EXPERIMENT_NAME, "package": package_str, "complete": True,
                         "finished_ts": datetime.now().isoformat(timespec="seconds")})
     result_path = write_audit_result_dict(package_str, result_dict)

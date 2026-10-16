@@ -17,7 +17,7 @@ import test_holdout
 from test_holdout import get_later_bar_design, get_leak_design
 from synthetic_data import get_synthetic_ohlcv_pdf
 from so.core.trade_execution import get_ohlcv_array_dict
-from scripts.lookahead_audit import get_audit_cut_date_list, get_audit_result_dict
+from scripts.lookahead_audit import get_audit_cut_date_list, get_audit_result_dict, get_replay_result_dict
 
 # THE REAL TRIAL LOG, MEASURED SO THIS SUITE CAN SHOW IT WAS NOT APPENDED
 REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
@@ -101,13 +101,15 @@ def test_designs():
     for design_module, label_str in [(get_leak_design(), "next close"),
                                      (get_later_bar_design("fill"), "fill bar"),
                                      (get_later_bar_design("session_close"), "session close")]:
-        result_dict = get_audit_result_dict(design_module, ohlcv_array_dict, leak_period_pdf, None, 4)
+        reference_dict = get_replay_result_dict(design_module, ohlcv_array_dict, leak_period_pdf, None)
+        result_dict = get_audit_result_dict(design_module, ohlcv_array_dict, leak_period_pdf, None, 4, reference_dict)
         assert result_dict["passed"] is False, label_str
         assert result_dict["first_difference"], label_str
         assert len(result_dict["cut_date_list"]) == 4
         passed(f"{label_str} fails ({result_dict['first_difference']})")
     from experiments._template import design as template_design
-    template_result_dict = get_audit_result_dict(template_design, ohlcv_array_dict, template_period_pdf, None, 4)
+    template_reference_dict = get_replay_result_dict(template_design, ohlcv_array_dict, template_period_pdf, None)
+    template_result_dict = get_audit_result_dict(template_design, ohlcv_array_dict, template_period_pdf, None, 4, template_reference_dict)
     assert template_result_dict["passed"] is True, template_result_dict["first_difference"]
     assert template_result_dict["first_difference"] == ""
     assert len(template_result_dict["cut_date_list"]) == 4
