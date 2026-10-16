@@ -7,8 +7,6 @@ import pandas as pd
 import numpy as np
 # IMPORT THE SHARED CONFIGURATION AND THE PATHS
 from so import config, paths
-# IMPORT THE VIX CONSTANTS (THE ARCHIVED PINNED BOUNDARY 2026-05-14)
-from so import vix_config
 
 """
 Rolling 12-Month Holdout (Nicolas, 2026-10-11)
@@ -380,29 +378,16 @@ def get_runner_active_bool():
     # RETURN THE FLAG
     return bool(_RUNNER_ACTIVE_BOOL)
 
-# FUNCTION: WARN THAT LEGACY REPRODUCTION IS ON
-def print_legacy_reproduction_warning():
-    """
-    Prints a loud warning. Agents must never set SO_ALLOW_LEGACY_REPRODUCTION (research-integrity.mdc rule 1).
-
-    Returns:
-        None
-    """
-    # PRINT THE WARNING
-    print("WARNING: SO_ALLOW_LEGACY_REPRODUCTION=1. Archived experiments may use only the pinned boundary "
-          f"{vix_config.UNTOUCHED_START_DATE_STR}. Agents must not set this variable.")
-
 # FUNCTION: GET THE DATE A REPLAY OR A LOADER MAY NOT REACH
 def get_replay_boundary_date(pinned_date_in=None):
     """
     The first date that must not be read.
     Runner: the day after the window end (the window itself is allowed; forward data is not).
-    SO_ALLOW_LEGACY_REPRODUCTION=1: the pinned 2026-05-14 boundary only (a passed date cannot extend it), with a warning.
-    No window and a passed date: that date (archived tests).
+    No window and a passed date: that date (tests that pass their own cap).
     An active window: the earlier of the passed date and the window start.
 
     Args:
-        pinned_date_in (datetime.date | str | None): Legacy pinned boundary passed by the caller
+        pinned_date_in (datetime.date | str | None): Optional extra cap passed by the caller
 
     Returns:
         datetime.date: Boundary (dates on or after it are refused)
@@ -410,21 +395,13 @@ def get_replay_boundary_date(pinned_date_in=None):
     # INSIDE THE RUNNER THE QUARANTINE STARTS THE DAY AFTER THE WINDOW
     if _RUNNER_ACTIVE_BOOL:
         return get_date(get_active_holdout_window_dict()["end"]) + timedelta(days=1)
-    # LEGACY REPRODUCTION USES ONLY THE PINNED 2026-05-14 BOUNDARY
-    legacy_date = get_date(vix_config.UNTOUCHED_START_DATE_STR)
-    if os.environ.get("SO_ALLOW_LEGACY_REPRODUCTION") == "1":
-        print_legacy_reproduction_warning()
-        boundary_date = legacy_date
-        if pinned_date_in is not None:
-            boundary_date = min(boundary_date, get_date(pinned_date_in))
-        return boundary_date
-    # WITHOUT A WINDOW, A PASSED DATE KEEPS THE ARCHIVED BEHAVIOUR
+    # WITHOUT A WINDOW, A PASSED DATE IS THE CAP
     window_dict = get_active_holdout_window_dict(missing_ok_bool_in=True)
     if window_dict is None:
         if pinned_date_in is None:
             raise ValueError(NO_WINDOW_MESSAGE_STR)
         return get_date(pinned_date_in)
-    # WITH A WINDOW, USE THE EARLIER OF THE PINNED DATE AND THE WINDOW START
+    # WITH A WINDOW, USE THE EARLIER OF THE PASSED DATE AND THE WINDOW START
     start_date = get_date(window_dict["start"])
     if pinned_date_in is None:
         return start_date

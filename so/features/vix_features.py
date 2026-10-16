@@ -9,7 +9,7 @@ from so import vix_config
 from so.core.datetime_utils import ny_tz
 
 """
-VIX Data Layer: point-in-time VIX and VIX3M values and features for every SPY session (roadmap 2026-10-09, exp08-exp11)
+VIX Data Layer: point-in-time VIX and VIX3M values and features for every SPY session (roadmap 2026-10-09)
 
 Data: IBKR VIX and VIX3M index bars in store01_rawzone/ibkr_vix_family/{vix_1min, vix_daily, vix3m_1min, vix3m_daily}/
 (daily: one file per calendar year, ohlcv_data_YYYY.csv; 1-minute: one file per session, ohlcv_data_YYYYMMDD.csv;
@@ -17,11 +17,11 @@ columns timestamp, open, high, low, close, volume, created_ts, date). Approved b
 staging folder (ibkr_vix_family_staging/) and the backup folders are never read.
 
 Loaders:
-    - every loader takes a REQUIRED cutoff date (no default) and raises if it is missing or on or after the first day
-      of the untouched window (vix_config.UNTOUCHED_START_DATE_STR = 2026-05-14);
+    - every loader takes a REQUIRED cutoff date (no default) and, when the holdout guard is on, raises if that cutoff
+      is on or after the active holdout start (so.core.holdout.get_replay_boundary_date);
     - the 1-minute loader never opens a file whose name date is after the cutoff; the daily loader never opens a year
       file after the cutoff's year, drops the rows after the cutoff immediately after parsing, then asserts that no row
-      is dated after the cutoff or on or after 2026-05-14;
+      is dated after the cutoff or on or after the holdout boundary;
     - timestamps are parsed as UTC and converted to New York time (as so.core.raw_data); volume is dropped (not
       meaningful for an index); the "date" column must equal the New York date of the timestamp;
     - the daily timestamp is a LABEL (midnight New York of the date), not a time of trade: the daily close is only
@@ -54,15 +54,15 @@ uses only values of sessions up to and including t and is NaN when an input is N
 # FUNCTION: CHECK A LOADER CUTOFF
 def check_cutoff_date(cutoff_date_str_in, untouched_start_str_in=None, enforce_holdout_bool_in=True):
     """
-    Raises unless the cutoff is given and lies strictly before the development boundary. The boundary is the earlier of
-    the pinned date (default vix_config.UNTOUCHED_START_DATE_STR, "2026-05-14") and the active holdout start.
-    SO_ALLOW_LEGACY_REPRODUCTION=1 keeps only the pinned boundary and prints a warning.
+    Raises unless the cutoff is given. When the holdout guard is on, the cutoff must lie strictly before the
+    development boundary: the active holdout start, or the earlier of that start and untouched_start_str_in.
+    With the guard off, the caller's cutoff is the only limit (the pipeline prepares data and computes no strategy
+    result).
 
     Args:
         cutoff_date_str_in (str): Last date the caller may load (inclusive)
-        untouched_start_str_in (str | None): Pinned boundary (None = "2026-05-14")
-        enforce_holdout_bool_in (bool): Apply the active holdout. False keeps only the pinned 2026-05-14 cutoff
-            (the pipeline's own explicit cutoff; it prepares data and computes no strategy result)
+        untouched_start_str_in (str | None): Optional extra cap (None = the active window only)
+        enforce_holdout_bool_in (bool): Apply the active holdout. False keeps the caller's cutoff only
 
     Returns:
         datetime.date: The cutoff date
@@ -72,13 +72,13 @@ def check_cutoff_date(cutoff_date_str_in, untouched_start_str_in=None, enforce_h
     # RAISE WITHOUT A CUTOFF
     if cutoff_date_str_in is None:
         raise ValueError("❌ A VIX loader needs an explicit cutoff date (no default).")
-    # COLLECT THE PINNED DATE AND THE EFFECTIVE BOUNDARY
-    pinned_str = vix_config.UNTOUCHED_START_DATE_STR if untouched_start_str_in is None else untouched_start_str_in
-    # THE PIPELINE KEEPS ITS OWN CUTOFF AND DOES NOT STOP AT A REGISTERED WINDOW
-    boundary_date = pd.Timestamp(pinned_str).date() if not enforce_holdout_bool_in else get_replay_boundary_date(pinned_str)
     # CONVERT THE CUTOFF
     cutoff_date = pd.Timestamp(cutoff_date_str_in).date()
+    # THE PIPELINE KEEPS ITS OWN CUTOFF AND DOES NOT STOP AT A REGISTERED WINDOW
+    if not enforce_holdout_bool_in:
+        return cutoff_date
     # RAISE IF THE CUTOFF REACHES THE BOUNDARY
+    boundary_date = get_replay_boundary_date(untouched_start_str_in)
     if cutoff_date >= boundary_date:
         raise ValueError(f"❌ VIX loader cutoff {cutoff_date} is on or after the holdout boundary {boundary_date}.")
     # RETURN THE CUTOFF DATE
@@ -160,26 +160,26 @@ def parse_vix_bar_pdf(raw_pdf_in):
 # FUNCTION: CHECK THE LOADED BARS
 def check_vix_bar_pdf(bar_pdf_in, cutoff_date_in, label_str_in, enforce_holdout_bool_in=True):
     """
-    Raises if a loaded row is dated after the cutoff or in the untouched window, or if a "date" differs from the New
-    York date of its timestamp.
+    Raises if a loaded row is dated after the cutoff or, when the guard is on, on or after the holdout boundary, or if
+    a "date" differs from the New York date of its timestamp.
 
     Args:
         bar_pdf_in (pd.DataFrame): Parsed bars (date, ny_date)
         cutoff_date_in (datetime.date): Cutoff of the load
         label_str_in (str): Series label for the messages
-        enforce_holdout_bool_in (bool): Apply the active holdout (False = the pinned 2026-05-14 date only)
+        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only)
 
     Returns:
         None
     """
     # IMPORT THE HOLDOUT BOUNDARY HERE (THE SAME DATE check_cutoff_date USES)
     from so.core.holdout import get_replay_boundary_date
-    # COLLECT THE FIRST DATE A ROW MAY NOT HAVE
-    pinned_date = pd.Timestamp(vix_config.UNTOUCHED_START_DATE_STR).date()
-    boundary_date = pinned_date if not enforce_holdout_bool_in else get_replay_boundary_date(vix_config.UNTOUCHED_START_DATE_STR)
-    # ASSERT THAT NO ROW IS AFTER THE CUTOFF OR ON OR AFTER THE BOUNDARY
+    # ASSERT THAT NO ROW IS AFTER THE CUTOFF
     assert not (bar_pdf_in["ny_date"] > cutoff_date_in).any() and not (bar_pdf_in["date"] > cutoff_date_in).any(), f"❌ {label_str_in}: a row after the cutoff {cutoff_date_in}"
-    assert not (bar_pdf_in["ny_date"] >= boundary_date).any() and not (bar_pdf_in["date"] >= boundary_date).any(), f"❌ {label_str_in}: a row on or after the holdout boundary {boundary_date}"
+    # ASSERT THAT NO ROW REACHES THE HOLDOUT WHEN THE GUARD IS ON
+    if enforce_holdout_bool_in:
+        boundary_date = get_replay_boundary_date(None)
+        assert not (bar_pdf_in["ny_date"] >= boundary_date).any() and not (bar_pdf_in["date"] >= boundary_date).any(), f"❌ {label_str_in}: a row on or after the holdout boundary {boundary_date}"
     # RAISE IF A DATE DIFFERS FROM THE NEW YORK DATE OF ITS TIMESTAMP
     mismatch_count = int((bar_pdf_in["date"] != bar_pdf_in["ny_date"]).sum())
     if mismatch_count:
@@ -193,9 +193,9 @@ def read_vix_daily_pdf(series_str_in, cutoff_date_str_in, raw_path_str_in=None, 
 
     Args:
         series_str_in (str): "vix" or "vix3m"
-        cutoff_date_str_in (str): Last date kept (required; must be before 2026-05-14)
+        cutoff_date_str_in (str): Last date kept (required; must be before the holdout boundary when the guard is on)
         raw_path_str_in (str | None): Override folder (tests)
-        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only, still before 2026-05-14)
+        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only)
 
     Returns:
         pd.DataFrame: timestamp (midnight New York, a label), open, high, low, close, created_ts, date; one row per date
@@ -239,10 +239,10 @@ def read_vix_1min_pdf(series_str_in, cutoff_date_str_in, start_date_str_in=None,
 
     Args:
         series_str_in (str): "vix" or "vix3m"
-        cutoff_date_str_in (str): Last session kept (required; must be before 2026-05-14)
+        cutoff_date_str_in (str): Last session kept (required; must be before the holdout boundary when the guard is on)
         start_date_str_in (str | None): First session read (None = from the first file)
         raw_path_str_in (str | None): Override folder (tests)
-        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only, still before 2026-05-14)
+        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only)
 
     Returns:
         pd.DataFrame: timestamp (New York), open, high, low, close, created_ts, date; sorted by timestamp
@@ -512,10 +512,10 @@ def get_vix_daily_feature_dict(daily_pdf_in, cutoff_date_str_in, variant_str_lis
 
     Args:
         daily_pdf_in (pd.DataFrame): Daily SPY table (session_idx, date, decision_ts, daily_volatility)
-        cutoff_date_str_in (str): Cutoff of every VIX load (required; must be before 2026-05-14 and not before the last SPY session)
+        cutoff_date_str_in (str): Cutoff of every VIX load (required; before the holdout boundary when the guard is on, and not before the last SPY session)
         variant_str_list_in (list[str]): Variants to build ("intraday" loads the 1-minute bars)
         raw_path_dict_in (dict | None): {(series, bar): folder} overrides (tests)
-        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only, still before 2026-05-14)
+        enforce_holdout_bool_in (bool): Apply the active holdout (False = the caller's cutoff only)
 
     Returns:
         dict: {"vix_table_pdf", "feature_pdf" (session_idx, date + the feature columns), "coverage_pdf", "last_date_dict"}

@@ -1,3 +1,0 @@
-experiment,notebook,cell_id,label,expected,reproduced,precision,match
-exp05_vol_scaled_exposure,experiments/exp05_vol_scaled_exposure/step01_exploration.ipynb,cell04,Spearman correlation,0.593,0.593,3,True
-exp05_vol_scaled_exposure,experiments/exp05_vol_scaled_exposure/step02_continuous_replay.ipynb,,notebook execution,exit 0,nbconvert failed,0,False

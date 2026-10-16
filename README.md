@@ -29,7 +29,8 @@ stock_overflow_workspace/
 │   ├── _template/               starting point for a new experiment
 │   ├── exp01_minute_entry/      minute entries with a model-chosen SL/TP distance (formerly v1)
 │   ├── exp02_stop_reentry/      trailing stop + model re-entry (formerly v2)
-│   └── exp03_ath_exit/          sell near the all-time high, buy back later (formerly the step 13 exploration)
+│   ├── exp03_ath_exit/          sell near the all-time high, buy back later (formerly the step 13 exploration)
+│   └── (removed)                exp08 and the skipped exp09–exp11: tag `pre-port-20261012`
 ├── scripts/                     command line tools (bad tick correction)
 ├── tests/                       plain-assert test suites on synthetic data (python tests/run_all_tests.py)
 ├── docs/
@@ -51,8 +52,7 @@ stock_overflow_workspace/
 | exp05_vol_scaled_exposure | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +142.59% vs +199.04%). Protocol 1.0 (+165.69% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp05_vol_scaled_exposure/PROTOCOL.md` |
 | exp06_capped_regret_reentry | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +132.25% vs +199.04%). Protocol 1.0 (+147.38% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp06_capped_regret_reentry/PROTOCOL.md` |
 | exp07_warning_lights_exit | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +40.95% vs +199.04%). Protocol 1.0 (+49.09% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp07_warning_lights_exit/PROTOCOL.md` |
-| exp08_vix_signal_check | **archived** (was DONE, VIX line STOP; no gate opens: G1, G2, G4 fail; G3 passes) | `experiments/exp08_vix_signal_check/PROTOCOL.md` |
-| exp09-exp11 (VIX) | **archived** (was SKIPPED by exp08's pre-registered gates) | `docs/RESEARCH_STATE_2026-10-11.md` §6 |
+| exp08_vix_signal_check, exp09–exp11 | **removed from the tree** (2026-10-16). exp08 was DONE, VIX line STOP (G1, G2, G4 fail; G3 passes). exp09–exp11 were skipped by that gate. Code, notebooks and numbers: tag `pre-port-20261012` and `docs/RESULTS_LOG.md` | tag `pre-port-20261012` |
 | exp12_vix_fear_reentry | **STOP** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +126.51% vs +199.04%). Protocol 1.0 (+119.24% vs +229.74%) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp12_vix_fear_reentry/PROTOCOL.md` |
 | exp13_e1m1_robustness | **candidate pending review** (2026-10-14, protocol 2.0, re-run under the new rules: prior-only +273.85% vs +199.04%; 6-month interval contains 0). Not a success claim. Holdout evaluation is parked. Protocol 1.0 (E1M1 IS NOT ROBUST) stays in the results log; its code is at tag `pre-port-20261012` | `experiments/exp13_e1m1_robustness/PROTOCOL.md` |
 | Rolling holdout | Infrastructure in place. A window is registered. The agent does not read it and does not evaluate it | `so/core/holdout.py` |
@@ -106,8 +106,6 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 | pipeline | `store02_workzone/step06_TSDAY_data/` | pipeline step 06 (daily table, one file) | regenerated in seconds |
 | experiments | `store04_experiments/<experiment>/<stepNN_..._data>/` | the experiment's notebooks | regenerate by re-running |
 | experiments | `store04_experiments/trial_log.csv` | every experiment notebook | **never edit** |
-
-`SO_EXPERIMENT_ZONE_PATH`, when set in the process, replaces `store04_experiments` for that process. The trial log moves with it. Unset, the path is unchanged.
 | records | `records/holdout_windows.csv` | `scripts/holdout_window.py` (Nicolas only) | append-only; a retired row is filled once |
 | records | `records/holdout_evaluations.csv` | `scripts/holdout_evaluate.py` (Nicolas only) | append-only summary metrics; `status` is `valid` or `invalid_lookahead` |
 | holdout results | `SO_HOLDOUT_PATH` (no default) | the holdout evaluation | daily paths; not in git |
@@ -143,10 +141,9 @@ variable with no default: when it is unset, holdout results cannot be written. A
   design read (`sources_read`). Fills on the cut session are not compared. A difference is ledger
   status `invalid_lookahead` (no daily paths, and the row counts against the budget). Each frozen design may be
   evaluated once per window, at most 10 designs, and only by Nicolas (`scripts/holdout_evaluate.py`). Agents never set
-  `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never run those scripts.
-- **A model-based design is a walk-forward with a rolling training window** (`so.core.rolling_retrain`, Nicolas 2026-10-11). It refits on a pre-registered schedule, default weekly (the first session of each week), using only rows whose label was complete before that day's decision bar. Unfinished labels are dropped, never filled. The default training-window candidates are 6 months, 2 years and 10 years. The candidate for a quarter is chosen from the last 4 completed quarters, prior-only. Development notebooks and the holdout report share `so.core.evaluation.get_performance_over_time_pdf` (cumulative log excess, rolling 63- and 252-session excess, drawdowns, and the quarter table), plus turnover, candidate switches, and the refit log (rows used, share purged, prediction move). Changing the frequency or the windows after a result is a new version. Archived experiments are not refit this way.
-- **Archived experiments** (exp01–exp13) keep their recorded numbers and stay pinned to the old boundary 2026-05-14.
-  Nicolas re-runs them only with `SO_ALLOW_LEGACY_REPRODUCTION=1`, which cannot extend past that date.
+  `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`, and never run those scripts.
+- **A model-based design is a walk-forward with a rolling training window** (`so.core.rolling_retrain`, Nicolas 2026-10-11). It refits on a pre-registered schedule, default weekly (the first session of each week), using only rows whose label was complete before that day's decision bar. Unfinished labels are dropped, never filled. The default training-window candidates are 6 months, 2 years and 10 years. The candidate for a quarter is chosen from the last 4 completed quarters, prior-only. Development notebooks and the holdout report share `so.core.evaluation.get_performance_over_time_pdf` (cumulative log excess, rolling 63- and 252-session excess, drawdowns, and the quarter table), plus turnover, candidate switches, and the refit log (rows used, share purged, prediction move). Changing the frequency or the windows after a result is a new version. The current folders are protocol 2.0. Version 1.0 code and notebooks are at tag `pre-port-20261012`.
+- **Removed experiments** (exp08, and exp09–exp11 which were never written) are not in this tree. Their results stay in `docs/RESULTS_LOG.md`. Their code is at tag `pre-port-20261012`.
 - **Every exploration, signal check, validation candidate, summary and test is logged** in the shared trial log, with the
   experiment name, protocol version and a configuration hash covering `so/config.py` + the experiment's `config.py`.
   Each notebook warns when the trial log already holds entries of the same stage: running it again adds trials.
@@ -161,14 +158,14 @@ variable with no default: when it is unset, holdout results cannot be written. A
 python tests/run_all_tests.py
 ```
 
-Sixteen suites on synthetic data (a few minutes). All must end with "passed ✅". Run them after every code change.
+Nineteen suites on synthetic data (a few minutes). All must end with "passed ✅". Run them after every code change.
 The list is the header of `tests/run_all_tests.py`.
 
 ### Reproduction
 
-`scripts/reproduce_archived.py` was dropped on 2026-10-12 (Nicolas: replace each experiment in place). It read the
-archived notebooks from the working tree. Those notebooks stay at tag `pre-port-20261012`. The headline numbers copied
-from them stay in `records/archived_reproduction_expected.csv`. The check is not run.
+`scripts/reproduce_archived.py` and `records/archived_reproduction_*.csv` were removed (the checker on 2026-10-12, the
+tables on 2026-10-16). The notebooks they read, and exp08, stay at tag `pre-port-20261012`. The headline numbers stay
+in `docs/RESULTS_LOG.md`. The check is not run.
 
 ## 8. Conventions
 

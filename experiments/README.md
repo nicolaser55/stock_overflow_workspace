@@ -25,17 +25,10 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp05_vol_scaled_exposure` | Hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, 20-point dead band (4 candidates) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +142.59% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp06_capped_regret_reentry` | Trend or near-ATH exit + buy-stop at S × (1 + b) with a cooling-off, or recovery above the 200-session average (12 candidates; data-dependent follow-up of exp03) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +132.25% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +40.95% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
-| `exp08_vix_signal_check` | The gate of the VIX line: univariate bins (G1), incremental AUC over the 16 price features (G2), VIX as a volatility forecast (G3), top VIX quintile forward return below 0 (G4) | 01 gate | 1.0 | **archived** (was DONE) 2026-10-09, the VIX line stops (G1 S1 = 0; G2 dAUC +0.0359 vs null max +0.0563, p = 0.15; G3 PASS; G4 FAIL) |
-| `exp09_vix_reentry` | VIX-timed re-entry / exit filter on exp04's trend exit and exp07's lights (6 candidates) | 01 exploration, 02 continuous replay | not written | **archived** (was SKIPPED) 2026-10-09 by exp08's gate (needs G1 or G2; both fail) |
-| `exp10_vix_vol_scaled_exposure` | exp05 with the VIX as the volatility forecast (4 candidates) | 01 exploration, 02 continuous replay | not written | **archived** (was SKIPPED) 2026-10-09 by exp08's gate (needs G3 and G4; G4 fails) |
-| `exp11_vix_model_exit` | Exit / re-entry from the price + VIX logistic model (4 candidates) | 01 continuous replay | not written | **archived** (was SKIPPED) 2026-10-09 by exp08's gate (needs G2; fails) |
 | `exp12_vix_fear_reentry` | Data-dependent follow-up of exp08 (Nicolas, 2026-10-09): exp09's rules (E1, E2 × M1 fear-fade re-entry, M2 term-structure re-entry, M3 no exit into fear), `_prev` timing only (6 candidates) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +126.51% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp13_e1m1_robustness` | Frozen E1M1 (exp12's rule), one candidate. Protocol 1.0's robustness steps are not repeated | 01 development replay | 2.0 | **candidate pending review** (2026-10-14), re-run under the new rules, not new evidence (prior-only +273.85% vs +199.04%; 6-month interval contains 0). Not a success claim. Protocol 1.0 (E1M1 IS NOT ROBUST) stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 
-*2026-10-11 (Nicolas): exp01–exp13 are archived. The status column keeps the historical outcome. No rule, grid,
-threshold or recorded number was changed. They stay pinned to the old untouched window 2026-05-14 and are superseded by
-`so.core.holdout`. Re-run only by Nicolas with `SO_ALLOW_LEGACY_REPRODUCTION=1`. exp09–exp11 were skipped and have no
-`config.py` or `PROTOCOL.md`; the registry rows above are the archive record.*
+*2026-10-16: exp08 and the skipped exp09–exp11 were removed from this tree. Their results stay in `docs/RESULTS_LOG.md`. Their code and notebooks are at tag `pre-port-20261012`. exp09–exp11 were never written.*
 
 *2026-10-12 (Nicolas): each strategy folder is replaced in place by a version 2.0. exp02's folder is that version and
 its row above is the new result. The other rows stay the archive record until their own version is pre-registered.
@@ -79,7 +72,7 @@ the holdout sessions are reported. Every decision uses only information availabl
 The holdout is the registered 12-month window (`so.core.holdout`, `records/holdout_windows.csv`). Development stops an
 embargo before its start. Validation uses `get_development_fold_pdf` (validation windows only; the archived
 `get_walk_forward_fold_pdf` is unchanged). Only Nicolas runs `scripts/holdout_evaluate.py`, once per frozen design per
-window. Agents never set `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`, and never
+window. Agents never set `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`, and never
 run `scripts/holdout_window.py` or `scripts/holdout_evaluate.py`.
 
 `design.py` (it imports the experiment's own code) exposes:

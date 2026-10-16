@@ -1,5 +1,5 @@
 """
-VIX Family Constants (shared by the VIX data layer and the VIX experiments exp08-exp11; roadmap 2026-10-09)
+VIX Family Constants (shared by the VIX data layer and exp12 / exp13; roadmap 2026-10-09)
 
 Kept apart from so/config.py on purpose: so/config.py must not change (its constants enter the config hash of every
 earlier experiment). Each VIX experiment's config.py assigns the values it uses to its own UPPERCASE constants, so its
@@ -22,8 +22,6 @@ VIX_FOLDER_KEY_DICT = {
 # DEFINE THE FILE NAME PREFIX (DAILY: ohlcv_data_YYYY.csv; 1-MINUTE: ohlcv_data_YYYYMMDD.csv)
 VIX_FILE_PREFIX_STR = "ohlcv_data_"
 
-# DEFINE THE FIRST DAY OF THE UNTOUCHED WINDOW (EVERY LOADER REFUSES A CUTOFF ON OR AFTER IT)
-UNTOUCHED_START_DATE_STR = "2026-05-14"
 # DEFINE THE FIRST DATE OF EACH SERIES IN THE IBKR DATA
 VIX_START_DATE_STR = "2005-10-03"
 VIX3M_START_DATE_STR = "2009-08-12"

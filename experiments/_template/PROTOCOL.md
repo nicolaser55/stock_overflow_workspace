@@ -70,8 +70,7 @@ an embargo before the active holdout start. Validation folds come from `so.core.
 (validation windows only). Do not read the holdout for exploration, validation or any decision.
 
 Only Nicolas runs the evaluation (`scripts/holdout_evaluate.py`), once per frozen design per window. Agents never run
-that script or `scripts/holdout_window.py`, and never set `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` or
-`SO_ALLOW_LEGACY_REPRODUCTION`.
+that script or `scripts/holdout_window.py`, and never set `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`.
 
 `design.py` exposes `PERIOD_RULE`, `CANDIDATE_LIST`, `SELECTION_RULE`, `run_candidate_replay_dict`,
 `run_prior_only_path_dict` and `get_baseline_return_dict` (see `experiments/README.md`). The runner scores every

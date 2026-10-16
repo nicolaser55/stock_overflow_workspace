@@ -6,8 +6,7 @@ Run from the workspace root:   python tests/test_holdout.py   (or python tests/r
 
 Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The real trial log and
 records/holdout_windows.csv are not written. If that registry file already exists, its size is unchanged.
-SO_HOLDOUT_PATH, SO_HOLDOUT_EVALUATION_TOKEN and
-SO_ALLOW_LEGACY_REPRODUCTION are set only inside this file, to temporary values.
+SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set only inside this file, to temporary values.
 """
 
 import os
@@ -26,12 +25,11 @@ TEMP_ROOT_STR = tempfile.mkdtemp(prefix="so_holdout_data_")
 os.environ["SO_DATA_PATH"] = TEMP_ROOT_STR
 os.environ.pop("SO_HOLDOUT_PATH", None)
 os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
-os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
 # IMPORT THE SHARED MODULES
-from so import paths, config, vix_config
+from so import paths, config
 from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, roll_holdout_window_dict,
                              get_active_holdout_window_dict, get_development_end_date, get_latest_session_date,
@@ -328,41 +326,25 @@ def test_guards():
         pass
     passed("guards (replay, raw loader, VIX loader stop at 2025-10-10)")
 
-# FUNCTION: TEST LEGACY REPRODUCTION
-def test_legacy():
+# FUNCTION: TEST THAT THE REMOVED LEGACY FLAG DOES NOT MOVE THE BOUNDARY
+def test_legacy_flag_ignored():
     """
-    Checks that the legacy flag allows only the pinned 2026-05-14 boundary and prints a warning.
+    Setting SO_ALLOW_LEGACY_REPRODUCTION leaves the replay boundary on the active window start.
 
     Returns:
         None
     """
-    # SET THE FLAG AND CAPTURE THE WARNING
+    # THE ACTIVE WINDOW IS THE ONE test_registry OPENED
+    window_start = pd.Timestamp(get_active_holdout_window_dict()["start"]).date()
+    # THE FLAG MUST NOT CHANGE THE BOUNDARY
     os.environ["SO_ALLOW_LEGACY_REPRODUCTION"] = "1"
     try:
-        stdout_file = StringIO()
-        saved_stdout = sys.stdout
-        sys.stdout = stdout_file
-        try:
-            assert check_replay_window_bool("2026-04-15", "2027-01-01")
-            try:
-                check_replay_window_bool("2026-05-14", "2027-01-01")
-                raise AssertionError("the legacy flag extended past 2026-05-14")
-            except ValueError:
-                pass
-            assert check_cutoff_date("2026-05-13") == pd.Timestamp("2026-05-13").date()
-            try:
-                check_cutoff_date("2026-05-14", "2027-01-01")
-                raise AssertionError("a VIX cutoff on 2026-05-14 was allowed")
-            except ValueError:
-                pass
-            assert get_replay_boundary_date("2027-01-01") == pd.Timestamp(vix_config.UNTOUCHED_START_DATE_STR).date()
-        finally:
-            sys.stdout = saved_stdout
-        assert "SO_ALLOW_LEGACY_REPRODUCTION" in stdout_file.getvalue()
+        flagged_date = get_replay_boundary_date("2027-01-01")
     finally:
-        # CLEAR THE FLAG
         os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
-    passed("legacy reproduction (pinned 2026-05-14 only, with a warning)")
+    plain_date = get_replay_boundary_date("2027-01-01")
+    assert flagged_date == plain_date == min(window_start, pd.Timestamp("2027-01-01").date())
+    passed("legacy flag ignored (boundary stays the window start)")
 
 # FUNCTION: BUILD THE GIT PROBE THE TESTS INJECT
 def get_git_dict(design_tree_str_in="design-tree", so_tree_str_in="so-tree"):
@@ -1032,7 +1014,7 @@ if __name__ == "__main__":
         test_registry()
         test_development_schedule()
         test_guards()
-        test_legacy()
+        test_legacy_flag_ignored()
         test_pipeline_holdout_flag()
         test_cache_guard()
         test_design_hash()
@@ -1049,4 +1031,3 @@ if __name__ == "__main__":
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)
         os.environ.pop("SO_HOLDOUT_PATH", None)
         os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
-        os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
