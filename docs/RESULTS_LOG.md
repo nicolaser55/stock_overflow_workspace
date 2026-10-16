@@ -225,6 +225,11 @@ minimum detectable effect, the **information test** (model vs its uninformed bas
   printed `all_baselines_beaten` compares the path with the random-entry median and the fixed-time entry. The path,
   1.365326, is below that hold, 1.793207. Time in the market, trade count, and costs of those two baselines were not
   saved; their total returns were. Method and the nine rows: `docs/BENCHMARK_2026-10-12.md`. Verdicts are unchanged.
+- *2026-10-16, exposure-matched weight (no new run, no new trial).* The 2026-10-15 hold is one entry of `w`, never
+  rebalanced, so the SPY weight drifts up. The timing comparison rebalances `w` every session: the product of
+  `(1 + w × r_t)` on the saved buy-and-hold daily returns. exp03 (1.111234 vs 1.018806) and exp06 (1.322490 vs
+  1.219744) are above that daily weight and below the held-once blend. exp13 is above both. The other six paths are
+  below both. The word "below" in the 2026-10-15 notes is the held-once blend. Verdicts are unchanged.
 
 ## Reproduction checks for the re-run
 
@@ -423,7 +428,7 @@ Mathematically: the prior-only total return is 1.365326 and buy-and-hold is 2.17
 
 *2026-10-15, exposure check.* No new run. No new trial. The saved outputs give the total returns of the two baselines and do not give their time in the market, their trade counts, or their costs. `summary_data.csv` has random-entry median **0.276782** and fixed-time entry **0.175908**. `get_path_baseline_dict` stores those returns and drops the rest of each simulation. The path's time in the market is **0.825000**, the mean of `in_position` over all 2,640 rows of `prior_only_daily_equity_data.csv` (2,178 sessions). The path's trade count, 5,404, is in that summary. The path's dollar costs are not in the saved files.
 
-The constant-exposure hold of that fraction is **1.793207**. The method, the entry of 7.53 dollars, and the exit of 7.53 dollars that is added back, are in `docs/BENCHMARK_2026-10-12.md`. The prior-only path, 1.365326, is 0.427882 below that hold. The random-entry median and the fixed-time entry are below it as well. `all_baselines_beaten` is the comparison with those two returns. The path was in the market on 82.5% of sessions and finished behind a constant 82.5% hold. The shortfall of the two baselines relative to that hold stays unsplit, because their time in the market and their costs were not saved. The verdict stays STOP.
+The constant-exposure hold of that fraction is **1.793207**. The method, the entry of 7.53 dollars, and the exit of 7.53 dollars that is added back, are in `docs/BENCHMARK_2026-10-12.md`. The prior-only path, 1.365326, is 0.427882 below that held-once blend. The random-entry median and the fixed-time entry are below that blend as well. `all_baselines_beaten` is the comparison with those two returns. The path was in the market on 82.5% of sessions and finished behind the held-once blend of that fraction. The shortfall of the two baselines relative to that blend stays unsplit, because their time in the market and their costs were not saved. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight at the same 0.825000 is **1.658154**. The path is 0.292828 below that timing comparison as well. No new run. No new trial. The verdict stays STOP.
 
 ## exp02_stop_reentry
 
@@ -584,7 +589,7 @@ Mathematically: the prior-only total return is 0.6182 and buy-and-hold is 1.9904
 is −1.372. The annualized log excess is −0.0594 per year. Its 6-month block interval [−0.1164, −0.0062] does not
 contain 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.735248, the constant-exposure hold is **1.463522** (`docs/BENCHMARK_2026-10-12.md`). The prior-only path, 0.618215, is 0.845307 below it. The path was already below every saved baseline. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.735248, the constant-exposure hold is **1.463522** (`docs/BENCHMARK_2026-10-12.md`). The prior-only path, 0.618215, is 0.845307 below that held-once blend. The path was already below every saved baseline. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.313259**. The path is 0.695044 below it. No new run. No new trial.
 
 ## exp03_ath_exit_v2
 
@@ -675,7 +680,7 @@ Mathematically: the prior-only total return is 1.1112 and buy-and-hold is 1.9904
 is −0.879. The annualized log excess is −0.0337 per year. Its 6-month block interval [−0.0694, −0.0024] does not
 contain 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.604037, the constant-exposure hold is **1.202344**. The prior-only path, 1.111234, is 0.091110 below it. The saved random-exit median is 0.381923 and the saved random-buyback median is 1.688064. The path beats the random-exit median. The constant hold and the random-buyback median are both above the path. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.604037, the held-once blend is **1.202344**. The prior-only path, 1.111234, is 0.091110 below that blend. The saved random-exit median is 0.381923 and the saved random-buyback median is 1.688064. The path beats the random-exit median. The held-once blend and the random-buyback median are both above the path. The verdict stays STOP. *2026-10-16.* The 2026-10-15 word "below" is the held-once blend. The daily-rebalanced weight is **1.018806**, and the path is 0.092428 above it. No new run. No new trial. The verdict stays STOP.
 
 ## exp03_ath_exit
 
@@ -740,7 +745,7 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 0.415088 and buy-and-hold is 1.990442, so the difference of total returns is −1.575354. The annualized log excess is −0.072409 per year. Its 6-month block interval [−0.140352, −0.017098] does not contain 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847826, the constant-exposure hold is **1.687609**. The prior-only path, 0.415088, is 1.272521 below it. The path was already below both random medians. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847826, the constant-exposure hold is **1.687609**. The prior-only path, 0.415088, is 1.272521 below that held-once blend. The path was already below both random medians. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.587718**. The path is 1.172630 below it. No new run. No new trial.
 
 ## exp04_trend_exit
 
@@ -819,7 +824,7 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 1.425930 and buy-and-hold is 1.990442, so the difference of total returns is −0.564512. The annualized log excess is −0.020246 per year. Its 6-month block interval [−0.036110, −0.002161] does not contain 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. This protocol already includes a constant-exposure baseline. The saved figure is **1.701911** at weight 0.854666. The prior-only path, 1.425930, is 0.275981 below it. The one-entry blend used for the other experiments, at the same weight, is 1.701224, which is 0.000687 from that saved simulation. The stopping rule used the saved simulation. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. This protocol already includes a constant-exposure baseline. The saved figure is **1.701911** at weight 0.854666. The prior-only path, 1.425930, is 0.275981 below it. The one-entry blend used for the other experiments, at the same weight, is 1.701224, which is 0.000687 from that saved simulation. The stopping rule used the saved simulation. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight at 0.854666 is **1.605042**. The path is 0.179112 below it, and 0.275294 below the held-once blend 1.701224. No new run. No new trial.
 
 ## exp05_vol_scaled_exposure
 
@@ -922,7 +927,7 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 1.322490 and buy-and-hold is 1.990442, so the difference of total returns is −0.667952. The annualized log excess is −0.024463 per year. Its 6-month block interval [−0.063152, 0.018654] contains 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.694876, the constant-exposure hold is **1.383159**. The prior-only path, 1.322490, is 0.060669 below it. The path beats the saved random-exit median 0.980501 and the saved random-reentry median 1.137882. Those two wins are wins over those medians. The constant hold of the path's own time in the market is higher than the path. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.694876, the held-once blend is **1.383159**. The prior-only path, 1.322490, is 0.060669 below that blend. The path beats the saved random-exit median 0.980501 and the saved random-reentry median 1.137882. Those two wins are wins over those medians. The verdict stays STOP. *2026-10-16.* The 2026-10-15 word "below", and the sentence that the constant hold is higher than the path, refer to the held-once blend. The daily-rebalanced weight is **1.219744**, and the path is 0.102746 above it. No new run. No new trial. The verdict stays STOP.
 
 ## exp06_capped_regret_reentry
 
@@ -1019,7 +1024,7 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 0.409471 and buy-and-hold is 1.990442, so the difference of total returns is −1.580971. The annualized log excess is −0.072794 per year. Its 6-month block interval [−0.126870, −0.028487] does not contain 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847438, the constant-exposure hold is **1.686836**. The prior-only path, 0.409472, is 1.277365 below it. The saved random-reentry median is 0.274653 and the saved random-exit median is 1.653326. The path beats the random-reentry median. The constant hold and the random-exit median are both above the path. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847438, the constant-exposure hold is **1.686836**. The prior-only path, 0.409472, is 1.277365 below that held-once blend. The saved random-reentry median is 0.274653 and the saved random-exit median is 1.653326. The path beats the random-reentry median. The held-once blend and the random-exit median are both above the path. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.586737**. The path is 1.177265 below it. No new run. No new trial.
 
 ## exp07_warning_lights_exit
 
@@ -1259,7 +1264,7 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 
 Mathematically: the prior-only total return is 1.265069 and buy-and-hold is 1.990442, so the difference of total returns is −0.725373. The annualized log excess is −0.026885 per year. Its 6-month block interval [−0.070945, 0.018952] contains 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.918090, the constant-exposure hold is **1.827470**. The prior-only path, 1.265069, is 0.562401 below it. The verdict stays STOP.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.918090, the constant-exposure hold is **1.827470**. The prior-only path, 1.265069, is 0.562401 below that held-once blend. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.769182**. The path is 0.504113 below it. No new run. No new trial.
 
 ## exp12_vix_fear_reentry
 
@@ -1409,7 +1414,7 @@ In plain words: on this shorter span the frozen rule, sell on the textbook trend
 
 Mathematically: the prior-only total return is 2.738521 and buy-and-hold is 1.990442, so the difference of total returns is +0.748079. The annualized log excess is +0.021607 per year. Its 6-month block interval [−0.010373, 0.061984] contains 0.
 
-*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.939053, the constant-exposure hold is **1.869197**. The prior-only path, 2.738521, is 0.869324 above it, so the path's lead over buy-and-hold comes with a lead over a constant hold of the same time in the market. The 6-month interval still contains 0. The status stays a candidate result pending review. Protocol 1.0's verdict, E1M1 IS NOT ROBUST, stands. No holdout evaluation was run.
+*2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.939053, the constant-exposure hold is **1.869197**. The prior-only path, 2.738521, is 0.869324 above that held-once blend. The 6-month interval still contains 0. The status stays a candidate result pending review. Protocol 1.0's verdict, E1M1 IS NOT ROBUST, stands. No holdout evaluation was run. *2026-10-16.* The daily-rebalanced weight is **1.824818**. The path is 0.913703 above it as well. No new run. No new trial. The status is unchanged.
 
 ## exp13_e1m1_robustness
 

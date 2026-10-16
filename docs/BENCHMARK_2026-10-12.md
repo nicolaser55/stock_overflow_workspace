@@ -16,18 +16,20 @@ The full-account exit matches the simulator. exp01: 502 shares, 10:00 open 198.9
 
 The reported constant-exposure total return adds `w × exit cost` to the blended final equity and divides by 100,000. The entry stays inside the saved equity, scaled by `w`.
 
-exp05 already records a constant-exposure baseline from its own simulation (integer shares, the protocol dead band, entry and exit). That saved return is the column below. The one-entry blend at the same weight is 1.701224, 0.000687 from the saved 1.701911. The stopping rule used the saved simulation.
+exp05 already records a constant-exposure baseline from its own simulation (integer shares, the protocol dead band, entry and exit). That saved return is 1.701911. The one-entry blend at the same weight is 1.701224, 0.000687 from the saved 1.701911. The stopping rule used the saved simulation. The held-once column below is the one-entry blend, the same object as the other rows.
 
-| Experiment | Weight | Prior-only | Buy-and-hold | Constant exposure | Path minus constant | vs constant exposure |
-|---|---:|---:|---:|---:|---:|---|
-| `exp01_minute_entry_v2` | 0.825000 | 1.365326 | 2.173509 | 1.793207 | −0.427882 | below |
-| `exp02_stop_reentry_v2` | 0.735248 | 0.618215 | 1.990442 | 1.463522 | −0.845307 | below |
-| `exp03_ath_exit_v2` | 0.604037 | 1.111234 | 1.990442 | 1.202344 | −0.091110 | below |
-| `exp04_trend_exit_v2` | 0.847826 | 0.415088 | 1.990442 | 1.687609 | −1.272521 | below |
-| `exp05_vol_scaled_exposure_v2` | 0.854666 | 1.425930 | 1.990442 | 1.701911 | −0.275981 | below (saved protocol baseline) |
-| `exp06_capped_regret_reentry_v2` | 0.694876 | 1.322490 | 1.990442 | 1.383159 | −0.060669 | below |
-| `exp07_warning_lights_exit_v2` | 0.847438 | 0.409472 | 1.990442 | 1.686836 | −1.277365 | below |
-| `exp12_vix_fear_reentry_v2` | 0.918090 | 1.265069 | 1.990442 | 1.827470 | −0.562401 | below |
-| `exp13_e1m1_robustness_v2` | 0.939053 | 2.738521 | 1.990442 | 1.869197 | +0.869324 | above |
+*2026-10-16.* The held-once blend lets the SPY weight drift up as prices rise, so its average exposure exceeds `w`. The timing comparison is a constant weight `w`, rebalanced every session: growth is the product over the saved `buy_hold_daily_return` rows of `(1 + w × r_t)`. `w` is the same saved average as the held-once column (`in_market_pct`; exp05 `mean_weight`). No cost is added. The saved returns already contain buy-and-hold's entry and exit, and those two sessions are scaled by `w`. No new run. No new trial. Verdicts do not change: the stopping rules compare buy-and-hold and the protocol baselines.
 
-Total returns are the 6-decimal values of the saved summary fields and of this calculation. The weight is `in_market_pct` (exp05: `mean_weight`) at 6 decimals. exp13 is the only path above its constant-exposure hold. That comparison is not a success claim: the 6-month interval still contains 0, and protocol 1.0 already recorded E1M1 IS NOT ROBUST.
+| Experiment | Weight | Prior-only | Buy-and-hold | w held once (exposure drifts up) | w constant (daily rebalanced, exposure-matched) | vs held once | vs daily constant |
+|---|---:|---:|---:|---:|---:|---|---|
+| `exp01_minute_entry_v2` | 0.825000 | 1.365326 | 2.173509 | 1.793207 | 1.658154 | below | below |
+| `exp02_stop_reentry_v2` | 0.735248 | 0.618215 | 1.990442 | 1.463522 | 1.313259 | below | below |
+| `exp03_ath_exit_v2` | 0.604037 | 1.111234 | 1.990442 | 1.202344 | 1.018806 | below | above |
+| `exp04_trend_exit_v2` | 0.847826 | 0.415088 | 1.990442 | 1.687609 | 1.587718 | below | below |
+| `exp05_vol_scaled_exposure_v2` | 0.854666 | 1.425930 | 1.990442 | 1.701224 | 1.605042 | below | below |
+| `exp06_capped_regret_reentry_v2` | 0.694876 | 1.322490 | 1.990442 | 1.383159 | 1.219744 | below | above |
+| `exp07_warning_lights_exit_v2` | 0.847438 | 0.409472 | 1.990442 | 1.686836 | 1.586737 | below | below |
+| `exp12_vix_fear_reentry_v2` | 0.918090 | 1.265069 | 1.990442 | 1.827470 | 1.769182 | below | below |
+| `exp13_e1m1_robustness_v2` | 0.939053 | 2.738521 | 1.990442 | 1.869197 | 1.824818 | above | above |
+
+Total returns are the 6-decimal values of the saved summary fields and of these two calculations. The daily-constant column is the timing comparison. On 2026-10-15 the word "below" referred only to the held-once column. exp03 and exp06 are below that column and above the daily-constant column. exp13 is above both. That is not a success claim: the 6-month interval still contains 0, and protocol 1.0 already recorded E1M1 IS NOT ROBUST.
