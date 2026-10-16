@@ -1,10 +1,8 @@
 import numpy as np
 import pandas as pd
 # IMPORT THE SHARED CONFIGURATION, THE EXPERIMENT CONFIGURATION AND THE DESIGN
-from so import config
 from experiments.exp03_ath_exit import config as exp_config
 from experiments.exp03_ath_exit import design
-from experiments.exp03_ath_exit.rules import get_random_baseline_probability_dict, get_random_exit_signal_arr, simulate_rule_dict
 
 """
 Development report for exp03_ath_exit_v2
@@ -64,49 +62,21 @@ def get_optimistic_dict(score_pdf_in):
     return best_dict
 
 # FUNCTION: MATCHED RANDOM FAMILIES AND THE TREND RULE ON THE PRIOR-ONLY PATH
-def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in):
+def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in, data_context_in=None):
     """
-    Twenty random buy-backs keep the path's exit signal. Twenty random exits keep the path's buy-back. The trend rule
-    does not use the path. When the path never exits, every random run equals the path.
+    The design's baselines. This is the same function the holdout report calls.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         path_dict_in (dict): Prior-only path
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
-        dict: Baseline name -> total return, plus the two lists of random returns
+        dict: Both random families, their lists, and the trend rule
     """
-    # IMPORT THE RANDOM BUY-BACK HERE
-    from so.core.reentry_simulation import get_random_reentry_func, simulate_trend_rule_dict
-    # MATCH THE PROBABILITIES TO THE PATH
-    probability_dict = get_random_baseline_probability_dict(path_dict_in)
-    daily_pdf = design.get_cached_daily_pdf(ohlcv_array_dict_in)
-    return_dict = {}
-    buyback_list, exit_list = [], []
-    never_bool = not np.isfinite(probability_dict["exit_probability"]) or not np.isfinite(probability_dict["buyback_probability"])
-    path_return = path_dict_in["metric_dict"]["total_return"]
-    if never_bool:
-        buyback_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-        exit_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-    else:
-        reentry_tuple = (design.get_switching_reentry_func(daily_pdf["decision_close"].to_numpy(dtype=float), path_dict_in["buyback_type_arr"], path_dict_in["buyback_value_arr"]), "random")
-        for run_idx in range(exp_config.RANDOM_RUN_COUNT):
-            buyback_dict = simulate_rule_dict(ohlcv_array_dict_in, daily_pdf, date1_in, date2_in, design._RULE_LIST[0],
-                                             exit_signal_arr_in=path_dict_in["exit_signal_arr"],
-                                             reentry_func_tuple_in=(get_random_reentry_func(probability_dict["buyback_probability"], config.RANDOM_SEED + run_idx), "random"))
-            exit_dict = simulate_rule_dict(ohlcv_array_dict_in, daily_pdf, date1_in, date2_in, design._RULE_LIST[0],
-                                          exit_signal_arr_in=get_random_exit_signal_arr(len(daily_pdf), probability_dict["exit_probability"], config.RANDOM_SEED + 1000 + run_idx),
-                                          reentry_func_tuple_in=reentry_tuple)
-            buyback_list.append(buyback_dict["metric_dict"]["total_return"])
-            exit_list.append(exit_dict["metric_dict"]["total_return"])
-    return_dict["random_buyback_median"] = float(np.median(buyback_list))
-    return_dict["random_exit_median"] = float(np.median(exit_list))
-    return_dict["random_buyback_list"] = buyback_list
-    return_dict["random_exit_list"] = exit_list
-    trend_dict = simulate_trend_rule_dict(ohlcv_array_dict_in, daily_pdf, date1_in, date2_in, "ma200_dist_pct")
-    return_dict["trend_ma200"] = trend_dict["metric_dict"]["total_return"]
-    return return_dict
+    # ONE IMPLEMENTATION, ON THE DESIGN
+    return design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in)
 
 # FUNCTION: RUN THE DEVELOPMENT REPORT
 def run_development_dict():
@@ -134,7 +104,7 @@ def run_development_dict():
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, date1, date2)
-    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
+    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2, data_context)
     # PERFORMANCE OVER TIME AND TURNOVER
     strategy_return_pdf = get_chained_daily_return_pdf([path_dict["daily_equity_pdf"]])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])

@@ -922,6 +922,58 @@ def test_evaluation():
     passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
     passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']}; template {template_row['status']})")
 
+# FUNCTION: TEST THAT THE LEDGER STORES THE DESIGN'S BASELINES
+def test_baseline_ledger():
+    """
+    The runner passes the context and the path. The ledger stores the scalars, including percentiles and counts.
+    The success flags compare only the keys the design names.
+
+    Returns:
+        None
+    """
+    # A SELECTION DESIGN WHOSE COMPARISON LIST IS ONE RETURN
+    path_dict = get_evaluation_path_dict()
+    git_dict = get_git_dict()
+    window_dict = get_active_holdout_window_dict()
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2023-06-01", "2026-10-09", minute_vol_in=0.0004, seed_in=11)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+    os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+    design_module = get_selection_design()
+    design_module.EXPERIMENT_NAME = "exp_holdout_baselines"
+    design_module.BASELINE_COMPARISON_KEY_LIST = ["flat_return"]
+    seen_dict = {}
+    def baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None):
+        # THE RUNNER PASSES THE CONTEXT AND THE PRIOR-ONLY PATH, AND THE READ GOES THROUGH THE CONTEXT
+        assert data_context_in is not None and path_dict_in is not None and "daily_equity_pdf" in path_dict_in
+        from so.core.point_in_time import get_decision_ts
+        from so.features.daily_features import get_session_decision_idx_dict
+        decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][-1])
+        decision_ts = get_decision_ts(ohlcv_array_dict_in["timestamp_index"][decision_idx])
+        data_context_in.set_decision_ts(decision_ts)
+        data_context_in.get("SPY_1MIN", decision_ts, columns_in=["timestamp", "close", "available_ts"])
+        data_context_in.set_decision_ts(None)
+        seen_dict["span"] = (pd.Timestamp(date1_in).date(), pd.Timestamp(date2_in).date())
+        return {"flat_return": 0.01, "random_entry_median": 0.02, "random_entry_p05": -0.1, "random_entry_p95": 0.4,
+                "random_entry_count": 20, "random_entry_beaten_count": 15}
+    design_module.get_baseline_return_dict = baseline_return_dict
+    # A FRESH LEDGER AND A FRESH TRIAL LOG, NOT THE REAL FILES
+    ledger_str = os.path.join(TEMP_ROOT_STR, "baseline_evaluations.csv")
+    trial_str = os.path.join(TEMP_ROOT_STR, "baseline_trial_log.csv")
+    real_size = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
+    row_dict = run_holdout_evaluation(design_module, "baselines", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                                      ledger_path_str_in=ledger_str, trial_log_path_str_in=trial_str)
+    # THE LEDGER CELL HOLDS THE SCALARS; THE BEATEN FLAGS HOLD ONLY THE NAMED RETURN
+    assert row_dict["status"] == "valid"
+    assert seen_dict["span"] == (pd.Timestamp(window_dict["start"]).date(), pd.Timestamp(window_dict["end"]).date())
+    stored_dict = json.loads(pd.read_csv(ledger_str)["baseline_returns"].iloc[0])
+    assert stored_dict["flat_return"] == 0.01 and stored_dict["random_entry_median"] == 0.02
+    assert stored_dict["random_entry_p05"] == -0.1 and stored_dict["random_entry_p95"] == 0.4
+    assert stored_dict["random_entry_count"] == 20 and stored_dict["random_entry_beaten_count"] == 15
+    assert set(row_dict["baselines_beaten"]) == {"flat_return"}
+    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_size
+    passed("holdout ledger stores the design baselines and does not beat the counts")
+
 # FUNCTION: TEST WHERE THE HOLDOUT GUARD MAY BE TURNED OFF
 def test_holdout_flag_scan():
     """
@@ -985,6 +1037,7 @@ if __name__ == "__main__":
         test_cache_guard()
         test_design_hash()
         test_evaluation()
+        test_baseline_ledger()
         test_holdout_flag_scan()
         test_walk_forward_unchanged()
         # THE REAL REGISTRY IS UNCHANGED (IT MAY ALREADY EXIST; THIS SUITE MUST NOT WRITE IT)

@@ -47,3 +47,4 @@ E1M1 was chosen after seeing exp12. The historical verdict is that it is not rob
 | 1.0 | 2026-10-09 | Robustness study. Verdict: E1M1 IS NOT ROBUST. Code at tag `pre-port-20261012`. |
 | 2.0 | 2026-10-12 | Frozen E1M1 only, under the new rules. The robustness steps are not repeated (§2). |
 | 2.0 | 2026-10-13 | Preregister amendment, before any version 2.0 run. One candidate, so the tie order is not used. A comparison counts a difference of at most NUMERIC_TOLERANCE (1e-6) as a match and also reports the maximum absolute difference. Summary prints show 6 decimal places. Calculations, and files later code reads, stay at full precision. |
+| 2.0 | 2026-10-15 | Holdout report baselines are the development report's uninformed baselines over the span passed in, with this protocol's fixed seeds, through the point-in-time context. Report-only: no rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. Development results unchanged. |

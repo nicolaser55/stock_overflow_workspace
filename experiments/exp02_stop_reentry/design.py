@@ -357,34 +357,59 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     simulation_dict["refit_log_pdf"] = pd.concat(refit_list, ignore_index=True) if refit_list else pd.DataFrame()
     return simulation_dict
 
-# FUNCTION: FIXED-DELAY AND TREND BASELINES OVER A SPAN
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
+BASELINE_COMPARISON_KEY_LIST = [f"fixed_delay_{int(delay_int)}" for delay_int in exp_config.FIXED_DELAY_SESSION_LIST] + ["random_reentry_median", "trend_ma200"]
+
+# FUNCTION: SAME-STOP FIXED DELAYS AND MATCHED RANDOM RE-ENTRY OVER A SPAN
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None):
     """
-    The uninformed baselines named in protocol 1.0, over the span the caller names. Fixed-delay uses each pre-registered
-    stop k (the grid, not a k chosen on this span). The trend rule uses the 200-session average. Random re-entry is
-    matched to a path and is computed in the development report, where that path exists.
+    Fixed-delay re-entry and 20 random re-entries use the path's stop. The trend rule does not. Random run i uses
+    so.config.RANDOM_SEED + i. The volatility column is the labelled daily row, the same column the report read.
+    The same function is the development report.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict | None): Prior-only path
 
     Returns:
-        dict: baseline name -> total return
+        dict: Fixed delays, the random family, and the trend rule
     """
-    # IMPORT THE SIMULATORS HERE
-    from so.core.reentry_simulation import simulate_stop_reentry_dict, simulate_trend_rule_dict, get_fixed_delay_reentry_func
+    # IMPORT THE RULES AND THE SPAN CUT HERE
+    from so.core.reentry_simulation import simulate_stop_reentry_dict, simulate_trend_rule_dict, get_fixed_delay_reentry_func, get_random_reentry_func
     from so.features.daily_features import get_daily_feature_pdf
-    # ONE VOLATILITY COLUMN AND THE DAILY TABLE
+    from so.core.baseline_report import get_random_family_stat_dict, get_span_path_dict
+    # SPY THROUGH THE CONTEXT, THEN THE PATH ON THIS SPAN
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
+    path_dict = get_span_path_dict(path_dict_in, ohlcv_array_dict_in, date1_in, date2_in)
+    # THE LABELLED VOLATILITY, NOT A SECOND MODEL FIT
     row_key = (get_bar_key_tuple(ohlcv_array_dict_in), "rows")
     row_pdf = _cache_dict[row_key] if row_key in _cache_dict else get_labelled_row_pdf(ohlcv_array_dict_in)
     volatility_arr = row_pdf["daily_volatility"].to_numpy(dtype=float)
+    stop_k_arr = path_dict["full_stop_k_arr"]
     return_dict = {}
-    for stop_k in exp_config.STOP_K_LIST:
-        for delay_int in exp_config.FIXED_DELAY_SESSION_LIST:
-            simulation_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr, float(stop_k),
-                                                         get_fixed_delay_reentry_func(int(delay_int)), "delay", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            return_dict[f"fixed_delay_k{int(stop_k)}_{int(delay_int)}"] = simulation_dict["metric_dict"]["total_return"]
-    # THE 200-SESSION RULE, NO STOP AND NO FORCED RE-ENTRY
+    for delay_int in exp_config.FIXED_DELAY_SESSION_LIST:
+        simulation_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr, stop_k_arr,
+                                                     get_fixed_delay_reentry_func(int(delay_int)), "delay", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+        return_dict[f"fixed_delay_{int(delay_int)}"] = simulation_dict["metric_dict"]["total_return"]
+    # RANDOM RE-ENTRY MATCHED TO THE PATH'S MEAN CASH DECISIONS; NO EXIT MEANS EVERY RUN EQUALS THE PATH
+    episode_pdf = path_dict["episode_pdf"]
+    mean_cash_float = float(episode_pdf["cash_session_count"].mean()) if len(episode_pdf) else np.nan
+    path_return = path_dict["metric_dict"]["total_return"]
+    random_list = []
+    if path_dict["metric_dict"]["stop_count"] == 0 or not np.isfinite(mean_cash_float) or mean_cash_float <= 0:
+        random_list = [path_return] * exp_config.RANDOM_REENTRY_RUN_COUNT
+    else:
+        probability_float = 1.0 / mean_cash_float
+        for run_idx in range(exp_config.RANDOM_REENTRY_RUN_COUNT):
+            simulation_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr, stop_k_arr,
+                                                         get_random_reentry_func(probability_float, so_config.RANDOM_SEED + run_idx), "random",
+                                                         max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+            random_list.append(simulation_dict["metric_dict"]["total_return"])
+    return_dict.update(get_random_family_stat_dict("random_reentry", random_list, path_return))
+    return_dict["random_return_list"] = random_list
+    # THE 200-SESSION RULE
     daily_pdf = get_daily_feature_pdf(ohlcv_array_dict_in)
     trend_dict = simulate_trend_rule_dict(ohlcv_array_dict_in, daily_pdf, date1_in, date2_in, "ma200_dist_pct")
     return_dict["trend_ma200"] = trend_dict["metric_dict"]["total_return"]

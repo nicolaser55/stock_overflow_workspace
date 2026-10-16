@@ -63,50 +63,21 @@ def get_optimistic_dict(score_pdf_in):
     return best_dict
 
 # FUNCTION: SAME-STOP FIXED DELAYS AND MATCHED RANDOM RE-ENTRY ON THE PRIOR-ONLY PATH
-def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in):
+def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in, data_context_in=None):
     """
-    Fixed-delay re-entry and 20 random re-entries use the path's stop. The trend rule does not.
+    The design's baselines. This is the same function the holdout report calls.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         path_dict_in (dict): Prior-only path
         date1_in, date2_in: Path span
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
-        dict: baseline name -> total return, plus random_return_list
+        dict: Fixed delays, the random family, and the trend rule
     """
-    # IMPORT THE RULES HERE
-    from so import config
-    from so.core.reentry_simulation import simulate_stop_reentry_dict, simulate_trend_rule_dict, get_fixed_delay_reentry_func, get_random_reentry_func
-    from so.features.daily_features import get_daily_feature_pdf
-    # THE PATH'S STOP AND ITS VOLATILITY
-    volatility_arr = design.get_window_retrain_dict(ohlcv_array_dict_in, exp_config.TRAIN_WINDOW_CANDIDATE_LIST[0])["row_pdf"]["daily_volatility"].to_numpy(dtype=float)
-    stop_k_arr = path_dict_in["full_stop_k_arr"]
-    return_dict = {}
-    for delay_int in exp_config.FIXED_DELAY_SESSION_LIST:
-        simulation_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr, stop_k_arr,
-                                                     get_fixed_delay_reentry_func(int(delay_int)), "delay", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-        return_dict[f"fixed_delay_{int(delay_int)}"] = simulation_dict["metric_dict"]["total_return"]
-    # RANDOM RE-ENTRY MATCHED TO THE PATH'S MEAN CASH DECISIONS; NO EXIT MEANS EVERY RUN EQUALS THE PATH
-    episode_pdf = path_dict_in["episode_pdf"]
-    mean_cash_float = float(episode_pdf["cash_session_count"].mean()) if len(episode_pdf) else np.nan
-    random_list = []
-    if path_dict_in["metric_dict"]["stop_count"] == 0 or not np.isfinite(mean_cash_float) or mean_cash_float <= 0:
-        random_list = [path_dict_in["metric_dict"]["total_return"]] * exp_config.RANDOM_REENTRY_RUN_COUNT
-    else:
-        probability_float = 1.0 / mean_cash_float
-        for run_idx in range(exp_config.RANDOM_REENTRY_RUN_COUNT):
-            simulation_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr, stop_k_arr,
-                                                         get_random_reentry_func(probability_float, config.RANDOM_SEED + run_idx), "random",
-                                                         max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            random_list.append(simulation_dict["metric_dict"]["total_return"])
-    return_dict["random_reentry_median"] = float(np.median(random_list))
-    return_dict["random_return_list"] = random_list
-    # THE 200-SESSION RULE
-    daily_pdf = get_daily_feature_pdf(ohlcv_array_dict_in)
-    trend_dict = simulate_trend_rule_dict(ohlcv_array_dict_in, daily_pdf, date1_in, date2_in, "ma200_dist_pct")
-    return_dict["trend_ma200"] = trend_dict["metric_dict"]["total_return"]
-    return return_dict
+    # ONE IMPLEMENTATION, ON THE DESIGN
+    return design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in)
 
 # FUNCTION: RUN THE DEVELOPMENT REPORT
 def run_development_dict():
@@ -134,7 +105,7 @@ def run_development_dict():
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, date1, date2)
-    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
+    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2, data_context)
     # PERFORMANCE OVER TIME, TURNOVER, AND THE REFITS
     strategy_return_pdf = get_chained_daily_return_pdf([path_dict["daily_equity_pdf"]])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])
@@ -150,8 +121,10 @@ def run_development_dict():
     buy_hold_period_pdf = get_period_return_pdf(buy_hold_dict["daily_equity_pdf"], period_pdf)
     summary_dict = get_window_return_summary_dict(path_period_pdf["total_return"].to_numpy(), buy_hold_period_pdf["total_return"].to_numpy())
     log_excess_dict = get_log_excess_bootstrap_dict(strategy_return_pdf, buy_hold_return_pdf, block_month_count_in=6)
+    # PERCENTILES AND COUNTS ARE NOT RETURNS THE SUCCESS CRITERIA COMPARE
+    from so.core.baseline_report import get_comparison_baseline_dict
     success_dict = get_success_criteria_dict(strategy_return_pdf, buy_hold_return_pdf,
-                                             {name: value for name, value in baseline_dict.items() if name != "random_return_list"})
+                                             get_comparison_baseline_dict(baseline_dict, design.BASELINE_COMPARISON_KEY_LIST))
     # STOP UNLESS THE PATH BEATS BUY-AND-HOLD AND EVERY SAME-STOP FIXED DELAY
     path_return = path_dict["metric_dict"]["total_return"]
     beats_buy_hold_bool = path_return > buy_hold_dict["metric_dict"]["total_return"]

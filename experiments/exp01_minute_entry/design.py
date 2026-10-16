@@ -668,20 +668,43 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     simulation_dict["decision_pdf"] = decision_pdf
     return simulation_dict
 
-# FUNCTION: PATH-MATCHED BASELINES LIVE IN THE REPORT
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
+BASELINE_COMPARISON_KEY_LIST = ["random_entry_median", "fixed_time_return"]
+
+# FUNCTION: RANDOM ENTRIES AND THE FIXED-TIME BASELINE OVER A SPAN
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None):
     """
-    The random-entry runs and the fixed-time baseline need the path's decision rows.
+    Twenty random-entry runs use the path's buy rate and its decision times. One fixed-time run buys at 09:59.
+    Seeds are so.config.RANDOM_SEED plus the run index. The same function is the development report.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict | None): Prior-only path
 
     Returns:
-        dict: Empty
+        dict: Median, percentiles, counts, the run list, and the fixed-time return
     """
-    # THE BASELINES NEED THE PATH
-    return {}
+    # IMPORT THE DECISION BUILDERS AND THE SPAN CUT HERE
+    from experiments.exp01_minute_entry.walk_forward import get_fixed_time_decision_pdf, get_random_decision_pdf, get_window_simulation_dict
+    from so.core.baseline_report import get_random_family_stat_dict, get_span_path_dict
+    # SPY THROUGH THE CONTEXT, THEN THE PATH ON THIS SPAN
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
+    path_dict = get_span_path_dict(path_dict_in, ohlcv_array_dict_in, date1_in, date2_in)
+    # MATCH THE BUY RATE AND SIMULATE
+    decision_pdf = path_dict["decision_pdf"]
+    eligible_series = pd.Series(decision_pdf["decision_ts"])
+    buy_probability = float(np.mean(decision_pdf["buy_flag"].to_numpy(dtype=float))) if len(decision_pdf) else 0.0
+    delta_list = list(exp_config.MODEL_DELTA_LIST)
+    random_list = []
+    for run_idx in range(exp_config.RANDOM_BASELINE_RUN_COUNT):
+        random_pdf = get_random_decision_pdf(eligible_series, buy_probability, delta_list, config.RANDOM_SEED + run_idx)
+        random_list.append(get_window_simulation_dict(random_pdf, ohlcv_array_dict_in, date1_in, date2_in)["metric_dict"]["total_return"])
+    fixed_pdf = get_fixed_time_decision_pdf(eligible_series)
+    fixed_return = get_window_simulation_dict(fixed_pdf, ohlcv_array_dict_in, date1_in, date2_in)["metric_dict"]["total_return"]
+    path_return = float(path_dict["metric_dict"]["total_return"])
+    return {**get_random_family_stat_dict("random_entry", random_list, path_return), "random_entry_list": random_list, "fixed_time_return": float(fixed_return)}
 
 # FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
 def get_development_data_context(session_date_list_in):

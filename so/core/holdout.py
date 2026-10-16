@@ -45,7 +45,7 @@ WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "m
 EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
-                          "comparable_pass", "baselines_beaten", "carried_weight", "holdout_candidates", "sources_read",
+                          "comparable_pass", "baselines_beaten", "baseline_returns", "carried_weight", "holdout_candidates", "sources_read",
                           "retrain_frequency", "train_window_candidates", "holdout_refit_count", "average_share_purged",
                           "turnover", "candidate_switches"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
@@ -1073,17 +1073,50 @@ def get_signal_difference_str(full_result_dict_in, short_result_dict_in, cut_dat
                 return f"signal on {session_day}"
     return None
 
+# FUNCTION: CALL THE DESIGN'S BASELINES WITH THE ARGUMENTS IT DECLARES
+def get_design_baseline_dict(design_module_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in, period_pdf_in):
+    """
+    Calls get_baseline_return_dict. data_context_in, path_dict_in and period_pdf_in are passed only when the function
+    declares them, so a design that still takes the bars and the span keeps that call.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict): Prior-only path
+        period_pdf_in (pd.DataFrame): Periods
+
+    Returns:
+        dict: Baseline name -> value
+    """
+    # IMPORT INSPECT HERE
+    import inspect
+    # PASS EACH EXTRA ARGUMENT ONLY WHEN THE DESIGN DECLARES IT
+    parameter_set = inspect.signature(design_module_in.get_baseline_return_dict).parameters
+    keyword_dict = {}
+    if "data_context_in" in parameter_set:
+        keyword_dict["data_context_in"] = data_context_in
+    if "path_dict_in" in parameter_set:
+        keyword_dict["path_dict_in"] = path_dict_in
+    if "period_pdf_in" in parameter_set:
+        keyword_dict["period_pdf_in"] = period_pdf_in
+    return design_module_in.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, **keyword_dict)
+
 # FUNCTION: REBASE THE HOLDOUT SEGMENT AND BUILD THE REPORT
-def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, result_dict_in):
+def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, result_dict_in, data_context_in=None):
     """
     Reports only the holdout sessions. Equity is rebased so the equity entering the window equals the initial capital.
-    Buy-and-hold and the design's baselines are computed on the holdout sessions only.
+    Buy-and-hold and the design's baselines are computed on the holdout sessions only. The baseline returns, including
+    random-family percentiles and counts, are stored on the ledger. The success flags compare the returns the design
+    names, not the percentiles or the counts.
 
     Args:
         design_module_in (module): Design (get_baseline_return_dict)
         ohlcv_array_dict_in (dict): Bars through the window end
         window_dict_in (dict): Active window
         result_dict_in (dict): The full prior-only result
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
         dict: report_dict, daily_equity_pdf, buy_hold_equity_pdf
@@ -1103,13 +1136,16 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
     holdout_pdf["equity"] = holdout_pdf["equity"] * (config.INITIAL_CAPITAL / base_float)
     carried_weight_float = float(holdout_pdf["weight"].iloc[0]) if "weight" in holdout_pdf.columns and len(holdout_pdf) else np.nan
     # BUY-AND-HOLD AND THE DESIGN'S BASELINES, BOTH OVER THE HOLDOUT ONLY
+    from so.core.baseline_report import get_baseline_json_str, get_comparison_baseline_dict
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, start_date, end_date)
-    baseline_return_dict = design_module_in.get_baseline_return_dict(ohlcv_array_dict_in, start_date, end_date)
+    baseline_return_dict = get_design_baseline_dict(design_module_in, ohlcv_array_dict_in, start_date, end_date, data_context_in,
+                                                    result_dict_in["path_dict"], result_dict_in["period_pdf"])
+    comparison_dict = get_comparison_baseline_dict(baseline_return_dict, getattr(design_module_in, "BASELINE_COMPARISON_KEY_LIST", None))
     # CALCULATE THE LOG EXCESS, THE SUCCESS CRITERIA AND THE MDE
     strategy_return_pdf = get_chained_daily_return_pdf([holdout_pdf])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])
     log_excess_dict = get_log_excess_bootstrap_dict(strategy_return_pdf, buy_hold_return_pdf, block_month_count_in=6)
-    success_dict = get_success_criteria_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_return_dict)
+    success_dict = get_success_criteria_dict(strategy_return_pdf, buy_hold_return_pdf, comparison_dict)
     merged_pdf = strategy_return_pdf.merge(buy_hold_return_pdf, on="date", suffixes=("_strategy", "_buy_hold"))
     merged_pdf["month"] = pd.to_datetime(merged_pdf["date"]).dt.to_period("M")
     month_pdf = merged_pdf.groupby("month").agg(strategy_log=("daily_return_strategy", lambda series: float(np.log1p(series).sum())),
@@ -1167,6 +1203,7 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
                    "mde": get_mde_float(float(np.std(month_excess_arr, ddof=1)) if len(month_excess_arr) > 1 else np.nan, len(month_excess_arr)),
                    "primary_pass": success_dict["primary_success"], "secondary_pass": success_dict["secondary_success"],
                    "comparable_pass": success_dict["comparable_return"], "baselines_beaten": success_dict["baselines_beaten"],
+                   "baseline_returns": get_baseline_json_str(baseline_return_dict),
                    "carried_weight": carried_weight_float, "holdout_candidates": json.dumps(candidate_dict),
                    "retrain_frequency": frequency_str, "train_window_candidates": window_text,
                    "holdout_refit_count": int(len(holdout_refit_pdf)) if holdout_refit_pdf is not None else np.nan,
@@ -1289,7 +1326,7 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         # REPLAY THE PATH, THEN THE TRUNCATION TEST, BEFORE ANY RESULT IS WRITTEN
         full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict, data_context)
         failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
-        report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict)
+        report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
     except ValueError as error:
         # A READ OUTSIDE DATA_SOURCE_LIST IS INVALID; ANY OTHER ERROR STILL PROPAGATES
         if "undeclared source" not in str(error):

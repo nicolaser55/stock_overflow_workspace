@@ -66,41 +66,21 @@ def get_optimistic_dict(score_pdf_in):
     return best_dict
 
 # FUNCTION: CONSTANT EXPOSURE AND RANDOM SHIFTS OF THE PRIOR-ONLY WEIGHTS
-def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in):
+def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in, data_context_in=None):
     """
-    Constant exposure holds the path's mean weight. Twenty circular shifts keep the weights and move their timing.
-    Shifts are drawn in [126, N - 126]. A path shorter than twice that minimum has no shift.
+    The design's baselines. This is the same function the holdout report calls.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         path_dict_in (dict): Prior-only path
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
-        dict: Constant return, the shift list, and the share of shifts the path beats
+        dict: Constant return, the shift family, and the share of shifts the path beats
     """
-    # THE MEAN WEIGHT IS THE UNINFORMED EXPOSURE
-    mean_weight = float(path_dict_in["metric_dict"]["mean_weight"])
-    decision_arr = np.asarray(path_dict_in["target_decision_arr"], dtype=float)
-    constant_arr = np.where(np.isfinite(decision_arr), mean_weight, np.nan)
-    constant_dict = design.simulate_weight_span_dict(ohlcv_array_dict_in, date1_in, date2_in, constant_arr)
-    window_idx_arr = np.flatnonzero(np.isfinite(decision_arr))
-    shift_list = []
-    low_int = int(exp_config.RANDOM_SHIFT_MIN_SESSIONS)
-    if len(window_idx_arr) > 2 * low_int:
-        shift_arr = np.random.default_rng(config.RANDOM_SEED).integers(low_int, len(window_idx_arr) - low_int, size=exp_config.RANDOM_RUN_COUNT)
-        for shift in shift_arr:
-            shifted_arr = np.full(decision_arr.shape, np.nan)
-            shifted_arr[window_idx_arr] = np.roll(decision_arr[window_idx_arr], int(shift))
-            shift_dict = design.simulate_weight_span_dict(ohlcv_array_dict_in, date1_in, date2_in, shifted_arr)
-            shift_list.append(shift_dict["metric_dict"]["total_return"])
-    else:
-        shift_list = [path_dict_in["metric_dict"]["total_return"]] * exp_config.RANDOM_RUN_COUNT
-    shift_arr = np.asarray(shift_list, dtype=float)
-    path_return = path_dict_in["metric_dict"]["total_return"]
-    return {"constant_exposure": constant_dict["metric_dict"]["total_return"], "constant_weight": mean_weight,
-            "random_shift_median": float(np.median(shift_arr)), "random_shift_list": shift_list,
-            "random_shift_beats_share": float(np.mean(shift_arr < path_return))}
+    # ONE IMPLEMENTATION, ON THE DESIGN
+    return design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in)
 
 # FUNCTION: RUN THE DEVELOPMENT REPORT
 def run_development_dict():
@@ -126,7 +106,7 @@ def run_development_dict():
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, date1, date2)
-    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
+    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2, data_context)
     strategy_return_pdf = get_chained_daily_return_pdf([path_dict["daily_equity_pdf"]])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])
     performance_pdf = get_performance_over_time_pdf(strategy_return_pdf, buy_hold_return_pdf)

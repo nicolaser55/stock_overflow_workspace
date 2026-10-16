@@ -363,22 +363,27 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     simulation_dict["refit_log_pdf"] = pd.concat(refit_list, ignore_index=True) if refit_list else pd.DataFrame()
     return simulation_dict
 
+# THE RETURN THE SUCCESS CRITERIA COMPARE
+BASELINE_COMPARISON_KEY_LIST = ["constant_exposure"]
+
 # FUNCTION: GET THE UNINFORMED BASELINE OVER A SPAN
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None):
     """
     Constant exposure at the pre-registered weight, over the span the caller names. The runner names the holdout only.
-    The weight is not fit on that span.
+    The weight is not fit on that span. Prices are read through the context when one is passed.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
         dict: baseline name -> total return
     """
     # IMPORT THE SIMULATOR HERE
     from so.core.fractional_exposure import simulate_fractional_exposure_dict
-    # HOLD THE CONSTANT WEIGHT FOR THE WHOLE SPAN
+    # SPY THROUGH THE CONTEXT, THEN HOLD THE CONSTANT WEIGHT FOR THE WHOLE SPAN
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
     weight_float = float(exp_config.CONSTANT_EXPOSURE_WEIGHT)
     target_arr = np.full(len(ohlcv_array_dict_in["session_date_list"]), weight_float)
     simulation_dict = simulate_fractional_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, target_arr, 0.0, weight_float)

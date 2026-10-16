@@ -68,43 +68,22 @@ def get_optimistic_dict(score_pdf_in):
     return best_dict
 
 # FUNCTION: MATCHED RANDOM FAMILIES ON THE PRIOR-ONLY PATH
-def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in):
+def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in, data_context_in=None, period_pdf_in=None):
     """
-    Twenty random exits keep the path's re-entry. Twenty random re-entries keep the path's exit signal. When the path
-    never exits, every random run equals the path.
+    The design's baselines. This is the same function the holdout report calls. period_pdf_in adds the unmodified path.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         path_dict_in (dict): Prior-only path
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        period_pdf_in (pd.DataFrame | None): Periods for the unmodified path
 
     Returns:
-        dict: Medians and the two lists
+        dict: Both random families and, with periods, the unmodified return
     """
-    # IMPORT THE RANDOM RULES AND THE PROBABILITY MATCH HERE
-    from so.core.reentry_simulation import simulate_stop_reentry_dict, get_random_reentry_func
-    from experiments.exp03_ath_exit.rules import get_random_baseline_probability_dict, get_random_exit_signal_arr
-    probability_dict = get_random_baseline_probability_dict(path_dict_in)
-    path_return = path_dict_in["metric_dict"]["total_return"]
-    session_count = len(path_dict_in["exit_signal_arr"])
-    never_bool = not np.isfinite(probability_dict["exit_probability"]) or not np.isfinite(probability_dict["buyback_probability"])
-    exit_list, reentry_list = [], []
-    if never_bool:
-        exit_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-        reentry_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-    else:
-        reentry_func = path_dict_in["reentry_func"]
-        for run_idx in range(exp_config.RANDOM_RUN_COUNT):
-            exit_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None, reentry_func, "random",
-                                                  exit_signal_arr_in=get_random_exit_signal_arr(session_count, probability_dict["exit_probability"], config.RANDOM_SEED + exp_config.RANDOM_EXIT_SEED_OFFSET + run_idx),
-                                                  max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            reentry_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None,
-                                                     get_random_reentry_func(probability_dict["buyback_probability"], config.RANDOM_SEED + run_idx), "random",
-                                                     exit_signal_arr_in=path_dict_in["exit_signal_arr"], max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            exit_list.append(exit_dict["metric_dict"]["total_return"])
-            reentry_list.append(reentry_dict["metric_dict"]["total_return"])
-    return {"random_exit_median": float(np.median(exit_list)), "random_reentry_median": float(np.median(reentry_list)),
-            "random_exit_list": exit_list, "random_reentry_list": reentry_list}
+    # ONE IMPLEMENTATION, ON THE DESIGN
+    return design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in, period_pdf_in)
 
 # FUNCTION: THE UNMODIFIED {E1, E2} PRIOR-ONLY PATH
 def get_unmodified_path_dict(ohlcv_array_dict_in, period_pdf_in, data_context_in):
@@ -152,7 +131,7 @@ def run_development_dict():
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
     buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, date1, date2)
-    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
+    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2, data_context)
     unmodified_dict = get_unmodified_path_dict(ohlcv_array_dict, period_pdf, data_context)
     strategy_return_pdf = get_chained_daily_return_pdf([path_dict["daily_equity_pdf"]])
     buy_hold_return_pdf = get_chained_daily_return_pdf([buy_hold_dict["daily_equity_pdf"]])

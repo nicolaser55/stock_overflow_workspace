@@ -344,20 +344,53 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     simulation_dict["decision_session_list"] = [session_date_list[idx] for idx in path_idx_list]
     return simulation_dict
 
-# FUNCTION: MATCHED BASELINES NEED THE PATH
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
+BASELINE_COMPARISON_KEY_LIST = ["constant_exposure", "random_shift_median"]
+
+# FUNCTION: CONSTANT EXPOSURE AND RANDOM SHIFTS OVER A SPAN
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None):
     """
-    The constant exposure and the random shifts are matched to the prior-only path in the development report.
+    Constant exposure holds the path's mean weight. Twenty circular shifts keep the weights and move their timing.
+    Shifts are drawn in [126, N - 126] from so.config.RANDOM_SEED. A path shorter than twice that minimum has no
+    shift. The same function is the development report.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict | None): Prior-only path
 
     Returns:
-        dict: Empty
+        dict: Constant return, the shift family, and the share of shifts the path beats
     """
-    # THE RUNNER'S HOOK HAS NO PATH
-    return {}
+    # IMPORT THE SPAN CUT HERE
+    from so.core.baseline_report import get_random_family_stat_dict, get_span_path_dict
+    # SPY THROUGH THE CONTEXT, THEN THE PATH ON THIS SPAN
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
+    path_dict = get_span_path_dict(path_dict_in, ohlcv_array_dict_in, date1_in, date2_in)
+    # THE MEAN WEIGHT IS THE UNINFORMED EXPOSURE
+    mean_weight = float(path_dict["metric_dict"]["mean_weight"])
+    decision_arr = np.asarray(path_dict["target_decision_arr"], dtype=float)
+    constant_arr = np.where(np.isfinite(decision_arr), mean_weight, np.nan)
+    constant_dict = simulate_weight_span_dict(ohlcv_array_dict_in, date1_in, date2_in, constant_arr)
+    window_idx_arr = np.flatnonzero(np.isfinite(decision_arr))
+    shift_list = []
+    low_int = int(exp_config.RANDOM_SHIFT_MIN_SESSIONS)
+    path_return = path_dict["metric_dict"]["total_return"]
+    if len(window_idx_arr) > 2 * low_int:
+        shift_arr = np.random.default_rng(config.RANDOM_SEED).integers(low_int, len(window_idx_arr) - low_int, size=exp_config.RANDOM_RUN_COUNT)
+        for shift in shift_arr:
+            shifted_arr = np.full(decision_arr.shape, np.nan)
+            shifted_arr[window_idx_arr] = np.roll(decision_arr[window_idx_arr], int(shift))
+            shift_dict = simulate_weight_span_dict(ohlcv_array_dict_in, date1_in, date2_in, shifted_arr)
+            shift_list.append(shift_dict["metric_dict"]["total_return"])
+    else:
+        shift_list = [path_return] * exp_config.RANDOM_RUN_COUNT
+    shift_return_arr = np.asarray(shift_list, dtype=float)
+    return_dict = {"constant_exposure": constant_dict["metric_dict"]["total_return"], "constant_weight": mean_weight,
+                   "random_shift_list": shift_list, "random_shift_beats_share": float(np.mean(shift_return_arr < path_return))}
+    return_dict.update(get_random_family_stat_dict("random_shift", shift_list, path_return))
+    return return_dict
 
 # FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
 def get_development_data_context(session_date_list_in):

@@ -4,7 +4,6 @@ import pandas as pd
 from so import config
 from experiments.exp01_minute_entry import config as exp_config
 from experiments.exp01_minute_entry import design
-from experiments.exp01_minute_entry.walk_forward import get_fixed_time_decision_pdf, get_random_decision_pdf, get_window_simulation_dict
 
 """
 Development report for exp01_minute_entry_v2
@@ -65,30 +64,21 @@ def get_optimistic_dict(score_pdf_in):
     return best_dict
 
 # FUNCTION: RANDOM ENTRIES AND THE FIXED-TIME BASELINE
-def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in):
+def get_path_baseline_dict(ohlcv_array_dict_in, path_dict_in, date1_in, date2_in, data_context_in=None):
     """
-    Twenty random-entry runs use the path's buy rate and its decision times. One fixed-time run buys at 09:59.
+    The design's baselines. This is the same function the holdout report calls.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         path_dict_in (dict): Prior-only path
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
 
     Returns:
-        dict: The random median, the list, and the fixed-time return
+        dict: The random family and the fixed-time return
     """
-    # MATCH THE BUY RATE AND SIMULATE
-    decision_pdf = path_dict_in["decision_pdf"]
-    eligible_series = pd.Series(decision_pdf["decision_ts"])
-    buy_probability = float(np.mean(decision_pdf["buy_flag"].to_numpy(dtype=float))) if len(decision_pdf) else 0.0
-    delta_list = list(exp_config.MODEL_DELTA_LIST)
-    random_list = []
-    for run_idx in range(exp_config.RANDOM_BASELINE_RUN_COUNT):
-        random_pdf = get_random_decision_pdf(eligible_series, buy_probability, delta_list, config.RANDOM_SEED + run_idx)
-        random_list.append(get_window_simulation_dict(random_pdf, ohlcv_array_dict_in, date1_in, date2_in)["metric_dict"]["total_return"])
-    fixed_pdf = get_fixed_time_decision_pdf(eligible_series)
-    fixed_return = get_window_simulation_dict(fixed_pdf, ohlcv_array_dict_in, date1_in, date2_in)["metric_dict"]["total_return"]
-    return {"random_entry_median": float(np.median(random_list)), "random_entry_list": random_list, "fixed_time_return": float(fixed_return)}
+    # ONE IMPLEMENTATION, ON THE DESIGN
+    return design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in)
 
 # FUNCTION: RUN THE DEVELOPMENT REPORT
 def run_development_dict():
@@ -118,7 +108,7 @@ def run_development_dict():
     design.print_progress_line()
     path_dict = design.run_prior_only_path_dict(ohlcv_array_dict, period_pdf, selection_pdf, data_context)
     date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
-    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2)
+    baseline_dict = get_path_baseline_dict(ohlcv_array_dict, path_dict, date1, date2, data_context)
     path_dict["metric_dict"]["cash_session_pct"] = float(1.0 - path_dict["daily_equity_pdf"]["in_position"].mean())
     path_dict["metric_dict"]["signal_exit_count"] = int(len(path_dict["transaction_pdf"])) if path_dict["transaction_pdf"] is not None else 0
     strategy_return_pdf = get_chained_daily_return_pdf([path_dict["daily_equity_pdf"]])

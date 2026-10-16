@@ -25,17 +25,31 @@ run_prior_only_path_dict = exp12_design.run_prior_only_path_dict
 get_development_data_context = exp12_design.get_development_data_context
 get_session_candidate_str = exp12_design.get_session_candidate_str
 
-# FUNCTION: PATH-MATCHED BASELINES LIVE IN THE REPORT
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
+BASELINE_COMPARISON_KEY_LIST = ["unmodified_e1", "random_exit_median", "random_reentry_median"]
+
+# FUNCTION: E1M1'S RANDOM FAMILIES AND, WHEN PERIODS ARE PASSED, UNMODIFIED E1
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None, period_pdf_in=None):
     """
-    The unmodified E1 path and the random families are computed in the report.
+    The random families are exp12's, on this path, with exp12's seeds. When period_pdf_in is passed, every period is
+    forced to E1none and that path's total return is unmodified_e1. The same function is the development report.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict | None): Prior-only path
+        period_pdf_in (pd.DataFrame | None): Periods, required for unmodified E1
 
     Returns:
-        dict: Empty
+        dict: Both random families and, with periods, unmodified E1
     """
-    # THE BASELINES NEED THE PATH
-    return {}
+    # THE RANDOM FAMILIES. PERIODS ARE NOT PASSED, SO exp12 DOES NOT ADD ITS OWN UNMODIFIED PATH
+    import pandas as pd
+    return_dict = exp12_design.get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in, path_dict_in)
+    # UNMODIFIED E1: EVERY PERIOD IS E1none
+    if period_pdf_in is not None:
+        selection_pdf = pd.DataFrame({"period_id": period_pdf_in["period_id"].astype(int), "candidate": "E1none", "candidate_idx": 0})
+        unmodified_dict = exp12_design.run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf, data_context_in)
+        return_dict["unmodified_e1"] = unmodified_dict["metric_dict"]["total_return"]
+    return return_dict

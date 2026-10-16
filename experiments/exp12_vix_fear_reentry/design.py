@@ -432,20 +432,61 @@ def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_i
     simulation_dict["decision_session_list"] = [session_date_list[idx] for idx in path_idx_list]
     return simulation_dict
 
-# FUNCTION: PATH-MATCHED BASELINES LIVE IN THE REPORT
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in):
+# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
+BASELINE_COMPARISON_KEY_LIST = ["unmodified", "random_exit_median", "random_reentry_median"]
+
+# FUNCTION: MATCHED RANDOM FAMILIES AND, WHEN PERIODS ARE PASSED, THE UNMODIFIED PATH
+def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None, period_pdf_in=None):
     """
-    The unmodified path and the random families are matched to the prior-only path and are computed in the report.
+    Twenty random exits keep the path's re-entry. Twenty random re-entries keep the path's exit signal. When the path
+    never exits, every random run equals the path. Exit run i uses so.config.RANDOM_SEED + RANDOM_EXIT_SEED_OFFSET + i.
+    Re-entry run i uses so.config.RANDOM_SEED + i. When period_pdf_in is passed, the unmodified {E1, E2} prior-only
+    return is included. The same function is the development report.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
+        data_context_in (DataContext | None): Point-in-time context
+        path_dict_in (dict | None): Prior-only path
+        period_pdf_in (pd.DataFrame | None): Periods, required for the unmodified path
 
     Returns:
-        dict: Empty
+        dict: Both random families and, with periods, the unmodified return
     """
-    # THE BASELINES NEED THE PATH
-    return {}
+    # IMPORT THE RANDOM RULES AND THE SPAN CUT HERE
+    from so.core.reentry_simulation import simulate_stop_reentry_dict, get_random_reentry_func
+    from experiments.exp03_ath_exit.rules import get_random_baseline_probability_dict, get_random_exit_signal_arr
+    from so.core.baseline_report import get_random_family_stat_dict, get_span_path_dict
+    # SPY THROUGH THE CONTEXT, THEN THE PATH ON THIS SPAN
+    read_context_inputs(ohlcv_array_dict_in, data_context_in)
+    path_dict = get_span_path_dict(path_dict_in, ohlcv_array_dict_in, date1_in, date2_in)
+    probability_dict = get_random_baseline_probability_dict(path_dict)
+    path_return = path_dict["metric_dict"]["total_return"]
+    session_count = len(path_dict["exit_signal_arr"])
+    never_bool = not np.isfinite(probability_dict["exit_probability"]) or not np.isfinite(probability_dict["buyback_probability"])
+    exit_list, reentry_list = [], []
+    if never_bool:
+        exit_list = [path_return] * exp_config.RANDOM_RUN_COUNT
+        reentry_list = [path_return] * exp_config.RANDOM_RUN_COUNT
+    else:
+        reentry_func = path_dict["reentry_func"]
+        for run_idx in range(exp_config.RANDOM_RUN_COUNT):
+            exit_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None, reentry_func, "random",
+                                                  exit_signal_arr_in=get_random_exit_signal_arr(session_count, probability_dict["exit_probability"], config.RANDOM_SEED + exp_config.RANDOM_EXIT_SEED_OFFSET + run_idx),
+                                                  max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+            reentry_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None,
+                                                     get_random_reentry_func(probability_dict["buyback_probability"], config.RANDOM_SEED + run_idx), "random",
+                                                     exit_signal_arr_in=path_dict["exit_signal_arr"], max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
+            exit_list.append(exit_dict["metric_dict"]["total_return"])
+            reentry_list.append(reentry_dict["metric_dict"]["total_return"])
+    return_dict = {**get_random_family_stat_dict("random_exit", exit_list, path_return),
+                   **get_random_family_stat_dict("random_reentry", reentry_list, path_return),
+                   "random_exit_list": exit_list, "random_reentry_list": reentry_list}
+    # THE UNMODIFIED PATH IS A SECOND REPLAY. THE DEVELOPMENT REPORT ASKS FOR IT WITH THE PERIODS
+    if period_pdf_in is not None:
+        from experiments.exp12_vix_fear_reentry.report import get_unmodified_path_dict
+        return_dict["unmodified"] = get_unmodified_path_dict(ohlcv_array_dict_in, period_pdf_in, data_context_in)["total_return"]
+    return return_dict
 
 # FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
 def get_development_data_context(session_date_list_in):
