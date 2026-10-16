@@ -83,10 +83,11 @@ def test_failed_run_is_saved():
     # A TEMPORARY NOTEBOOK, NOT AN EXPERIMENT
     with tempfile.TemporaryDirectory(prefix="so_nb_fail_") as directory_str:
         notebook_path_str = write_notebook_str(directory_str, ["print('kept-marker')", "raise RuntimeError('synthetic failure')"], "failed.ipynb")
+        progress_path_str = os.path.join(directory_str, "progress.log")
         # THE EXECUTOR RAISES AFTER THE SAVE
         raised_bool = False
         try:
-            execute_notebook_bool(notebook_path_str, timeout_int_in=120)
+            execute_notebook_bool(notebook_path_str, timeout_int_in=120, progress_path_str_in=progress_path_str)
         except Exception as exc:
             raised_bool = True
             assert type(exc).__name__ == "CellExecutionError", type(exc).__name__
@@ -112,16 +113,39 @@ def test_completed_run_is_saved():
     # A TEMPORARY NOTEBOOK
     with tempfile.TemporaryDirectory(prefix="so_nb_ok_") as directory_str:
         notebook_path_str = write_notebook_str(directory_str, ["print('ok-marker')"], "ok.ipynb")
+        progress_path_str = os.path.join(directory_str, "progress.log")
         # THE EXECUTOR RETURNS AFTER THE SAVE
-        assert execute_notebook_bool(notebook_path_str, timeout_int_in=120) is True
+        assert execute_notebook_bool(notebook_path_str, timeout_int_in=120, progress_path_str_in=progress_path_str) is True
         saved = nbformat.read(notebook_path_str, as_version=4)
         assert saved.cells[0].get("execution_count") == 1
         assert "ok-marker" in get_stream_text_str(saved.cells[0])
     # THE CHECK PASSED
     passed("a completed notebook is saved with its output")
 
+# FUNCTION: THE PROGRESS LINE IS ON DISK BEFORE THE CELL RETURNS
+def test_progress_line_is_flushed_before_the_cell_returns():
+    """
+    The cell reads the progress log and finds its own start line. That line was flushed before the cell ran.
+
+    Returns:
+        None
+    """
+    # A CELL THAT READS THE LOG THE EXECUTOR IS WRITING
+    with tempfile.TemporaryDirectory(prefix="so_nb_progress_") as directory_str:
+        progress_path_str = os.path.join(directory_str, "progress.log")
+        source_str = "import os\ntext = open(os.environ['SO_NOTEBOOK_PROGRESS_LOG'], encoding='utf-8').read()\nassert 'cell 0 start' in text\nprint('saw-progress')\n"
+        notebook_path_str = write_notebook_str(directory_str, [source_str], "progress.ipynb")
+        assert execute_notebook_bool(notebook_path_str, timeout_int_in=120, progress_path_str_in=progress_path_str) is True
+        saved = nbformat.read(notebook_path_str, as_version=4)
+        assert "saw-progress" in get_stream_text_str(saved.cells[0])
+        progress_text_str = open(progress_path_str, encoding="utf-8").read()
+        assert "cell 0 start" in progress_text_str and "cell 0 done" in progress_text_str
+    # THE CHECK PASSED
+    passed("a progress line is flushed before the cell returns")
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_failed_run_is_saved()
     test_completed_run_is_saved()
+    test_progress_line_is_flushed_before_the_cell_returns()
     print("\nAll notebook-execution tests passed")

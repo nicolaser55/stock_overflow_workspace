@@ -89,11 +89,12 @@ def test_queue():
         # THE QUEUE JOINS THE NOTEBOOK PATH TO THE WORKSPACE ROOT. POINT THE NOTEBOOKS AT ABSOLUTE PATHS BY USING A ROOT-RELATIVE TRICK:
         # get_notebook_finished_bool joins _ROOT_PATH / notebook. PASS PATHS THAT ARE ALREADY ABSOLUTE AND PATCH THE JOIN.
         status_path = root_path / "status.csv"
+        progress_path = root_path / "progress.log"
         from scripts import run_port_queue
         original_root = run_port_queue._ROOT_PATH
         run_port_queue._ROOT_PATH = Path("")
         try:
-            written_list = run_queue(step_list, trial_pdf, status_path, runner)
+            written_list = run_queue(step_list, trial_pdf, status_path, runner, progress_path)
         finally:
             run_port_queue._ROOT_PATH = original_root
         status_list = [(row["experiment"], row["step"], row["status"]) for row in written_list]
@@ -107,7 +108,7 @@ def test_queue():
         call_list.clear()
         run_port_queue._ROOT_PATH = Path("")
         try:
-            second_list = run_queue(step_list, trial_pdf, status_path, runner)
+            second_list = run_queue(step_list, trial_pdf, status_path, runner, progress_path)
         finally:
             run_port_queue._ROOT_PATH = original_root
         # A DEVELOPMENT THAT FAILED BEFORE IT FINISHED IS RUN AGAIN. ITS CALIBRATION STAYS SKIPPED FOR THIS PASS.
@@ -269,13 +270,47 @@ def test_retry_unfinished_calibration():
         from scripts import run_port_queue
         original_root = run_port_queue._ROOT_PATH
         run_port_queue._ROOT_PATH = Path("")
+        progress_path = root_path / "progress.log"
         try:
-            written_list = run_queue(step_list, trial_pdf, status_path, runner)
+            written_list = run_queue(step_list, trial_pdf, status_path, runner, progress_path)
         finally:
             run_port_queue._ROOT_PATH = original_root
         assert [(row["step"], row["status"]) for row in written_list] == [("development", "skipped"), ("calibration", "finished")]
         assert call_list == ["calibration"]
     passed("queue (a finished development stays skipped; a calibration without a note row runs again)")
+
+# FUNCTION: THE PROGRESS LINE IS ON DISK BEFORE THE STEP RETURNS
+def test_progress_line_is_flushed_before_the_step_returns():
+    """
+    The runner reads the progress log and finds its own running line. That line was flushed before the runner was called.
+
+    Returns:
+        None
+    """
+    # A STEP THAT HAS NOT FINISHED, AND A RUNNER THAT READS THE LOG
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        root_path = Path(temp_dir_str)
+        pending_path = root_path / "pending.ipynb"
+        write_notebook(pending_path, False)
+        progress_path = root_path / "progress.log"
+        seen_dict = {}
+
+        def runner(step_dict):
+            seen_dict["text"] = progress_path.read_text(encoding="utf-8")
+
+        step_list = [{"experiment": "delta", "step": "development", "kind": "notebook", "notebook": str(pending_path),
+                      "experiment_name": "delta_v2", "heartbeat": False}]
+        trial_pdf = pd.DataFrame(columns=["experiment", "stage", "note"])
+        from scripts import run_port_queue
+        original_root = run_port_queue._ROOT_PATH
+        run_port_queue._ROOT_PATH = Path("")
+        try:
+            run_queue(step_list, trial_pdf, root_path / "status.csv", runner, progress_path)
+        finally:
+            run_port_queue._ROOT_PATH = original_root
+        assert "running delta development" in seen_dict["text"]
+    # THE CHECK PASSED
+    passed("a progress line is flushed before the step returns")
 
 # IF THE FILE IS RUN DIRECTLY
 if __name__ == "__main__":
@@ -284,4 +319,5 @@ if __name__ == "__main__":
     test_quarter_on_development_end_is_dropped()
     test_calibration_refuses_empty_and_nan()
     test_retry_unfinished_calibration()
+    test_progress_line_is_flushed_before_the_step_returns()
     print("\nAll port-queue tests passed")
