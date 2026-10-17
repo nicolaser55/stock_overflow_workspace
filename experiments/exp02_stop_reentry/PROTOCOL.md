@@ -147,8 +147,8 @@ log (rows used, share purged, prediction move).
 
 ## 7. Holdout evaluation
 
-Only Nicolas runs `scripts/holdout_evaluate.py`. The agent does not run it and does not set `SO_HOLDOUT_PATH`,
-`SO_HOLDOUT_EVALUATION_TOKEN` or `SO_ALLOW_LEGACY_REPRODUCTION`.
+Only Nicolas runs `scripts/holdout_evaluate.py`. The agent does not run it and does not set `SO_HOLDOUT_PATH` or
+`SO_HOLDOUT_EVALUATION_TOKEN`.
 
 ## 8. Known limitations
 
@@ -163,3 +163,4 @@ carries the position. The two numbers are not the same object. The old results s
 | 2.0 | 2026-10-12 | Re-run under the new rules, not new evidence (Nicolas, 2026-10-12). Machinery only, section 2. |
 | 2.0 | 2026-10-13 | Shared selection now treats scores within NUMERIC_TOLERANCE (1e-6) as tied. This experiment is not re-run. Its trials stand. |
 | 2.0 | 2026-10-15 | Holdout report baselines are the development report's uninformed baselines over the span passed in, with this protocol's fixed seeds, through the point-in-time context. Report-only: no rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. Development results unchanged. |
+| 2.0 | 2026-10-16 | The removed `SO_ALLOW_LEGACY_REPRODUCTION` flag is no longer named. No rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. |

@@ -20,7 +20,7 @@ boundaries.
 
 What this module adds (shared code, no trading rule of exp01-exp03 is changed):
     1. Continuous replay: so.core.reentry_simulation.simulate_stop_reentry_dict over one long window, behind a guard that
-       refuses any window reaching the untouched data (the caller passes its start date, 2026-05-14). The optional cash
+       refuses any window reaching the holdout (the caller may pass an extra cap). The optional cash
        cap (max_cash_sessions_in) is passed through: None = never forced, or a long cap such as 250 decisions.
     2. Replay periods: the validation quarters of a walk-forward schedule made NON-OVERLAPPING (the anchored schedule
        lets consecutive quarters overlap or leave gaps of a few sessions): period f runs from fold f's validation start
@@ -50,13 +50,12 @@ Replay Window And Periods
 def check_replay_window_bool(date2_in, untouched_start_date_str_in=None):
     """
     Raises if the replay window reaches the holdout (research-integrity.mdc, "Never" rule 1). With no registered window,
-    a passed date keeps the archived behaviour. With a window, the boundary is the earlier of that date and the window
-    start (so.core.holdout.get_replay_boundary_date). SO_ALLOW_LEGACY_REPRODUCTION=1 uses only the pinned 2026-05-14
-    boundary and prints a warning.
+    a passed date is the cap. With a window, the boundary is the earlier of that date and the window start
+    (so.core.holdout.get_replay_boundary_date).
 
     Args:
         date2_in (datetime.date | str): Last session of the replay window
-        untouched_start_date_str_in (str | None): Legacy pinned boundary (e.g. "2026-05-14"); None uses the active window
+        untouched_start_date_str_in (str | None): Optional extra cap; None uses the active window
 
     Returns:
         bool: True if the window is allowed

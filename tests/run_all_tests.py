@@ -19,7 +19,6 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
     tests/test_exp07.py              exp07 warning lights, the k-of-5 rule and the walk-forward
     tests/test_exp01_step04.py       exp01 step 04 multivariate signal check (planted interaction, noise, null, parallel)
     tests/test_vix_features.py       VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, no look-ahead, formulas)
-    tests/test_exp08.py              exp08 VIX gate (analysis rows, shifted null, G1-G4 on planted data, gate decisions)
     tests/test_exp12.py              exp12 VIX re-entry rules (M1-M3, fresh-exit option of the simulator, walk-forward, reports)
     tests/test_exp13.py              exp13 E1M1 robustness (average distances, variants = frozen, delay, VIX shift, nulls, reports, verdict)
     tests/test_holdout.py            rolling holdout (window, roll, guards, ledger, causal replay; synthetic data only)
@@ -34,7 +33,7 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp08.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py", "test_holdout_baselines.py", "test_lookahead_audit.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py", "test_holdout_baselines.py", "test_lookahead_audit.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 

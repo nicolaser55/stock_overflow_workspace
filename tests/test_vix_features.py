@@ -5,10 +5,10 @@ Run from the workspace root:   python tests/test_vix_features.py   (or python te
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
 What is verified (synthetic data; temporary files under logs/test_vix_tmp/ inside the workspace, removed at the end):
-    1. Loaders: raise without a cutoff and with a cutoff on or after 2026-05-14; never return a row after the cutoff (a
-       row dated 2026-05-14 is planted in a yearly file); never open a file dated after the cutoff (corrupt files are
-       planted there); raise when a "date" differs from the New York date of the timestamp. The registry path is a
-       missing file for the duration of the suite, so a registered window does not move that pinned boundary.
+    1. Loaders: raise without a cutoff and with a cutoff on or after the temporary window start 2026-05-14; never return a
+       row after the cutoff (a row dated 2026-05-14 is planted in a yearly file); never open a file dated after the
+       cutoff (corrupt files are planted there); raise when a "date" differs from the New York date of the timestamp.
+       The suite points the registry at that temporary window and does not read the real registry.
     2. _prev uses the close of the strictly previous date; _intraday picks the bar labelled decision - 1 minute on a full
        day (15:57) and on a half day (12:57).
     3. Staleness (lag 3 accepted, lag 4 stale) and the fallback of _intraday (missing session, half day without an
@@ -108,7 +108,7 @@ def test_loaders():
             raise AssertionError("a loader ran without a cutoff")
         except TypeError:
             pass
-    # A CUTOFF ON OR AFTER THE UNTOUCHED START (OR None) RAISES
+    # A CUTOFF ON OR AFTER THE TEMPORARY WINDOW START (OR None) RAISES
     for cutoff_str in [None, "2026-05-14", "2026-08-13", "2030-01-01"]:
         for call_func in [lambda: read_vix_daily_pdf("vix", cutoff_str, folder_str + "daily/"), lambda: read_vix_1min_pdf("vix", cutoff_str, None, folder_str + "1min/")]:
             try:
@@ -137,7 +137,7 @@ def test_loaders():
         raise AssertionError("a date mismatch was accepted")
     except ValueError:
         pass
-    passed("loaders (cutoff required and < 2026-05-14; no row after the cutoff; later files never opened; date check)")
+    passed("loaders (cutoff required and before the window start; no row after the cutoff; later files never opened; date check)")
 
 # FUNCTION: BUILD THE SYNTHETIC SPY TABLE AND VIX BARS
 def get_synthetic_setup_dict():
@@ -333,10 +333,14 @@ if __name__ == "__main__":
     # START FROM AN EMPTY TEMPORARY FOLDER
     shutil.rmtree(TMP_PATH_STR, ignore_errors=True)
     os.makedirs(TMP_PATH_STR, exist_ok=True)
-    # POINT THE REGISTRY AT A MISSING FILE SO THE PINNED 2026-05-14 CUTOFF IS WHAT THIS SUITE CHECKS
+    # POINT THE REGISTRY AT A TEMPORARY WINDOW STARTING 2026-05-14 (THE REAL REGISTRY IS NOT READ)
     from so import paths
     saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
-    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TMP_PATH_STR, "no_holdout_windows.csv")
+    registry_path_str = os.path.join(TMP_PATH_STR, "holdout_windows.csv")
+    pd.DataFrame([{"window_id": "test", "status": "active", "start": "2026-05-14", "end": "2027-05-13",
+                   "session_count": 1, "months_covered": 12, "opened_ts": "2026-10-16T00:00:00", "opened_by": "test",
+                   "data_last_session_at_open": "2027-05-13", "retired_ts": "", "retire_reason": ""}]).to_csv(registry_path_str, index=False)
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = registry_path_str
     try:
         test_loaders()
         setup_dict = get_synthetic_setup_dict()

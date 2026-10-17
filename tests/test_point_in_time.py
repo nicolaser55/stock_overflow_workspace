@@ -22,7 +22,6 @@ TEMP_ROOT_STR = tempfile.mkdtemp(prefix="so_pit_data_")
 os.environ["SO_DATA_PATH"] = TEMP_ROOT_STR
 os.environ.pop("SO_HOLDOUT_PATH", None)
 os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
-os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
@@ -733,4 +732,3 @@ if __name__ == "__main__":
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)
         os.environ.pop("SO_HOLDOUT_PATH", None)
         os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
-        os.environ.pop("SO_ALLOW_LEGACY_REPRODUCTION", None)
