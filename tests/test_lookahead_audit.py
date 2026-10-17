@@ -7,6 +7,7 @@ Run from the workspace root:   python tests/test_lookahead_audit.py   (or python
 Synthetic bars only. The leaking designs must fail. The template must pass. The real trial log is not written.
 """
 
+import datetime
 import os
 import sys
 
@@ -83,6 +84,35 @@ def test_cut_dates():
     assert all(cut_date > month_end_date for cut_date in cut_on_first_list)
     passed(f"four month-end cuts ({cut_list[0]} … {cut_list[-1]})")
 
+# FUNCTION: CLIPPED PERIOD BOUNDS ARE DATES, SO THE VOLATILITY TARGET CAN COMPARE THEM
+def test_clipped_period_bounds_are_dates():
+    """
+    The saved period file stores bounds as strings. After clipping, both bounds are datetime.date, and exp05's
+    volatility target accepts that frame.
+
+    Returns:
+        None
+    """
+    # A STRING-BOUNDED PERIOD THAT CONTAINS THE CUT, AND ONE THAT STARTS AFTER IT
+    from scripts.lookahead_audit import get_clipped_period_pdf
+    period_pdf = pd.DataFrame([{"period_id": 1, "period_start": "2015-01-02", "period_end": "2015-06-30"},
+                               {"period_id": 2, "period_start": "2015-07-01", "period_end": "2015-12-31"}])
+    cut_date = datetime.date(2015, 4, 30)
+    clipped_pdf = get_clipped_period_pdf(period_pdf, cut_date)
+    assert len(clipped_pdf) == 1
+    assert clipped_pdf["period_start"].iloc[0] == datetime.date(2015, 1, 2)
+    assert clipped_pdf["period_end"].iloc[0] == cut_date
+    assert type(clipped_pdf["period_start"].iloc[0]) is datetime.date
+    assert type(clipped_pdf["period_end"].iloc[0]) is datetime.date
+    # THE TARGET COMPARES THESE DATES WITH THE DAILY TABLE'S DATES
+    from experiments.exp05_vol_scaled_exposure.exposure import get_target_volatility_arr
+    daily_pdf = pd.DataFrame({"date": [datetime.date(2014, 12, 31), datetime.date(2015, 1, 2), cut_date],
+                              "daily_volatility": [0.01, 0.02, 0.03]})
+    target_arr = get_target_volatility_arr(daily_pdf, clipped_pdf, 0.5, min_history_in=1)
+    assert len(target_arr) == 3
+    assert target_arr[0] == target_arr[0]
+    passed("clipped period bounds are dates")
+
 # FUNCTION: LEAKING DESIGNS FAIL AND THE TEMPLATE PASSES
 def test_designs():
     """
@@ -120,6 +150,7 @@ def test_designs():
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     test_cut_dates()
+    test_clipped_period_bounds_are_dates()
     test_designs()
     assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
     print("\nAll look-ahead audit tests passed")

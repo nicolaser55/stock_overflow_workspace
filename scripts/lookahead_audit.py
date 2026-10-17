@@ -139,7 +139,9 @@ def get_audit_cut_date_list(session_date_list_in, first_decision_date_in, develo
 def get_clipped_period_pdf(period_pdf_in, cut_date_in):
     """
     Drops periods that start after the cut. A period that contains the cut keeps its id and ends on the cut, so the
-    path still decides on the cut session. Periods that already end before the cut are unchanged.
+    path still decides on the cut session. Periods that already end before the cut are unchanged. Both bounds are
+    datetime.date. The saved period file stores them as strings; a design that compares them with daily dates
+    (exp05's volatility target) receives the same type the development schedule wrote.
 
     Args:
         period_pdf_in (pd.DataFrame): Development periods
@@ -158,6 +160,8 @@ def get_clipped_period_pdf(period_pdf_in, cut_date_in):
         end_date = get_date(row_dict["period_end"])
         if start_date > cut_date:
             continue
+        # BOTH BOUNDS ARE DATES. THE CSV LEAVES THEM AS STRINGS, AND A DATE < STRING COMPARISON RAISES.
+        row_dict["period_start"] = start_date
         row_dict["period_end"] = min(end_date, cut_date)
         if get_date(row_dict["period_end"]) >= start_date:
             row_dict_list.append(row_dict)
