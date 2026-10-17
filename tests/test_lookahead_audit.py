@@ -113,6 +113,55 @@ def test_clipped_period_bounds_are_dates():
     assert target_arr[0] == target_arr[0]
     passed("clipped period bounds are dates")
 
+# FUNCTION: A WINDOW-END WEIGHT IS NOT A FINDING WHEN THE CONTROL HAS IT TOO
+def test_window_end_matches_the_control():
+    """
+    The last session of a stopped replay is flat. The saved path is not. The control is stopped the same way, so the
+    check passes. The control runs, because the saved path differed.
+
+    Returns:
+        None
+    """
+    # THE SAME YEAR THE LEAK TESTS USE. THE WEIGHT IS 0 ONLY ON THE LAST SESSION OF THE PERIOD.
+    import types
+    import numpy as np
+    from so import config
+    from test_holdout import get_planted_equity_pdf
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2023-01-03", "2023-12-29", minute_vol_in=0.0004, seed_in=11)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    session_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+    period_pdf = get_period_pdf(session_list, 0, len(session_list) - 1)
+    design_module = types.ModuleType("window_end_design")
+    design_module.EXPERIMENT_NAME = "exp_window_end"
+    design_module.PROTOCOL_VERSION = "1.0"
+    design_module.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
+    design_module.CANDIDATE_LIST = ["flat"]
+    design_module.SELECTION_RULE = {"pooled_periods": 1, "tie_break": [("candidate", True)]}
+
+    def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in):
+        return {"daily_equity_pdf": get_planted_equity_pdf(date2_in, 0.0), "trade_pdf": pd.DataFrame()}
+
+    def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in):
+        date1 = pd.Timestamp(period_pdf_in["period_start"].iloc[0]).date()
+        date2 = pd.Timestamp(period_pdf_in["period_end"].iloc[-1]).date()
+        kept_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]
+                     if date1 <= pd.Timestamp(session_date).date() <= date2]
+        weight_list = [0.0 if session_date == date2 else 1.0 for session_date in kept_list]
+        equity_pdf = pd.DataFrame({"date": kept_list, "equity": float(config.INITIAL_CAPITAL),
+                                   "in_position": [weight == 1.0 for weight in weight_list], "weight": weight_list})
+        return {"daily_equity_pdf": equity_pdf, "trade_pdf": pd.DataFrame(columns=["trade_ts", "delta_share_count", "reason"]),
+                "target_weight_arr": np.array(weight_list, dtype=float), "decision_session_list": kept_list}
+
+    design_module.run_candidate_replay_dict = run_candidate_replay_dict
+    design_module.run_prior_only_path_dict = run_prior_only_path_dict
+    design_module.get_baseline_return_dict = lambda ohlcv_array_dict_in, date1_in, date2_in: {"flat": 0.0}
+    reference_dict = get_replay_result_dict(design_module, ohlcv_array_dict, period_pdf, None)
+    result_dict = get_audit_result_dict(design_module, ohlcv_array_dict, period_pdf, None, 4, reference_dict)
+    assert result_dict["passed"] is True, result_dict
+    assert result_dict["artefact_list"], result_dict
+    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
+    passed(f"window end matches the control ({len(result_dict['artefact_list'])} saved-path differences)")
+
 # FUNCTION: LEAKING DESIGNS FAIL AND THE TEMPLATE PASSES
 def test_designs():
     """
@@ -151,6 +200,7 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     test_cut_dates()
     test_clipped_period_bounds_are_dates()
+    test_window_end_matches_the_control()
     test_designs()
     assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
     print("\nAll look-ahead audit tests passed")

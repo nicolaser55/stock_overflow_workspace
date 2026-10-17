@@ -459,12 +459,81 @@ def get_saved_reference_dict(experiment_name_str_in):
         path_dict["refit_log_pdf"] = pd.read_csv(refit_path)
     return {"period_pdf": period_pdf, "selection_pdf": selection_pdf, "path_dict": path_dict}
 
+# FUNCTION: THE CONTROL REPLAY FOR ONE CUT, RUN AT MOST ONCE
+def get_control_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in,
+                            cut_date_in, cache_dict_in):
+    """
+    Unmodified bars and the development context, with the decision schedule stopped on the cut. A second check at the
+    same cut reuses the replay.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Development bars
+        period_pdf_in (pd.DataFrame): Periods
+        selection_pdf_in (pd.DataFrame): Saved candidate in force
+        data_context_in (DataContext | None): Development context
+        cut_date_in (datetime.date): Cut session
+        cache_dict_in (dict): Holds the replay under "result" after the first call
+
+    Returns:
+        dict: period_pdf, selection_pdf, path_dict
+    """
+    # THE CONTROL IS THE EXPENSIVE REPLAY. SKIP IT WHEN THIS CUT ALREADY HAS ONE.
+    if "result" in cache_dict_in:
+        return cache_dict_in["result"]
+    say(f"control {cut_date_in}")
+    stop_event = start_heartbeat_event()
+    try:
+        cache_dict_in["result"] = get_cut_replay_result_dict(
+            design_module_in, ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in, cut_date_in)
+    finally:
+        stop_event.set()
+    return cache_dict_in["result"]
+
+# FUNCTION: DIFFERENCE AGAINST THE CONTROL WHEN THE SAVED PATH ALREADY DIFFERS
+def get_control_difference_str(design_module_in, ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in,
+                               reference_result_dict_in, short_result_dict_in, cut_date_in, cache_dict_in, kind_str_in,
+                               artefact_list_in):
+    """
+    None when the check matches the saved path, or matches a control replay after it differed from the saved path.
+    The control runs only in that second case. A difference from the control is a finding.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Unmodified development bars
+        period_pdf_in (pd.DataFrame): Periods
+        selection_pdf_in (pd.DataFrame): Saved candidate in force
+        data_context_in (DataContext | None): Development context
+        reference_result_dict_in (dict): Saved path
+        short_result_dict_in (dict): Truncated or perturbed replay
+        cut_date_in (datetime.date): Cut session
+        cache_dict_in (dict): Control cache for this cut
+        kind_str_in (str): "truncation" or "perturbation"
+        artefact_list_in (list): Cuts whose saved-path difference matched the control
+
+    Returns:
+        str | None: Difference from the control, or None when the check passes
+    """
+    # A MATCH WITH THE SAVED PATH DOES NOT NEED THE CONTROL
+    saved_difference_str = get_decision_difference_str(reference_result_dict_in, short_result_dict_in, cut_date_in)
+    if saved_difference_str is None:
+        return None
+    control_dict = get_control_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, selection_pdf_in,
+                                           data_context_in, cut_date_in, cache_dict_in)
+    control_difference_str = get_decision_difference_str(control_dict, short_result_dict_in, cut_date_in)
+    if control_difference_str is None:
+        artefact_list_in.append(f"{kind_str_in} {cut_date_in} {saved_difference_str}")
+        say(f"{kind_str_in} {cut_date_in} matches the control ({saved_difference_str})")
+        return None
+    return control_difference_str
+
 # FUNCTION: RUN BOTH CHECKS AT EVERY CUT
 def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in, cut_count_in,
-                          reference_result_dict_in, development_end_date_in=None):
+                          reference_result_dict_in, development_end_date_in=None, skip_cut_count_in=0):
     """
-    Truncation and perturbation at each cut, compared with the reference. The reference is not recomputed. Each
-    replay stops on the cut. The perturbed bars and context keep the full span.
+    Truncation and perturbation at each cut. Each is compared with the saved path. A difference runs one control
+    replay on the unmodified bars, stopped at the same cut, and the check is compared with that control. The control
+    is not run when the check already matches the saved path. The perturbed bars and context keep the full span.
 
     Args:
         design_module_in (module): Design
@@ -474,9 +543,10 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
         cut_count_in (int): How many cuts
         reference_result_dict_in (dict): Saved path, or the test's stand-in
         development_end_date_in (datetime.date | None): Development end (None = the last bar session)
+        skip_cut_count_in (int): Leading cuts to leave as already decided
 
     Returns:
-        dict: passed, cut_date_list, first_difference, check
+        dict: passed, cut_date_list, first_difference, check, artefact_list
     """
     # IMPORT THE RUNNER'S BAR EDITS HERE
     from so.core.holdout import get_date, get_perturbed_ohlcv_dict, get_truncated_ohlcv_dict
@@ -488,9 +558,15 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
     session_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
     development_end_date = get_date(development_end_date_in) if development_end_date_in is not None else session_list[-1]
     cut_date_list = get_audit_cut_date_list(session_list, first_decision_date, development_end_date, cut_count_in)
-    say(f"cuts {', '.join(str(cut_date) for cut_date in cut_date_list)} (first decision {first_decision_date})")
-    # EACH CUT: TRUNCATION, THEN PERTURBATION. THE FIRST DIFFERENCE IS THE FINDING.
-    for cut_date in cut_date_list:
+    skip_count = int(skip_cut_count_in)
+    if skip_count < 0 or skip_count >= len(cut_date_list):
+        raise ValueError(f"skip_cut_count_in must leave at least one of the {len(cut_date_list)} cuts.")
+    run_list = cut_date_list[skip_count:]
+    say(f"cuts {', '.join(str(cut_date) for cut_date in run_list)} (first decision {first_decision_date})")
+    # EACH CUT: TRUNCATION, THEN PERTURBATION. THE CONTROL RUNS ONLY IF A CHECK LEAVES THE SAVED PATH.
+    artefact_list = []
+    for cut_date in run_list:
+        control_cache = {}
         say(f"truncation {cut_date}")
         truncated_dict = get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date)
         stop_event = start_heartbeat_event()
@@ -500,10 +576,12 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
                 get_cut_context(data_context_in, ohlcv_array_dict_in, truncated_dict, cut_date, "truncation"), cut_date)
         finally:
             stop_event.set()
-        difference_str = get_decision_difference_str(reference_result_dict_in, short_result_dict, cut_date)
+        difference_str = get_control_difference_str(
+            design_module_in, ohlcv_array_dict_in, period_pdf_in, reference_result_dict_in["selection_pdf"],
+            data_context_in, reference_result_dict_in, short_result_dict, cut_date, control_cache, "truncation", artefact_list)
         if difference_str is not None:
-            return {"passed": False, "cut_date_list": [str(cut) for cut in cut_date_list],
-                    "first_difference": f"truncation {difference_str}", "check": "truncation"}
+            return {"passed": False, "cut_date_list": [str(cut) for cut in run_list],
+                    "first_difference": f"truncation {difference_str}", "check": "truncation", "artefact_list": artefact_list}
         say(f"perturbation {cut_date}")
         perturbed_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date)
         stop_event = start_heartbeat_event()
@@ -513,40 +591,46 @@ def get_audit_result_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, 
                 get_cut_context(data_context_in, ohlcv_array_dict_in, perturbed_dict, cut_date, "perturbation"), cut_date)
         finally:
             stop_event.set()
-        difference_str = get_decision_difference_str(reference_result_dict_in, perturbed_result_dict, cut_date)
+        difference_str = get_control_difference_str(
+            design_module_in, ohlcv_array_dict_in, period_pdf_in, reference_result_dict_in["selection_pdf"],
+            data_context_in, reference_result_dict_in, perturbed_result_dict, cut_date, control_cache, "perturbation", artefact_list)
         if difference_str is not None:
-            return {"passed": False, "cut_date_list": [str(cut) for cut in cut_date_list],
-                    "first_difference": f"perturbation {difference_str}", "check": "perturbation"}
-    return {"passed": True, "cut_date_list": [str(cut) for cut in cut_date_list], "first_difference": "", "check": ""}
+            return {"passed": False, "cut_date_list": [str(cut) for cut in run_list],
+                    "first_difference": f"perturbation {difference_str}", "check": "perturbation", "artefact_list": artefact_list}
+    return {"passed": True, "cut_date_list": [str(cut) for cut in run_list], "first_difference": "", "check": "",
+            "artefact_list": artefact_list}
 
 # FUNCTION: THE RESULT FILE FOR ONE DESIGN
-def get_result_path(package_str_in):
+def get_result_path(package_str_in, remaining_bool_in=False):
     """
     The JSON file a later session reads.
 
     Args:
         package_str_in (str): Experiment package
+        remaining_bool_in (bool): The file for cuts after the first
 
     Returns:
         Path: Result file
     """
-    # ONE FILE PER DESIGN
-    return _RESULT_DIR_PATH / f"{get_package_str(package_str_in)}.json"
+    # THE REMAINING-CUT FILE DOES NOT REPLACE THE FIRST AUDIT
+    suffix_str = "_remaining" if remaining_bool_in else ""
+    return _RESULT_DIR_PATH / f"{get_package_str(package_str_in)}{suffix_str}.json"
 
 # FUNCTION: WRITE THE RESULT AND REPLACE ANY PARTIAL FILE
-def write_audit_result_dict(package_str_in, result_dict_in):
+def write_audit_result_dict(package_str_in, result_dict_in, remaining_bool_in=False):
     """
     Writes the result JSON. A reader sees the file only after the write finishes.
 
     Args:
         package_str_in (str): Experiment package
         result_dict_in (dict): Result
+        remaining_bool_in (bool): Write the remaining-cut file
 
     Returns:
         Path: The file
     """
     # WRITE A TEMPORARY FILE, THEN REPLACE
-    result_path = get_result_path(package_str_in)
+    result_path = get_result_path(package_str_in, remaining_bool_in)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = result_path.with_suffix(".json.tmp")
     temp_path.write_text(json.dumps(result_dict_in, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -656,6 +740,72 @@ def run_design_audit_bool(package_str_in, cut_count_in):
         return False
     return bool(result_dict.get("complete"))
 
+# FUNCTION: AUDIT THE CUTS AFTER THE FIRST, THEN WRITE THAT FILE AND ONE NOTE
+def run_remaining_audit(package_str_in, cut_count_in):
+    """
+    Runs every cut after the first. A check that leaves the saved path is compared with the control. The original
+    result file is not replaced. The note is written only after this file.
+
+    Args:
+        package_str_in (str): Experiment package
+        cut_count_in (int): How many cuts the date rule names, including the one already decided
+
+    Returns:
+        dict: The result
+    """
+    # SKIP A REMAINING FILE THAT ALREADY COMPLETED
+    package_str = get_package_str(package_str_in)
+    result_path = get_result_path(package_str, True)
+    if result_path.is_file() and bool(json.loads(result_path.read_text(encoding="utf-8")).get("complete")):
+        say(f"skip {package_str} remaining (result file already complete)")
+        return json.loads(result_path.read_text(encoding="utf-8"))
+    say(f"start {package_str} remaining {datetime.now().isoformat(timespec='seconds')}")
+    design_module = importlib.import_module(f"experiments.{package_str}.design")
+    loaded_dict = get_development_audit_dict(design_module)
+    reference_dict = get_saved_reference_dict(design_module.EXPERIMENT_NAME)
+    result_dict = get_audit_result_dict(design_module, loaded_dict["ohlcv_array_dict"], reference_dict["period_pdf"],
+                                        loaded_dict["data_context"], cut_count_in, reference_dict,
+                                        loaded_dict["development_end"], skip_cut_count_in=1)
+    result_dict.update({"experiment": design_module.EXPERIMENT_NAME, "package": package_str, "complete": True,
+                        "finished_ts": datetime.now().isoformat(timespec="seconds")})
+    result_path = write_audit_result_dict(package_str, result_dict, True)
+    say(f"wrote {result_path} passed={result_dict['passed']}")
+    from so.core.trial_log import log_trial_dict
+    config_module = importlib.import_module(f"experiments.{package_str}.config")
+    difference_str = str(result_dict.get("first_difference") or "")
+    artefact_str = "; ".join(result_dict.get("artefact_list") or [])
+    log_trial_dict(config_module, "note",
+                   {"cut_dates": ",".join(result_dict["cut_date_list"]), "check": result_dict.get("check") or ""},
+                   {"passed": int(bool(result_dict["passed"])), "first_difference": difference_str[:500]},
+                   False, note_str_in=f"lookahead audit remaining cuts. {artefact_str}"[:1500])
+    say(f"note {design_module.EXPERIMENT_NAME}")
+    return result_dict
+
+# FUNCTION: THE REMAINING CUTS, WITH NO NOTE WHEN THE RUN CRASHES
+def run_remaining_audit_bool(package_str_in, cut_count_in):
+    """
+    Runs the cuts after the first. An exception writes an incomplete remaining file and does not append a note.
+
+    Args:
+        package_str_in (str): Experiment package
+        cut_count_in (int): How many cuts the date rule names
+
+    Returns:
+        bool: True when the run completed
+    """
+    # A FINDING COMPLETES. AN EXCEPTION DOES NOT TOUCH THE ORIGINAL RESULT FILE.
+    try:
+        result_dict = run_remaining_audit(package_str_in, cut_count_in)
+    except Exception:
+        package_str = get_package_str(package_str_in)
+        error_str = traceback.format_exc()
+        say(error_str)
+        write_audit_result_dict(package_str, {"package": package_str, "complete": False, "passed": False,
+                                              "cut_date_list": [], "first_difference": error_str[-2000:],
+                                              "check": "error", "finished_ts": datetime.now().isoformat(timespec="seconds")}, True)
+        return False
+    return bool(result_dict.get("complete"))
+
 # FUNCTION: THE COMMAND LINE
 def main(argument_list_in):
     """
@@ -671,6 +821,7 @@ def main(argument_list_in):
     parser = argparse.ArgumentParser(description="Look-ahead audit on development bars")
     parser.add_argument("--design", default="", help="Experiment folder, e.g. exp03_ath_exit")
     parser.add_argument("--queue", action="store_true", help="Run the nine designs in order")
+    parser.add_argument("--remaining", action="store_true", help="Cuts after the first, compared with the control")
     parser.add_argument("--cuts", type=int, default=4, help="Cut dates per design")
     argument_namespace = parser.parse_args(argument_list_in)
     if argument_namespace.queue:
@@ -682,8 +833,9 @@ def main(argument_list_in):
         return 2
     # ONE DESIGN AT A TIME. A FINDING DOES NOT STOP THE QUEUE.
     failed_bool = False
+    run_bool = run_remaining_audit_bool if argument_namespace.remaining else run_design_audit_bool
     for package_str in package_list:
-        if not run_design_audit_bool(package_str, argument_namespace.cuts):
+        if not run_bool(package_str, argument_namespace.cuts):
             failed_bool = True
     return 1 if failed_bool else 0
 
