@@ -1,7 +1,7 @@
 # expNN_<name>: Protocol
 
 *Version 1.0 (YYYY-MM-DD). Experiment name `expNN_<name>`. Config: `experiments/expNN_<name>/config.py` + `so/config.py`.
-Agreed with Nicolas on YYYY-MM-DD, before any of this experiment's data was explored. After the first `validation_only`
+Agreed with Nicolas on YYYY-MM-DD, before any of this experiment's data was explored. After the first development
 run, any rule change is a new version with a new experiment name.*
 
 ## 1. Background and research question
