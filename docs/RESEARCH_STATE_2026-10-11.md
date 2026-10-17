@@ -80,6 +80,11 @@ Facts that constrain every new design:
 4. **Few events:** 2005-2026 contains only a handful of large declines (2008, 2011, 2015-16, late 2018, 2020, 2022,
    spring 2025). A model cannot learn "confidence" from 6-8 events; long-horizon designs must be simple, pre-registered
    rules, judged episode by episode.
+5. **Scoring rows are built without labels** (2026-10-17). Labels are needed only for training. A model design that
+   cannot score a bar until that bar's label clock exists is not deployable. exp01 drops 212 sampled rows, all in the
+   last 9 sessions before the development end, for that reason. Its truncation check fails by construction, and a
+   holdout evaluation would mark it `invalid_lookahead`. The development result itself is unaffected. Details:
+   `docs/BENCHMARK_2026-10-12.md`.
 
 ## 3. What data has been seen (contamination record)
 
@@ -607,3 +612,4 @@ The queue was not launched.
 | 2026-10-15 | agent | Recorded `exp01_minute_entry_v2`. Prior-only +136.53% vs +217.35%, printed STOP. Trials 505 inside budget 529. Beats the random-entry median (20/20) and the fixed-time baseline, loses to buy-and-hold. 6-month interval contains 0. Signal-check STOP stands. No re-run, no new trial, no holdout evaluation | Holdout baselines for the v2 designs (report only, no rule change). Do not re-run a finished development run |
 | 2026-10-15 | agent | Exposure check from saved development files. No new run, no new trial. Constant hold of each path's time in the market is above the prior-only path for exp01–exp07 and exp12. exp01 path 1.365326 vs hold 1.793207; random-entry and fixed-time time-in-market, trades and costs were not saved. exp13 is above its hold (2.738521 vs 1.869197) and stays pending review. Column in `docs/BENCHMARK_2026-10-12.md` | Holdout baselines for the v2 designs (report only, no rule change). Do not re-run a finished development run |
 | 2026-10-16 | agent | Daily-rebalanced weight from the saved buy-and-hold returns. No new run, no new trial. exp03 and exp06 are above that weight and below the 2026-10-15 held-once blend. exp13 is above both. The other six paths are below both. Verdicts unchanged | Holdout baselines for the v2 designs, once the development-span replay is recorded. Do not re-run it |
+| 2026-10-17 | agent | Look-ahead audit of the nine v2 designs. Rule designs and exp05 pass against the saved path. exp02 passes at all four cuts once a difference from the saved path is checked against a control stopped on the same cut. exp01 perturbation passes on decision rows (buy flag, distance, expected return); the 2015-02-27 difference is a take-profit on the bar after the decision bar. exp01 truncation fails by construction: scoring needs the label clock; 212 dropped rows, last 9 sessions only; development results unaffected; not deployable; a holdout evaluation would mark it invalid_lookahead. One note, `20261017222644392171_15ef441ce8`. Merged `agent/remove-legacy` at `2df0c5c`. Future model designs build scoring rows without labels. Table in `docs/BENCHMARK_2026-10-12.md` | Write-up of the negative result stays parked. Do not re-run a finished development run |

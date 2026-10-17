@@ -1,6 +1,6 @@
 # Benchmark
 
-Started 2026-10-15 with the constant-exposure column. The other columns of the benchmark table (old span, calibration, look-ahead audit, trials) are filled when that write-up is done. The development spans differ across experiments. A return on one span is not a return on another.
+Started 2026-10-15 with the constant-exposure column. The old span, the calibration, the look-ahead audit and the trial counts are in the table of 2026-10-17. The development spans differ across experiments. A return on one span is not a return on another.
 
 ## Constant exposure (2026-10-15)
 
@@ -33,3 +33,36 @@ exp05 already records a constant-exposure baseline from its own simulation (inte
 | `exp13_e1m1_robustness_v2` | 0.939053 | 2.738521 | 1.990442 | 1.869197 | 1.824818 | above | above |
 
 Total returns are the 6-decimal values of the saved summary fields and of these two calculations. The daily-constant column is the timing comparison. On 2026-10-15 the word "below" referred only to the held-once column. exp03 and exp06 are below that column and above the daily-constant column. exp13 is above both. That is not a success claim: the 6-month interval still contains 0, and protocol 1.0 already recorded E1M1 IS NOT ROBUST.
+
+## Look-ahead audit (2026-10-17)
+
+A future model design builds its scoring rows without labels. Labels are needed only for training. A row that cannot be scored until its label clock exists is not a deployable decision, and a holdout truncation test marks that design `invalid_lookahead`.
+
+exp01's development run did not save a refit table. Its audit compares decision rows only. A decision row is the sampled row on or before the cut. The buy flag, the distance and the expected return are computed from that row. Position changes from a fill or an exit on a bar after the decision bar are not decision differences.
+
+The four exp01 cuts were classified from those datasets (`logs/lookahead_audit/exp01_cut_classify.json`). Every column of every shared row matches. Perturbation drops no row. Truncation drops only rows whose `label_known_ts` is after the cut session's last bar.
+
+| Cut | Perturbation | Truncation rows absent, clock after the cut |
+|---|---|---:|
+| 2015-02-27 | pass (61,048 rows match) | 216 |
+| 2018-07-31 | pass (81,664 rows match) | 216 |
+| 2021-11-30 | pass (101,728 rows match) | 45 |
+| 2025-04-30 | pass (122,200 rows match) | 79 |
+
+On 2015-02-27 the fitted replay was also compared. All 456 decisions through the cut match (buy flag, distance, expected return). The perturbed path's only extra trade is a take-profit sale at the bar labelled 15:59, the first bar after the decision bar. Truncation fails by construction: scoring needs the row's label clock; development results unaffected (212 rows, last 9 sessions only); not deployable; a holdout evaluation would mark it `invalid_lookahead`. Trial note `20261017222644392171_15ef441ce8`.
+
+The other designs were compared with the saved development path, and with a control replay when a check left that path. Rule designs keep the stricter saved-path pass.
+
+| Experiment | Protocol 1.0 prior-only vs buy-and-hold | Protocol 2.0 prior-only vs buy-and-hold | Shared quarters, returns / selections | Old bounds, returns / selections | Look-ahead | v2 trials |
+|---|---|---|---|---|---|---:|
+| `exp01_minute_entry_v2` | +146.94% vs +218.48% | +136.53% vs +217.35% | 40 overlap pairs, 0/40 returns | not run | perturbation pass; truncation fails by construction | 505 |
+| `exp02_stop_reentry_v2` | +111.66% vs +237.21% | +61.82% vs +199.04% | not run | not run | pass, four cuts | 739 |
+| `exp03_ath_exit_v2` | +143.05% vs +237.21% | +111.12% vs +199.04% | not the three-quarter gate | 615/615, 36/40 | pass, four cuts | 616 |
+| `exp04_trend_exit_v2` | +70.84% vs +229.74% | +41.51% vs +199.04% | 0/27, 1/3 | 369/369, 41/41 | pass, four cuts | 370 |
+| `exp05_vol_scaled_exposure_v2` | +165.69% vs +229.74% | +142.59% vs +199.04% | 0/12, 2/3 | 164/164, 41/41 | pass, four cuts | 165 |
+| `exp06_capped_regret_reentry_v2` | +147.38% vs +229.74% | +132.25% vs +199.04% | 0/36, 1/3 | 492/492, 41/41 | pass, four cuts | 493 |
+| `exp07_warning_lights_exit_v2` | +49.09% vs +229.74% | +40.95% vs +199.04% | 0/9, 1/3 | 123/123, 41/41 | pass, four cuts | 124 |
+| `exp12_vix_fear_reentry_v2` | +119.24% vs +229.74% | +126.51% vs +199.04% | 0/18, 3/3 | 246/246, 41/41 | pass, four cuts | 247 |
+| `exp13_e1m1_robustness_v2` | no path; E1M1 IS NOT ROBUST | +273.85% vs +199.04% | 0/3, 3/3 | 41/41, 41/41 | pass, four cuts | 42 |
+
+Protocol 1.0 returns are the summary table of `docs/RESULTS_LOG.md`. Protocol 2.0 returns, the calibration counts and the trial counts are the version 2.0 sections of that log. v2 trials are validation plus the one summary. Each calibration also added one note, which is not in this column. exp02's four-cut pass treats the 2015-04-30 difference from the saved path as an end-of-window artefact: truncation and perturbation match a control stopped on the same cut. The later three cuts do the same. No holdout evaluation was run.
