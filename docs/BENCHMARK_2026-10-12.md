@@ -32,7 +32,7 @@ exp05 already records a constant-exposure baseline from its own simulation (inte
 | `exp12_vix_fear_reentry_v2` | 0.918090 | 1.265069 | 1.990442 | 1.827470 | 1.769182 | below | below |
 | `exp13_e1m1_robustness_v2` | 0.939053 | 2.738521 | 1.990442 | 1.869197 | 1.824818 | above | above |
 
-Total returns are the 6-decimal values of the saved summary fields and of these two calculations. The daily-constant column is the timing comparison. On 2026-10-15 the word "below" referred only to the held-once column. exp03 and exp06 are below that column and above the daily-constant column. exp13 is above both. That is not a success claim: the 6-month interval still contains 0, and protocol 1.0 already recorded E1M1 IS NOT ROBUST.
+Total returns are the 6-decimal values of the saved summary fields and of these two calculations. The daily-constant column is the timing comparison. On 2026-10-15 the word "below" referred only to the held-once column. exp03 and exp06 are below that column and above the daily-constant column. That comparison is descriptive only: 2 of the 8 designs other than exp13, compared after the fact, with no significance test. Verdicts are unchanged. exp13 is above both columns. That is not a success claim: the 6-month interval still contains 0, and protocol 1.0 already recorded E1M1 IS NOT ROBUST.
 
 ## Look-ahead audit (2026-10-17)
 
@@ -57,7 +57,7 @@ The other designs were compared with the saved development path, and with a cont
 |---|---|---|---|---|---|---:|
 | `exp01_minute_entry_v2` | +146.94% vs +218.48% | +136.53% vs +217.35% | 40 overlap pairs, 0/40 returns | not run | perturbation pass; truncation fails by construction | 505 |
 | `exp02_stop_reentry_v2` | +111.66% vs +237.21% | +61.82% vs +199.04% | not run | not run | pass, four cuts | 739 |
-| `exp03_ath_exit_v2` | +143.05% vs +237.21% | +111.12% vs +199.04% | not the three-quarter gate | 615/615, 36/40 | pass, four cuts | 616 |
+| `exp03_ath_exit_v2` | +143.05% vs +237.21% | +111.12% vs +199.04% | not the three-quarter gate | 615/615; 36/40 exact, 40/40 with the 1e-6 tie tolerance (amendment `98115f0`) | pass, four cuts | 616 |
 | `exp04_trend_exit_v2` | +70.84% vs +229.74% | +41.51% vs +199.04% | 0/27, 1/3 | 369/369, 41/41 | pass, four cuts | 370 |
 | `exp05_vol_scaled_exposure_v2` | +165.69% vs +229.74% | +142.59% vs +199.04% | 0/12, 2/3 | 164/164, 41/41 | pass, four cuts | 165 |
 | `exp06_capped_regret_reentry_v2` | +147.38% vs +229.74% | +132.25% vs +199.04% | 0/36, 1/3 | 492/492, 41/41 | pass, four cuts | 493 |
@@ -65,4 +65,10 @@ The other designs were compared with the saved development path, and with a cont
 | `exp12_vix_fear_reentry_v2` | +119.24% vs +229.74% | +126.51% vs +199.04% | 0/18, 3/3 | 246/246, 41/41 | pass, four cuts | 247 |
 | `exp13_e1m1_robustness_v2` | no path; E1M1 IS NOT ROBUST | +273.85% vs +199.04% | 0/3, 3/3 | 41/41, 41/41 | pass, four cuts | 42 |
 
-Protocol 1.0 returns are the summary table of `docs/RESULTS_LOG.md`. Protocol 2.0 returns, the calibration counts and the trial counts are the version 2.0 sections of that log. v2 trials are validation plus the one summary. Each calibration also added one note, which is not in this column. exp02's four-cut pass treats the 2015-04-30 difference from the saved path as an end-of-window artefact: truncation and perturbation match a control stopped on the same cut. The later three cuts do the same. No holdout evaluation was run.
+Protocol 1.0 returns are the summary table of `docs/RESULTS_LOG.md`. Protocol 2.0 returns, the calibration counts and the trial counts are the version 2.0 sections of that log. The v2-trials column is validation plus the one summary. exp02's four-cut pass treats the 2015-04-30 difference from the saved path as an end-of-window artefact: truncation and perturbation match a control stopped on the same cut. The later three cuts do the same.
+
+Shared-quarter returns do not match because a version 2.0 period is a slice of one continuous path, so the position carried into the quarter differs from the archived quarter. The old-bounds columns are the calibration.
+
+E1M1 is a single rule chosen after the fact (best of exp12's six) on the same 2015–2026 data, its ninth reuse, and found NOT ROBUST by exp13 v1. With one candidate, its prior-only path involves no selection and is optimistic; the "candidate" label is mechanical, not evidence. The registered holdout (2025-08-14 → 2026-08-13) overlaps the data it was chosen on, so a holdout slot would be biased; only data after 2026-08-13 can test it (forward paper test, parked).
+
+The nine version 2.0 experiments have 3,323 trial-log rows (3,292 validation, 9 summaries, 22 notes). The workspace trial log has 6,974 rows. With the 4,089 legacy trials, the total is 11,063. Counted from `store04_experiments/trial_log.csv` on 2026-10-18. The v2-trials column above is the 3,301 validation and summary rows only.
