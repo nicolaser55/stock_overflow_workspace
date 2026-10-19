@@ -7,8 +7,8 @@ alwaysApply: true
 
 ## Environment
 
-- Windows, PowerShell, workspace the workspace folder, data
-  the folder in SO_DATA_PATH (outside the workspace; read it with Python, never copy it into the repo).
+- Windows, PowerShell. Workspace: the workspace folder. Data: the folder in SO_DATA_PATH
+  (outside the workspace; read it with Python, never copy it into the repo).
 - Python: always `venv-main\Scripts\python.exe` (the workspace is installed in it in editable mode, so `so` and
   `experiments` import from anywhere).
 - Packages: never upgrade or remove an installed package (it could change past results). If a new package is truly

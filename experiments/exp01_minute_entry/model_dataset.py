@@ -34,14 +34,31 @@ STEP_FILE_PREFIX_DICT = {
     "MDS": "model_dataset",
 }
 
-# DEFINE THE STEP FILE PATH DICTIONARY
-STEP_FILE_PATH_DICT = {
-    "TSIND": paths.LOCAL_TSIND_DATA_FILE_PATH_STR,
-    "TSSEG": paths.LOCAL_TSSEG_DATA_FILE_PATH_STR,
-    "TSCTX": paths.LOCAL_TSCTX_DATA_FILE_PATH_STR,
-    "TSBAR": paths.LOCAL_TSBAR_DATA_FILE_PATH_STR,
-    "MDS": paths.get_experiment_data_path_str(exp_config.EXPERIMENT_NAME, "step01_model_dataset_data"),
-}
+# FUNCTION: GET THE FOLDER OF A STEP
+def get_step_file_path_str(step_str_in):
+    """
+    The folder of one step. The data paths are read here, not at import.
+
+    Args:
+        step_str_in (str): Step key ("TSIND", "TSSEG", "TSCTX", "TSBAR", "MDS")
+
+    Returns:
+        str: Folder path ending with "/"
+    """
+    # THE MODEL DATASET IS IN THE EXPERIMENT ZONE
+    if step_str_in == "MDS":
+        return paths.get_experiment_data_path_str(exp_config.EXPERIMENT_NAME, "step01_model_dataset_data")
+    # THE PIPELINE FOLDERS
+    if step_str_in == "TSIND":
+        return paths.LOCAL_TSIND_DATA_FILE_PATH_STR
+    if step_str_in == "TSSEG":
+        return paths.LOCAL_TSSEG_DATA_FILE_PATH_STR
+    if step_str_in == "TSCTX":
+        return paths.LOCAL_TSCTX_DATA_FILE_PATH_STR
+    if step_str_in == "TSBAR":
+        return paths.LOCAL_TSBAR_DATA_FILE_PATH_STR
+    # AN UNKNOWN KEY IS THE SAME ERROR A DICTIONARY LOOKUP RAISED
+    raise KeyError(step_str_in)
 
 # FUNCTION: GET THE FILE PATH OF A STEP AT A DATE
 def get_step_date_file_path_str(step_str_in, date_str_in):
@@ -49,7 +66,7 @@ def get_step_date_file_path_str(step_str_in, date_str_in):
     Builds the daily file path of a step ('{prefix}_YYYYMMDD.csv').
 
     Args:
-        step_str_in (str): Step key of STEP_FILE_PATH_DICT ("TSIND", "TSSEG", "TSCTX", "TSBAR", "MDS")
+        step_str_in (str): Step key ("TSIND", "TSSEG", "TSCTX", "TSBAR", "MDS")
         date_str_in (str): Date 'YYYY-MM-DD'
 
     Returns:
@@ -58,7 +75,7 @@ def get_step_date_file_path_str(step_str_in, date_str_in):
     # DEFINE THE DATE NAME
     date_name_str = pd.to_datetime(date_str_in).strftime("%Y%m%d")
     # RETURN THE FILE PATH
-    return f"{STEP_FILE_PATH_DICT[step_str_in]}{STEP_FILE_PREFIX_DICT[step_str_in]}_{date_name_str}.csv"
+    return f"{get_step_file_path_str(step_str_in)}{STEP_FILE_PREFIX_DICT[step_str_in]}_{date_name_str}.csv"
 
 # FUNCTION: READ THE FILE OF A STEP AT A DATE
 def read_step_date_pdf(step_str_in, date_str_in):
@@ -66,7 +83,7 @@ def read_step_date_pdf(step_str_in, date_str_in):
     Reads the daily file of a step and converts its timestamp column(s) to New York timezone.
 
     Args:
-        step_str_in (str): Step key of STEP_FILE_PATH_DICT
+        step_str_in (str): Step key ("TSIND", "TSSEG", "TSCTX", "TSBAR", "MDS")
         date_str_in (str): Date 'YYYY-MM-DD'
 
     Returns:
@@ -195,7 +212,7 @@ def read_model_dataset_pdf(date1_str_in, date2_str_in, delta_list_in=exp_config.
         pd.DataFrame: Dataset rows with label columns (y_tp_<d>, net_return_<d>, exit_bar_count_<d>, exit_reason_<d>)
     """
     # COLLECT THE FILE PATHS OF THE DATE RANGE
-    file_path_str_list = get_date_range_file_path_list(STEP_FILE_PATH_DICT["MDS"], date1_str_in, date2_str_in)
+    file_path_str_list = get_date_range_file_path_list(get_step_file_path_str("MDS"), date1_str_in, date2_str_in)
     # DISPLAY INFORMATION
     print(f"Reading {len(file_path_str_list):,} model dataset files ({date1_str_in} -> {date2_str_in}, sampling: '{sampling_mode_str_in}')") if alert_in else None
     # LIST TO HOLD THE DATAFRAMES
