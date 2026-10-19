@@ -20,7 +20,7 @@ to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine 
 
 - Code: `so/` (shared library), `pipeline/` (shared data notebooks 00-06), `experiments/expNN_<name>/` (one folder per
   experiment: `PROTOCOL.md`, `config.py`, code, `stepNN_*.ipynb`), `tests/`, `docs/`, `records/`.
-- Data (never in git): `C:/Users/nico/Desktop/stock_overflow_data/` (`so.paths`, override with `SO_DATA_PATH`).
+- Data (never in git): the folder in SO_DATA_PATH (`so.paths`).
 - Every experiment run is logged in `store04_experiments/trial_log.csv` (never edit it) and reported in
   `docs/RESULTS_LOG.md` the same day.
 - exp01 to exp07, exp12 and exp13 are protocol 2.0. exp08 and the skipped exp09–exp11 were removed from this tree on

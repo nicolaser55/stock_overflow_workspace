@@ -4,9 +4,9 @@ Workspace Tests: point-in-time data (so.core.point_in_time; Nicolas, 2026-10-11)
 Run from the workspace root:   python tests/test_point_in_time.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
-Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The real trial log and
-records/holdout_windows.csv are not written. SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set only inside this
-file, to temporary values.
+Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The data root is a
+temporary folder. records/holdout_windows.csv is not written. SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set
+only inside this file, to temporary values.
 """
 
 import os
@@ -25,6 +25,9 @@ os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 # IMPORT THE SHARED MODULES
 from so import paths, config
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, run_holdout_evaluation,
@@ -42,10 +45,8 @@ from synthetic_data import get_synthetic_ohlcv_pdf
 
 # KEEP THE REAL REGISTRY PATHS AND POINT THE SUITE AT TEMPORARY FILES
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
-REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
 REAL_WINDOWS_EXISTS_BOOL = os.path.isfile(REAL_WINDOWS_PATH_STR)
 REAL_WINDOWS_SIZE_INT = os.path.getsize(REAL_WINDOWS_PATH_STR) if REAL_WINDOWS_EXISTS_BOOL else None
-REAL_TRIAL_SIZE_INT = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
 REGISTRY_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
 paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REGISTRY_PATH_STR
 # A NEW YORK CLOCK USED BY THE SMALL FRAMES
@@ -722,7 +723,6 @@ if __name__ == "__main__":
         test_vix_regression()
         test_runner()
         test_declared_load()
-        assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_SIZE_INT
         assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
         if REAL_WINDOWS_EXISTS_BOOL:
             assert os.path.getsize(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_SIZE_INT

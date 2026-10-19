@@ -7,8 +7,8 @@ alwaysApply: true
 
 ## Environment
 
-- Windows, PowerShell, workspace `C:\Users\nico\Desktop\stock_overflow_workspace`, data
-  `C:\Users\nico\Desktop\stock_overflow_data\` (outside the workspace; read it with Python, never copy it into the repo).
+- Windows, PowerShell. Workspace: the workspace folder. Data: the folder in SO_DATA_PATH
+  (outside the workspace; read it with Python, never copy it into the repo).
 - Python: always `venv-main\Scripts\python.exe` (the workspace is installed in it in editable mode, so `so` and
   `experiments` import from anywhere).
 - Packages: never upgrade or remove an installed package (it could change past results). If a new package is truly
@@ -65,7 +65,7 @@ alwaysApply: true
    Explain the key result both mathematically and in plain words.
 2. The experiment's `PROTOCOL.md` change log if anything changed; `experiments/README.md` registry status; root `README.md`
    status table when an experiment starts or ends.
-3. Copy `C:\Users\nico\Desktop\stock_overflow_data\store04_experiments\trial_log.csv` to `records\trial_log_snapshot.csv`.
+3. Copy `store04_experiments\trial_log.csv` from the folder in SO_DATA_PATH to `records\trial_log_snapshot.csv`.
 4. Commit with a message that says what was run and the outcome (e.g. `exp04 step02 validation: prior-only +X% vs +Y%,
    STOP`).
 

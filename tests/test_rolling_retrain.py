@@ -4,9 +4,9 @@ Workspace Tests: rolling retraining (so.core.rolling_retrain; Nicolas, 2026-10-1
 Run from the workspace root:   python tests/test_rolling_retrain.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
-Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The real trial log and
-records/holdout_windows.csv are not written. SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set only inside
-this file, to temporary values. No experiment is run.
+Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The data root is a
+temporary folder. records/holdout_windows.csv is not written. SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set
+only inside this file, to temporary values. No experiment is run.
 """
 
 import os
@@ -26,6 +26,9 @@ os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 # IMPORT THE SHARED MODULES
 from so import paths, config
 from so.core.holdout import (compute_holdout_window_dict, get_active_holdout_window_dict, get_prior_only_result_dict,
@@ -42,10 +45,8 @@ from so.features.daily_features import get_session_decision_idx_dict
 
 # KEEP THE REAL PATHS AND POINT THE SUITE AT TEMPORARY FILES
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
-REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
 REAL_WINDOWS_EXISTS_BOOL = os.path.isfile(REAL_WINDOWS_PATH_STR)
 REAL_WINDOWS_SIZE_INT = os.path.getsize(REAL_WINDOWS_PATH_STR) if REAL_WINDOWS_EXISTS_BOOL else None
-REAL_TRIAL_SIZE_INT = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
 paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
 NY_TZ_STR = "America/New_York"
 
@@ -461,7 +462,6 @@ def test_label_leak():
     refit_path_str = os.path.join(results_path_str, valid_row["window_id"], "purge_on", "refit_log.csv")
     assert os.path.isfile(refit_path_str)
     assert int(valid_row["holdout_refit_count"]) > 0
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_SIZE_INT
     if REAL_WINDOWS_EXISTS_BOOL:
         assert os.path.getsize(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_SIZE_INT
     else:
@@ -720,7 +720,6 @@ if __name__ == "__main__":
         test_reporting()
         test_fresh_design_module()
         test_template_refit_log()
-        assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_SIZE_INT
         print("\nAll rolling-retrain tests passed")
     finally:
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)

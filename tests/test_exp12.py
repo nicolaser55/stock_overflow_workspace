@@ -34,6 +34,9 @@ sys.path.insert(0, WORKSPACE_PATH_STR)
 sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "tests"))
 # IGNORE WARNINGS FROM LIBRARIES
 warnings.filterwarnings("ignore")
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 
 # IMPORT WORKSPACE MODULES
 from experiments.exp12_vix_fear_reentry import config as exp_config

@@ -89,7 +89,7 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 - Code is edited in Cursor on **nicosls**, committed and pushed, then pulled on **nicodesktop**. From 2026-10-06 the
   research is also continued by a Cursor agent working directly on **nicodesktop** (`AGENTS.md`, `.cursor/rules/`).
 - Notebooks run on the Jupyter server of **nicodesktop** (kernel `venv-main`); data lives there, in
-  `C:/Users/nico/Desktop/stock_overflow_data/` (`so.paths.LOCAL_PATH_STR`).
+  the folder in SO_DATA_PATH (`so.paths.LOCAL_PATH_STR`).
 - **Restart the kernel before running a notebook** after any `.py` change ("Run All" keeps old imports in memory).
 - **Commit executed notebooks with their outputs** after every run: the saved outputs are evidence for the thesis.
 - **Data never goes into git** (`.gitignore`), except `records/`.

@@ -4,9 +4,9 @@ import os
 Stock Overflow Data Paths
 
 Forward slashes are used on purpose: they work on Windows and the file helpers (so.core.local_file_management) expect them.
-The data root can be overridden with the environment variable SO_DATA_PATH (used to run the tests and notebooks on
-another machine); by default it is the data folder on nicodesktop. The experiment zone is store04_experiments under
-that root.
+The data root is the folder in the environment variable SO_DATA_PATH. There is no default. The variable is read at the
+first use of a data path, not at import, so this module can be imported before the variable is set. The experiment zone
+is store04_experiments under that root.
 
 Four zones:
     store01_rawzone         raw IBKR minute bars (corrected once for bad ticks, records/bad_tick_corrections.csv)
@@ -18,57 +18,104 @@ Pipeline data (zones 1-3) is shared and kept across experiments. Experiment data
 re-running the experiment's notebooks; deleting an experiment's folder never affects another experiment.
 """
 
-# DEFINE THE DATA ROOT (ENVIRONMENT OVERRIDE OR THE DEFAULT FOLDER ON NICODESKTOP)
-LOCAL_PATH_STR = os.environ.get("SO_DATA_PATH", "C:/Users/nico/Desktop/stock_overflow_data/").replace("\\", "/").rstrip("/") + "/"
+# DEFINE THE DATA PATHS RELATIVE TO THE DATA ROOT (RESOLVED ON USE, NOT AT IMPORT)
+_DATA_PATH_SUFFIX_DICT = {
+    # THE DATA ROOT ITSELF
+    "LOCAL_PATH_STR": "",
+    # THE FOUR ZONES
+    "LOCAL_RAWZONE_PATH_STR": "store01_rawzone/",
+    "LOCAL_WORKZONE_PATH_STR": "store02_workzone/",
+    "LOCAL_GOLDZONE_PATH_STR": "store03_goldzone/",
+    "LOCAL_EXPERIMENTZONE_PATH_STR": "store04_experiments/",
+    # THE RAW IBKR MINUTE BARS AND THE VIX FAMILY (READ ONLY THROUGH so.features.vix_features)
+    "LOCAL_OHLCV_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_spy_1min/",
+    "LOCAL_VIX_FAMILY_PATH_STR": "store01_rawzone/ibkr_vix_family/",
+    "LOCAL_VIX_1MIN_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix_1min/",
+    "LOCAL_VIX_DAILY_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix_daily/",
+    "LOCAL_VIX3M_1MIN_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix3m_1min/",
+    "LOCAL_VIX3M_DAILY_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix3m_daily/",
+    # THE PIPELINE FOLDERS (STEPS 00-04 WORKZONE, STEP 05 GOLDZONE, STEP 06 WORKZONE)
+    "LOCAL_DQ_REPORT_DATA_FILE_PATH_STR": "store02_workzone/step00_data_quality_report/",
+    "LOCAL_PA_OHLCV_DATA_FILE_PATH_STR": "store02_workzone/step01_PA_ohlcv_data/",
+    "LOCAL_TSIND_DATA_FILE_PATH_STR": "store02_workzone/step02_TSIND_data/",
+    "LOCAL_TSSEG_DATA_FILE_PATH_STR": "store02_workzone/step03_TSSEG_data/",
+    "LOCAL_TSCTX_DATA_FILE_PATH_STR": "store02_workzone/step04_TSCTX_data/",
+    "LOCAL_TSBAR_DATA_FILE_PATH_STR": "store03_goldzone/step05_TSBAR_data/",
+    "LOCAL_TSDAY_DATA_FILE_PATH_STR": "store02_workzone/step06_TSDAY_data/",
+    # THE SHARED TRIAL LOG
+    "LOCAL_TRIAL_LOG_FILE_PATH_STR": "store04_experiments/trial_log.csv",
+}
+
 # DEFINE THE WORKSPACE ROOT (records/ IS VERSIONED IN GIT; IT IS NOT IN THE DATA FOLDER)
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
-
-# DEFINE THE ZONES
-LOCAL_RAWZONE_PATH_STR = f"{LOCAL_PATH_STR}store01_rawzone/"
-LOCAL_WORKZONE_PATH_STR = f"{LOCAL_PATH_STR}store02_workzone/"
-LOCAL_GOLDZONE_PATH_STR = f"{LOCAL_PATH_STR}store03_goldzone/"
-# DEFINE THE EXPERIMENT ZONE (THE TRIAL LOG IS INSIDE THIS ZONE)
-LOCAL_EXPERIMENTZONE_PATH_STR = f"{LOCAL_PATH_STR}store04_experiments/"
-
-"""
-Rawzone
-"""
-
-# DEFINE THE RAW IBKR MINUTE BARS FOLDER (YEARLY FILES)
-LOCAL_OHLCV_DATA_FILE_PATH_STR = f"{LOCAL_RAWZONE_PATH_STR}ibkr_spy_1min/"
-# DEFINE THE RAW IBKR VIX FAMILY FOLDERS (READ ONLY THROUGH so.features.vix_features; NEVER THE STAGING OR BACKUP FOLDERS)
-LOCAL_VIX_FAMILY_PATH_STR = f"{LOCAL_RAWZONE_PATH_STR}ibkr_vix_family/"
-LOCAL_VIX_1MIN_DATA_FILE_PATH_STR = f"{LOCAL_VIX_FAMILY_PATH_STR}vix_1min/"
-LOCAL_VIX_DAILY_DATA_FILE_PATH_STR = f"{LOCAL_VIX_FAMILY_PATH_STR}vix_daily/"
-LOCAL_VIX3M_1MIN_DATA_FILE_PATH_STR = f"{LOCAL_VIX_FAMILY_PATH_STR}vix3m_1min/"
-LOCAL_VIX3M_DAILY_DATA_FILE_PATH_STR = f"{LOCAL_VIX_FAMILY_PATH_STR}vix3m_daily/"
-
-"""
-Pipeline (shared by every experiment)
-"""
-
-# DEFINE THE PIPELINE FOLDERS (STEPS 00-04: WORKZONE)
-LOCAL_DQ_REPORT_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step00_data_quality_report/"
-LOCAL_PA_OHLCV_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step01_PA_ohlcv_data/"
-LOCAL_TSIND_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step02_TSIND_data/"
-LOCAL_TSSEG_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step03_TSSEG_data/"
-LOCAL_TSCTX_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step04_TSCTX_data/"
-# DEFINE THE BARRIER TARGET FOLDER (STEP 05: GOLDZONE)
-LOCAL_TSBAR_DATA_FILE_PATH_STR = f"{LOCAL_GOLDZONE_PATH_STR}step05_TSBAR_data/"
-# DEFINE THE DAILY TABLE FOLDER (STEP 06: WORKZONE; THE RECORD OF THE TABLE THAT DAILY EXPERIMENTS REBUILD IN MEMORY)
-LOCAL_TSDAY_DATA_FILE_PATH_STR = f"{LOCAL_WORKZONE_PATH_STR}step06_TSDAY_data/"
-
-"""
-Experiments
-"""
-
-# DEFINE THE SHARED TRIAL LOG (EVERY EXPLORATION, SIGNAL CHECK, VALIDATION CANDIDATE AND TEST OF EVERY EXPERIMENT)
-LOCAL_TRIAL_LOG_FILE_PATH_STR = f"{LOCAL_EXPERIMENTZONE_PATH_STR}trial_log.csv"
 # DEFINE THE HOLDOUT REGISTRY AND THE EVALUATION LEDGER (DATES AND SUMMARY METRICS; VERSIONED IN GIT)
 HOLDOUT_WINDOWS_FILE_PATH_STR = f"{WORKSPACE_PATH_STR}/records/holdout_windows.csv"
 HOLDOUT_EVALUATIONS_FILE_PATH_STR = f"{WORKSPACE_PATH_STR}/records/holdout_evaluations.csv"
 # DEFINE THE HOLDOUT RESULTS FOLDER (NO DEFAULT: NONE MEANS RESULTS CANNOT BE WRITTEN; SET ONLY BY NICOLAS)
 HOLDOUT_RESULTS_PATH_STR = os.environ.get("SO_HOLDOUT_PATH") or None
+
+# FUNCTION: GET THE DATA ROOT FROM SO_DATA_PATH
+def get_data_root_str():
+    """
+    The data root is the folder in SO_DATA_PATH. There is no default folder.
+
+    Returns:
+        str: Data root, with forward slashes and a trailing slash
+    """
+    # READ THE SETTING WHEN A DATA PATH IS USED, NOT WHEN THIS MODULE IS IMPORTED
+    data_path_str = os.environ.get("SO_DATA_PATH", "").strip()
+    # AN UNSET OR BLANK SETTING IS AN ERROR
+    if data_path_str == "":
+        raise RuntimeError("SO_DATA_PATH is not set. Set it to the data folder before using a data path.")
+    # FORWARD SLASHES AND ONE TRAILING SLASH
+    return data_path_str.replace("\\", "/").rstrip("/") + "/"
+
+# FUNCTION: GET ONE DATA PATH, HONOURING AN ASSIGNMENT ON THIS MODULE
+def get_named_data_path_str(name_str_in):
+    """
+    One data path. A value assigned on this module (a test or a script replacing one folder) wins over SO_DATA_PATH.
+
+    Args:
+        name_str_in (str): Attribute name, for example "LOCAL_PATH_STR"
+
+    Returns:
+        str: Path
+    """
+    # AN ASSIGNMENT AFTER IMPORT REPLACES THE COMPUTED PATH
+    if name_str_in in globals():
+        return globals()[name_str_in]
+    # UNKNOWN NAMES ARE ORDINARY MISSING ATTRIBUTES
+    if name_str_in not in _DATA_PATH_SUFFIX_DICT:
+        raise AttributeError(f"module 'so.paths' has no attribute {name_str_in!r}")
+    # THE DATA ROOT PLUS THE RELATIVE SUFFIX
+    return get_data_root_str() + _DATA_PATH_SUFFIX_DICT[name_str_in]
+
+# FUNCTION: RESOLVE A DATA PATH ON FIRST USE
+def __getattr__(name_str_in):
+    """
+    Resolves a data-path attribute. Other names stay missing, so import does not require SO_DATA_PATH.
+
+    Args:
+        name_str_in (str): Attribute name
+
+    Returns:
+        str: Path
+    """
+    # ONLY THE REGISTERED DATA PATHS ARE COMPUTED HERE
+    if name_str_in not in _DATA_PATH_SUFFIX_DICT:
+        raise AttributeError(f"module 'so.paths' has no attribute {name_str_in!r}")
+    return get_named_data_path_str(name_str_in)
+
+# FUNCTION: LIST THE MODULE, INCLUDING THE DATA PATHS
+def __dir__():
+    """
+    The module names plus the data paths, which are not stored until a caller assigns one.
+
+    Returns:
+        list[str]: Names
+    """
+    # THE STORED NAMES AND THE LAZY DATA PATHS
+    return sorted(set(globals()) | set(_DATA_PATH_SUFFIX_DICT))
 
 # FUNCTION: GET THE DATA FOLDER OF AN EXPERIMENT STEP
 def get_experiment_data_path_str(experiment_name_str_in, folder_name_str_in):
@@ -83,5 +130,5 @@ def get_experiment_data_path_str(experiment_name_str_in, folder_name_str_in):
     Returns:
         str: Folder path (ending with "/")
     """
-    # RETURN THE FOLDER PATH
-    return f"{LOCAL_EXPERIMENTZONE_PATH_STR}{experiment_name_str_in}/{folder_name_str_in}/"
+    # THE ZONE FOLLOWS AN ASSIGNMENT WHEN A SCRIPT HAS REPLACED IT
+    return f"{get_named_data_path_str('LOCAL_EXPERIMENTZONE_PATH_STR')}{experiment_name_str_in}/{folder_name_str_in}/"
