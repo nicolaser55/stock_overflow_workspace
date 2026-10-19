@@ -4,8 +4,8 @@ Workspace Tests: the rolling holdout (so.core.holdout; Nicolas, 2026-10-11)
 Run from the workspace root:   python tests/test_holdout.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
-Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The real trial log and
-records/holdout_windows.csv are not written. If that registry file already exists, its size is unchanged.
+Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The data root is a
+temporary folder. records/holdout_windows.csv is not written. If that registry file already exists, its size is unchanged.
 SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set only inside this file, to temporary values.
 """
 
@@ -28,6 +28,9 @@ os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 # IMPORT THE SHARED MODULES
 from so import paths, config
 from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
@@ -51,14 +54,10 @@ REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
 REAL_WINDOWS_EXISTS_BOOL = os.path.isfile(REAL_WINDOWS_PATH_STR)
 REAL_WINDOWS_SIZE_INT = os.path.getsize(REAL_WINDOWS_PATH_STR) if REAL_WINDOWS_EXISTS_BOOL else None
 REAL_EVALUATIONS_PATH_STR = paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR
-REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
 REGISTRY_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
 LEDGER_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_evaluations.csv")
 paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REGISTRY_PATH_STR
 paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR = LEDGER_PATH_STR
-# DEFINE THE REAL RAW AND STEP06 PATHS USED ONLY BY THE FINAL DATE CHECK
-REAL_RAW_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store01_rawzone/ibkr_spy_1min/"
-REAL_TSDAY_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store02_workzone/step06_TSDAY_data/TSDAY_data.csv"
 
 # FUNCTION: PRINT A PASSED TEST
 def passed(name_str_in):
@@ -741,7 +740,6 @@ def test_evaluation():
     window_dict = get_active_holdout_window_dict()
     ohlcv_pdf = get_synthetic_ohlcv_pdf("2023-06-01", "2026-10-09", minute_vol_in=0.0004, seed_in=11)
     ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
-    real_trial_size = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
     os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
     selection_module = get_selection_design()
     # REFUSE A MISSING RESULTS FOLDER AND A WRONG TOKEN BEFORE ANY ROW IS WRITTEN
@@ -865,10 +863,9 @@ def test_evaluation():
         raise AssertionError("an eleventh design was accepted")
     except ValueError as error:
         assert "evaluations" in str(error)
-    # THE TEMPORARY TRIAL LOG HOLDS THE VALID RUNS ONLY; THE REAL TRIAL LOG IS UNCHANGED
+    # THE TEMPORARY TRIAL LOG HOLDS THE VALID RUNS ONLY
     trial_pdf = pd.read_csv(path_dict["trial_log_path_str"])
     assert len(trial_pdf) == 3 and set(trial_pdf["stage"]) == {"test"}
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
     # THE PERTURBATION KEEPS THE DECISION BAR AND CHANGES THE FILL BAR
     cut_date = get_truncation_cut_date_list(ohlcv_array_dict["session_date_list"], window_dict)[0]
     perturbed_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict, cut_date)
@@ -900,7 +897,6 @@ def test_evaluation():
         assert later_row["status"] == "invalid_lookahead"
         assert "decision bar" in leak_stdout_file.getvalue()
         assert not os.path.isfile(os.path.join(path_dict["results_path_str"], later_row["window_id"], bar_kind_str, "strategy_daily_equity.csv"))
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_trial_size
     passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
     passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']}; template {template_row['status']})")
 
@@ -942,7 +938,6 @@ def test_baseline_ledger():
     # A FRESH LEDGER AND A FRESH TRIAL LOG, NOT THE REAL FILES
     ledger_str = os.path.join(TEMP_ROOT_STR, "baseline_evaluations.csv")
     trial_str = os.path.join(TEMP_ROOT_STR, "baseline_trial_log.csv")
-    real_size = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
     row_dict = run_holdout_evaluation(design_module, "baselines", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
                                       ledger_path_str_in=ledger_str, trial_log_path_str_in=trial_str)
     # THE LEDGER CELL HOLDS THE SCALARS; THE BEATEN FLAGS HOLD ONLY THE NAMED RETURN
@@ -953,7 +948,6 @@ def test_baseline_ledger():
     assert stored_dict["random_entry_p05"] == -0.1 and stored_dict["random_entry_p95"] == 0.4
     assert stored_dict["random_entry_count"] == 20 and stored_dict["random_entry_beaten_count"] == 15
     assert set(row_dict["baselines_beaten"]) == {"flat_return"}
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == real_size
     passed("holdout ledger stores the design baselines and does not beat the counts")
 
 # FUNCTION: TEST WHERE THE HOLDOUT GUARD MAY BE TURNED OFF

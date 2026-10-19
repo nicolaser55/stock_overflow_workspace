@@ -1,6 +1,8 @@
 import os
 import sys
+import shutil
 import subprocess
+import tempfile
 import time
 
 """
@@ -8,6 +10,8 @@ Run Every Test Suite
 
 Run from the workspace root:   python tests/run_all_tests.py
 Each suite runs in its own interpreter (plain asserts; a failing suite stops with its error). Takes a few minutes.
+Each suite gets its own empty temporary SO_DATA_PATH. If SO_DATA_PATH was already set, the trial log under that
+folder must keep the same size and modification time.
 
     tests/test_shared_and_exp01.py   shared pipeline code (execution, targets, features, schedule, bad ticks) and exp01
     tests/test_exp02.py              daily features, exit/re-entry simulator, evaluation helpers, trial log and exp02
@@ -37,23 +41,84 @@ SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "tes
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
+# FUNCTION: SIZE AND MODIFICATION TIME OF A DATA ROOT'S TRIAL LOG
+def get_trial_log_stamp_tuple(data_path_str_in):
+    """
+    The size and modification time of store04_experiments/trial_log.csv under a data root. The file is not read.
+
+    Args:
+        data_path_str_in (str): Data root
+
+    Returns:
+        tuple: (file path, None) when the file is absent, otherwise (file path, (size, mtime_ns))
+    """
+    # THE TRIAL LOG LIVES IN THE EXPERIMENT ZONE
+    trial_log_path_str = os.path.join(data_path_str_in, "store04_experiments", "trial_log.csv")
+    # AN ABSENT FILE IS A STAMP: THE RUN MUST NOT CREATE IT
+    if not os.path.isfile(trial_log_path_str):
+        return (trial_log_path_str, None)
+    # RECORD THE SIZE AND THE MODIFICATION TIME
+    trial_stat = os.stat(trial_log_path_str)
+    return (trial_log_path_str, (trial_stat.st_size, trial_stat.st_mtime_ns))
+
+# FUNCTION: ONE LINE FOR A TRIAL-LOG STAMP
+def get_trial_log_stamp_str(stamp_in):
+    """
+    Formats a stamp from get_trial_log_stamp_tuple.
+
+    Args:
+        stamp_in (tuple | None): (size, mtime_ns), or None when the file is absent
+
+    Returns:
+        str: size and modification time, or "absent"
+    """
+    # ABSENT AND PRESENT ARE BOTH REPORTED
+    if stamp_in is None:
+        return "absent"
+    return f"size={stamp_in[0]} mtime_ns={stamp_in[1]}"
+
 # RUN THE SUITES
 if __name__ == "__main__":
     # FORCE UTF-8 OUTPUT IN THIS PROCESS AND IN THE SUITES
     sys.stdout.reconfigure(encoding="utf-8")
-    suite_env_dict = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    # ITERATE OVER THE SUITES
-    for suite_str in SUITE_LIST:
-        # DISPLAY INFORMATION
-        print(f"\n===== {suite_str} =====", flush=True)
-        start_time = time.time()
-        # RUN THE SUITE
-        result = subprocess.run([sys.executable, os.path.join(TESTS_PATH_STR, suite_str)], env=suite_env_dict)
-        # STOP AT THE FIRST FAILURE
-        if result.returncode != 0:
-            print(f"\n❌ {suite_str} failed")
-            raise SystemExit(result.returncode)
-        # DISPLAY INFORMATION
-        print(f"({time.time() - start_time:.0f} s)", flush=True)
+    # THE CALLER'S DATA FOLDER, IF ANY, BEFORE THE SUITES REPLACE IT
+    caller_data_path_str = os.environ.get("SO_DATA_PATH", "").strip()
+    before_stamp_tuple = get_trial_log_stamp_tuple(caller_data_path_str) if caller_data_path_str else None
+    # SUITES INHERIT THIS ENVIRONMENT, THEN RECEIVE THEIR OWN EMPTY DATA FOLDER
+    suite_env_base_dict = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    exit_code_int = 0
+    try:
+        # ITERATE OVER THE SUITES
+        for suite_str in SUITE_LIST:
+            # DISPLAY INFORMATION
+            print(f"\n===== {suite_str} =====", flush=True)
+            # ONE EMPTY TEMPORARY DATA FOLDER FOR THIS SUITE
+            suite_dir_str = tempfile.mkdtemp(prefix="so_suite_")
+            suite_env_dict = {**suite_env_base_dict, "SO_DATA_PATH": suite_dir_str}
+            start_time = time.time()
+            try:
+                # RUN THE SUITE
+                result = subprocess.run([sys.executable, os.path.join(TESTS_PATH_STR, suite_str)], env=suite_env_dict)
+            finally:
+                # REMOVE THE SUITE'S TEMPORARY FOLDER
+                shutil.rmtree(suite_dir_str, ignore_errors=True)
+            # STOP AT THE FIRST FAILURE
+            if result.returncode != 0:
+                print(f"\n❌ {suite_str} failed")
+                exit_code_int = result.returncode
+                break
+            # DISPLAY INFORMATION
+            print(f"({time.time() - start_time:.0f} s)", flush=True)
+    finally:
+        # WHEN THE CALLER NAMED A DATA FOLDER, ITS TRIAL LOG MUST BE UNCHANGED
+        if before_stamp_tuple is not None:
+            after_stamp_tuple = get_trial_log_stamp_tuple(caller_data_path_str)
+            print(f"trial_log before {get_trial_log_stamp_str(before_stamp_tuple[1])}", flush=True)
+            print(f"trial_log after {get_trial_log_stamp_str(after_stamp_tuple[1])}", flush=True)
+            if after_stamp_tuple[1] != before_stamp_tuple[1]:
+                print("\n❌ trial_log.csv size or modification time changed")
+                exit_code_int = exit_code_int or 1
     # DISPLAY THE RESULT
+    if exit_code_int != 0:
+        raise SystemExit(exit_code_int)
     print("\nAll test suites passed ✅")

@@ -4,25 +4,23 @@ Workspace Tests: the development look-ahead audit (scripts/lookahead_audit.py)
 Run from the workspace root:   python tests/test_lookahead_audit.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required.)
 
-Synthetic bars only. The leaking designs must fail. The template must pass. The real trial log is not written.
+Synthetic bars only. The leaking designs must fail. The template must pass. The data root is a temporary folder.
 """
 
 import datetime
-import os
 import sys
 
 import pandas as pd
 
 # THE HOLDOUT SUITE POINTS THE DATA ROOT AT A TEMPORARY FOLDER BEFORE so IS IMPORTED
 import test_holdout
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 from test_holdout import get_later_bar_design, get_leak_design
 from synthetic_data import get_synthetic_ohlcv_pdf
 from so.core.trade_execution import get_ohlcv_array_dict
 from scripts.lookahead_audit import get_audit_cut_date_list, get_audit_result_dict, get_replay_result_dict
-
-# THE REAL TRIAL LOG, MEASURED SO THIS SUITE CAN SHOW IT WAS NOT APPENDED
-REAL_TRIAL_LOG_PATH_STR = "C:/Users/nico/Desktop/stock_overflow_data/store04_experiments/trial_log.csv"
-REAL_TRIAL_LOG_SIZE_INT = os.path.getsize(REAL_TRIAL_LOG_PATH_STR)
 
 # FUNCTION: PRINT A PASSED TEST
 def passed(name_str_in):
@@ -159,7 +157,6 @@ def test_window_end_matches_the_control():
     result_dict = get_audit_result_dict(design_module, ohlcv_array_dict, period_pdf, None, 4, reference_dict)
     assert result_dict["passed"] is True, result_dict
     assert result_dict["artefact_list"], result_dict
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
     passed(f"window end matches the control ({len(result_dict['artefact_list'])} saved-path differences)")
 
 # FUNCTION: LEAKING DESIGNS FAIL AND THE TEMPLATE PASSES
@@ -192,7 +189,6 @@ def test_designs():
     assert template_result_dict["passed"] is True, template_result_dict["first_difference"]
     assert template_result_dict["first_difference"] == ""
     assert len(template_result_dict["cut_date_list"]) == 4
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
     passed(f"template passes ({', '.join(template_result_dict['cut_date_list'])})")
 
 # RUN THE SUITE
@@ -202,5 +198,4 @@ if __name__ == "__main__":
     test_clipped_period_bounds_are_dates()
     test_window_end_matches_the_control()
     test_designs()
-    assert os.path.getsize(REAL_TRIAL_LOG_PATH_STR) == REAL_TRIAL_LOG_SIZE_INT
     print("\nAll look-ahead audit tests passed")

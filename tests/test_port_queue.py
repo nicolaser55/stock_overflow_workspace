@@ -15,6 +15,9 @@ not read the shared trial log.
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 
 # IMPORT THE QUEUE AND THE CALIBRATION ROW READER
 from scripts.run_port_queue import get_notebook_finished_bool, run_queue

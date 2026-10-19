@@ -13,7 +13,7 @@ it was tuned until it did is a failure of this project, not a success. Negative 
 
 ## File scope
 
-- Work only inside `C:\Users\nico\Desktop\stock_overflow_workspace` and `C:\Users\nico\Desktop\stock_overflow_data`
+- Work only inside the workspace folder and the folder in SO_DATA_PATH
   (plus running the Python of `venv-main`, Jupyter and git). Never read or write anything else on the computer.
 - Workspace: you may add, modify and delete files (git keeps the history; commit often).
 - Data folder: you may **add** files and folders, and modify or delete **only files you created**. Never delete, move or

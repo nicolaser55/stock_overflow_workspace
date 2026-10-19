@@ -14,6 +14,9 @@ import tempfile
 # ADD THE SCRIPTS FOLDER SO THE EXECUTOR IMPORTS WITHOUT A PACKAGE
 SCRIPT_PATH_STR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 sys.path.insert(0, SCRIPT_PATH_STR)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
 import nbformat
 from execute_notebook import execute_notebook_bool
 
