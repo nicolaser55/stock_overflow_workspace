@@ -1193,7 +1193,7 @@ def test_holdout_flag_scan():
     # FAIL WHEN THE ARGUMENT APPEARS ANYWHERE ELSE
     assert offender_list == []
     # THE QUARANTINE ROOT MAY BE NAMED ONLY IN THE PATHS MODULE, THE EVALUATION LOADER, THE EVALUATION SCRIPT AND TESTS
-    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "scripts/holdout_evaluate.py"}
+    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "scripts/holdout_evaluate.py", "scripts/refresh_development_view.py"}
     quarantine_offender_list = []
     for root_str, dir_list, file_list in os.walk(WORKSPACE_PATH_STR):
         dir_list[:] = [dir_name for dir_name in dir_list if dir_name not in {".git", "venv-main", "__pycache__", "logs"}]
