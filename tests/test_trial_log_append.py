@@ -150,6 +150,30 @@ def test_append_keeps_the_byte_prefix():
     assert all(id_pattern.match(trial_id_str) for trial_id_str in pd.read_csv(file_path_str)["trial_id"].astype(str))
     passed("the bytes before an append are an exact prefix of the bytes after it")
 
+# FUNCTION: AN EXISTING FILE KEEPS ITS OWN LINE ENDING
+def test_line_ending_is_preserved():
+    # ONE QUOTED FIELD, SO THE CHECK IS ABOUT RECORD SEPARATORS RATHER THAN A BARE COMMA
+    column_str_list = ["alpha", "beta"]
+    row_pdf = pd.DataFrame([{"alpha": "o,e", "beta": "two"}])
+    # A CRLF FILE STAYS CRLF, INCLUDING THE NEW ROW
+    crlf_path_str = get_log_path_str("line_ending_crlf.csv")
+    crlf_before_bytes = b"alpha,beta\r\nkept,row\r\n"
+    with open(crlf_path_str, "wb") as csv_file:
+        csv_file.write(crlf_before_bytes)
+    append_csv_record_pdf(row_pdf, crlf_path_str, column_str_list)
+    crlf_after_bytes = open(crlf_path_str, "rb").read()
+    assert crlf_after_bytes.startswith(crlf_before_bytes) and crlf_after_bytes.endswith(b'"o,e",two\r\n')
+    assert crlf_after_bytes.replace(b"\r\n", b"").find(b"\n") == -1 and crlf_after_bytes.replace(b"\r\n", b"").find(b"\r") == -1
+    # AN LF FILE STAYS LF
+    lf_path_str = get_log_path_str("line_ending_lf.csv")
+    lf_before_bytes = b"alpha,beta\nkept,row\n"
+    with open(lf_path_str, "wb") as csv_file:
+        csv_file.write(lf_before_bytes)
+    append_csv_record_pdf(row_pdf, lf_path_str, column_str_list)
+    lf_after_bytes = open(lf_path_str, "rb").read()
+    assert lf_after_bytes.startswith(lf_before_bytes) and lf_after_bytes.endswith(b'"o,e",two\n') and b"\r" not in lf_after_bytes
+    passed("an existing CRLF file stays all-CRLF after an append, and an LF file stays all-LF")
+
 # FUNCTION: A WRONG HEADER IS REFUSED AND THE FILE IS LEFT AS IT WAS
 def test_header_mismatch_is_refused():
     # A COMPLETE FILE WHOSE HEADER IS NOT THE EXPECTED COLUMN LIST
@@ -229,6 +253,7 @@ if __name__ == "__main__":
     # CONCURRENT APPEND, THEN THE BYTE PREFIX, THE TWO REFUSALS AND THE LOCK TIMEOUT
     test_concurrent_appends()
     test_append_keeps_the_byte_prefix()
+    test_line_ending_is_preserved()
     test_header_mismatch_is_refused()
     test_missing_newline_is_refused()
     test_held_lock_times_out()

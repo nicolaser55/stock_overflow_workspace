@@ -19,8 +19,8 @@ While the lock is held:
     - any other file must already have that header exactly, and must already end with a newline;
     - a file that fails either check is left as it is (it is not repaired);
     - the new rows are written in the given column order, in append mode, then flushed and fsynced.
-New bytes use a line feed (\\n). A file that already uses CRLF is accepted: its last byte is still a newline, and the
-header text is the column line without the line ending.
+A missing or empty file is started with LF. An existing file's new rows use the line ending of its header line,
+CRLF or LF, so the file stays on one ending. The header text compared to the column list does not include that ending.
 """
 
 # THE EXCLUSIVE LOCK IS WAITED FOR THIS LONG, THEN THE APPEND FAILS
@@ -166,20 +166,21 @@ def check_csv_column_list(column_str_list_in):
             raise ValueError(f"CSV column '{column_str}' contains a comma, quote or line break. The file was not changed.")
 
 # FUNCTION: SERIALIZE THE NEW ROWS ONLY
-def get_csv_row_bytes(pdf_in, column_str_list_in):
+def get_csv_row_bytes(pdf_in, column_str_list_in, line_ending_bytes_in):
     """
-    The new rows in the given column order, with a line feed after each row and no header.
+    The new rows in the given column order, with no header. Each row ends with line_ending_bytes_in (CRLF or LF).
 
     Args:
         pdf_in (pd.DataFrame): Rows to append
         column_str_list_in (list[str]): Columns, in write order
+        line_ending_bytes_in (bytes): b"\\r\\n" or b"\\n"
 
     Returns:
         bytes: The CSV rows
     """
-    # PANDAS QUOTES FIELDS THAT CONTAIN COMMAS; THE LINE ENDING IS A LINE FEED ON EVERY PLATFORM
+    # PANDAS QUOTES FIELDS THAT CONTAIN COMMAS; THE RECORD SEPARATOR IS THE FILE'S OWN ENDING
     buffer = io.StringIO(newline="")
-    pdf_in.to_csv(buffer, columns=list(column_str_list_in), index=False, header=False, lineterminator="\n")
+    pdf_in.to_csv(buffer, columns=list(column_str_list_in), index=False, header=False, lineterminator=line_ending_bytes_in.decode("ascii"))
     return buffer.getvalue().encode("utf-8")
 
 # FUNCTION: THE HEADER TEXT OF THE FIRST LINE, WITHOUT ITS LINE ENDING
@@ -205,34 +206,37 @@ def get_csv_header_str(first_line_bytes_in):
 def check_csv_append_target(file_path_str_in, column_str_list_in):
     """
     Reads the last byte and the header line of an existing non-empty file. Does not read the data rows. A missing
-    newline or a header that is not the expected column list raises, and the caller must not write.
+    newline or a header that is not the expected column list raises, and the caller must not write. The line ending
+    of the new rows is the ending of that header line.
 
     Args:
         file_path_str_in (str): CSV path
         column_str_list_in (list[str]): Expected columns, in order
 
     Returns:
-        bool: True when the file is missing or empty and the header must be written
+        tuple[bool, bytes]: Write the header, and the line ending for the new rows (LF when the file is new)
     """
-    # A MISSING OR EMPTY FILE IS STARTED WITH THE HEADER
+    # A MISSING OR EMPTY FILE IS STARTED WITH AN LF HEADER
     if (not os.path.isfile(file_path_str_in)) or os.path.getsize(file_path_str_in) == 0:
-        return True
+        return True, b"\n"
     # THE LAST BYTE FIRST, SO A FILE WITH NO NEWLINE IS NOT READ THROUGH
     with open(file_path_str_in, "rb") as csv_file:
         csv_file.seek(-1, os.SEEK_END)
         last_byte = csv_file.read(1)
         if last_byte != b"\n":
             raise ValueError(f"CSV file '{file_path_str_in}' does not end with a newline. The file was not changed and was not repaired.")
-        # THE HEADER IS THE FIRST LINE ONLY
+        # THE HEADER IS THE FIRST LINE ONLY; ITS ENDING IS THE ENDING OF THE NEW ROWS
         csv_file.seek(0)
         first_line_bytes = csv_file.readline()
+    # CRLF WHEN THE HEADER LINE ENDS WITH CR LF; OTHERWISE LF
+    line_ending_bytes = b"\r\n" if first_line_bytes.endswith(b"\r\n") else b"\n"
     # THE HEADER MUST BE THE COLUMN NAMES JOINED BY COMMAS
     expected_header_str = ",".join(column_str_list_in)
     header_str = get_csv_header_str(first_line_bytes)
     if header_str != expected_header_str:
         raise ValueError(f"CSV header of '{file_path_str_in}' does not match the expected columns. "
                          f"Expected '{expected_header_str}'. Found '{header_str}'. The file was not changed.")
-    return False
+    return False, line_ending_bytes
 
 # FUNCTION: WRITE THE NEW BYTES, THEN FLUSH AND FSYNC
 def write_csv_payload_bytes(file_path_str_in, payload_bytes_in):
@@ -284,12 +288,12 @@ def append_csv_record_pdf(pdf_in, file_path_str_in, column_str_list_in, timeout_
     # NOTHING TO APPEND
     if len(pdf_in) == 0:
         return None
-    # BUILD THE NEW ROWS BEFORE TAKING THE LOCK; THE HEADER IS ADDED ONLY FOR A NEW FILE
-    row_bytes = get_csv_row_bytes(pdf_in, column_str_list_in)
+    # A NEW FILE'S HEADER USES LF; AN EXISTING FILE KEEPS THE ENDING OF ITS HEADER LINE
     header_bytes = (",".join(column_str_list_in) + "\n").encode("utf-8")
     # CHECK AND WRITE WHILE NO OTHER APPENDER HOLDS THE LOCK
     with hold_csv_append_lock(file_path_str_in, timeout_seconds_in=timeout_seconds_in):
-        write_header_bool = check_csv_append_target(file_path_str_in, column_str_list_in)
+        write_header_bool, line_ending_bytes = check_csv_append_target(file_path_str_in, column_str_list_in)
+        row_bytes = get_csv_row_bytes(pdf_in, column_str_list_in, line_ending_bytes)
         payload_bytes = header_bytes + row_bytes if write_header_bool else row_bytes
         write_csv_payload_bytes(file_path_str_in, payload_bytes)
     return None
