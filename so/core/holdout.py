@@ -31,8 +31,9 @@ the window is opened. It replaces the per-fold 3-month test windows and the fixe
 Once opened, the window is frozen: new downloads do not move it. Sessions after its end are forward data and are
 refused everywhere this module guards (a later task adds forward evaluation). Each frozen design may be evaluated once
 per window, and at most HOLDOUT_EVALUATION_BUDGET designs per window. Only scripts/holdout_evaluate.py, run by
-Nicolas, may read the window. Development code stops at get_development_end_date (the session an embargo before the
-window start).
+Nicolas, may read the window, and it reads that window from the quarantine root (SO_QUARANTINE_PATH), not from the
+development view. Development code stops at get_development_end_date (the session an embargo before the window start)
+and reads only SO_DATA_PATH.
 
 records/holdout_windows.csv and records/holdout_evaluations.csv are versioned (dates and summary metrics are not
 secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no default.
@@ -50,8 +51,10 @@ EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "ev
                           "turnover", "candidate_switches"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
-# DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE A WINDOW-END LOAD IS IN PROGRESS)
+# DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE THE QUARANTINE WINDOW-END LOAD IS IN PROGRESS)
 _RUNNER_ACTIVE_BOOL = False
+# DEFINE THE MESSAGE WHEN THE DEVELOPMENT VIEW STAMP IS MISSING OR DOES NOT MATCH THE ACTIVE WINDOW
+VIEW_STALE_MESSAGE_STR = "development view is missing or stale: Nicolas must run the refresh"
 
 """
 Dates And The Registry
@@ -372,7 +375,7 @@ def get_development_end_date(embargo_sessions_in, session_date_list_in):
 # FUNCTION: WHETHER THE HOLDOUT RUNNER IS ACTIVE
 def get_runner_active_bool():
     """
-    True only inside run_holdout_evaluation.
+    True inside run_holdout_evaluation and while the evaluation loader is reading the quarantine root.
 
     Returns:
         bool: Runner flag
@@ -432,6 +435,34 @@ def check_development_date(date_in):
     # OUTSIDE THE RUNNER, REFUSE THE WINDOW AND EVERYTHING AFTER IT
     if date >= get_date(window_dict["start"]):
         raise ValueError(f"❌ {date} is on or after the holdout start {window_dict['start']}.")
+    return True
+
+# FUNCTION: CHECK THE DEVELOPMENT VIEW STAMP
+def check_development_view():
+    """
+    Reads VIEW.json in the SO_DATA_PATH root and requires its window_start to equal the active registry start.
+    A missing file, an unreadable file, or a different start raises. The quarantine root is not consulted.
+
+    Returns:
+        bool: True when the stamp matches the active window
+    """
+    # THE STAMP LIVES IN THE DEVELOPMENT VIEW, NOT IN THE QUARANTINE
+    view_path_str = paths.get_data_root_str() + "VIEW.json"
+    # A MISSING STAMP IS THE REFRESH ERROR
+    if not os.path.isfile(view_path_str):
+        raise ValueError(VIEW_STALE_MESSAGE_STR)
+    # PARSE window_start. A BROKEN FILE IS THE SAME REFRESH ERROR
+    try:
+        with open(view_path_str, "r", encoding="utf-8") as view_file:
+            view_dict = json.load(view_file)
+        stamped_date = get_date(view_dict["window_start"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        raise ValueError(VIEW_STALE_MESSAGE_STR)
+    # THE ACTIVE WINDOW SUPPLIES THE DATE THE STAMP MUST MATCH (A MISSING WINDOW KEEPS ITS OWN ERROR)
+    active_date = get_date(get_active_holdout_window_dict()["start"])
+    # A STAMP FOR A DIFFERENT WINDOW IS STALE
+    if stamped_date != active_date:
+        raise ValueError(VIEW_STALE_MESSAGE_STR)
     return True
 
 """
@@ -497,6 +528,54 @@ def check_evaluation_token_bool(token_file_path_str_in):
     if not file_token_str or env_token_str != file_token_str:
         raise ValueError("❌ SO_HOLDOUT_EVALUATION_TOKEN does not match the token file.")
     return True
+
+# FUNCTION: LOAD DECLARED SOURCES FROM THE QUARANTINE THROUGH THE WINDOW END
+def load_evaluation_source_frame_dict(source_name_list_in, token_file_path_str_in):
+    """
+    Reads declared sources from the quarantine root through the active window end. The evaluation token is checked
+    first, then SO_QUARANTINE_PATH. Development code does not call this. The runner flag is set only for the read,
+    so the loaders allow the window and still refuse the day after it, and it is restored before the function returns.
+
+    Args:
+        source_name_list_in (list[str]): Registry names
+        token_file_path_str_in (str): Token file path (given by Nicolas on the command line)
+
+    Returns:
+        dict: source name -> stamped frame
+    """
+    # THE RUNNER FLAG IS MODULE STATE. DECLARE IT BEFORE IT IS READ OR SET
+    global _RUNNER_ACTIVE_BOOL
+    # THE TOKEN IS CHECKED BEFORE THE QUARANTINE PATH IS READ
+    check_evaluation_token_bool(token_file_path_str_in)
+    # THE QUARANTINE ROOT HAS NO DEFAULT. AN UNSET VARIABLE RAISES HERE, BEFORE ANY PATH IS REPOINTED
+    paths.get_quarantine_root_str()
+    # THE LAST SESSION THE EVALUATION MAY SEE
+    end_date = get_date(get_active_holdout_window_dict()["end"])
+    # REMEMBER ASSIGNMENTS SO A DEVELOPMENT OVERRIDE IS RESTORED, AND WHICH NAMES WERE LAZY
+    saved_dict = {}
+    fresh_name_list = []
+    previous_bool = _RUNNER_ACTIVE_BOOL
+    try:
+        # POINT EVERY DATA-PATH NAME AT THE SAME LAYOUT UNDER THE QUARANTINE ROOT
+        for name_str in paths.get_data_path_name_list():
+            if name_str in paths.__dict__:
+                saved_dict[name_str] = paths.__dict__[name_str]
+            else:
+                fresh_name_list.append(name_str)
+            setattr(paths, name_str, paths.get_quarantine_named_path_str(name_str))
+        # THE WINDOW IS READABLE ONLY WHILE THIS FLAG IS SET
+        _RUNNER_ACTIVE_BOOL = True
+        # STAMP THE FRAMES. THE DEVELOPMENT LOADER WOULD REFUSE THIS END DATE
+        from so.core.point_in_time import get_stamped_source_frame_dict
+        return get_stamped_source_frame_dict(source_name_list_in, end_date)
+    finally:
+        # RESTORE THE FLAG AND THE DEVELOPMENT PATHS EVEN WHEN THE LOAD RAISES
+        _RUNNER_ACTIVE_BOOL = previous_bool
+        for name_str, value in saved_dict.items():
+            setattr(paths, name_str, value)
+        for name_str in fresh_name_list:
+            if name_str in paths.__dict__:
+                delattr(paths, name_str)
 
 # FUNCTION: READ THE GIT PRECONDITIONS OF A DESIGN
 def get_git_precondition_dict(design_folder_str_in):

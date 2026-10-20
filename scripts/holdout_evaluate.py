@@ -8,15 +8,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # IMPORT THE ARRAY CONVERSION
 from so.core.trade_execution import get_ohlcv_array_dict
-# IMPORT THE HOLDOUT EVALUATION AND THE DECLARED-SOURCE LOADER
-from so.core.holdout import get_active_holdout_window_dict, get_date, run_holdout_evaluation
-from so.core.point_in_time import get_declared_source_name_list, load_source_frame_dict
+# IMPORT THE HOLDOUT EVALUATION AND THE QUARANTINE WINDOW-END LOADER
+from so.core.holdout import load_evaluation_source_frame_dict, run_holdout_evaluation
+from so.core.point_in_time import get_declared_source_name_list
 
 """
 Holdout Evaluation (Nicolas only)
 
 Only Nicolas may run this script. Agents must not (research-integrity.mdc, rule 1). It evaluates one frozen design
-once on the active holdout window. Daily paths go under SO_HOLDOUT_PATH. One summary row is appended to
+once on the active holdout window. Bars and declared sources are read from the quarantine root (SO_QUARANTINE_PATH),
+not from the development view. Daily paths go under SO_HOLDOUT_PATH. One summary row is appended to
 records/holdout_evaluations.csv and one trial-log row (stage "test") is appended to the shared trial log.
 """
 
@@ -53,44 +54,45 @@ def load_design_module(design_folder_str_in):
     return design_module
 
 # FUNCTION: LOAD DECLARED SOURCES UP TO THE WINDOW END
-def get_evaluation_frame_dict(design_module_in):
+def get_evaluation_frame_dict(design_module_in, token_file_path_str_in):
     """
-    Loads each source in DATA_SOURCE_LIST, and SPY_1MIN for the bar arrays, through the active window end.
-    Rows after that date are not in the frames. A design without DATA_SOURCE_LIST loads SPY_1MIN only.
+    Loads each source in DATA_SOURCE_LIST, and SPY_1MIN for the bar arrays, from the quarantine root through the
+    active window end. The token is checked before that root is read. Rows after the window end are not in the
+    frames. A design without DATA_SOURCE_LIST loads SPY_1MIN only.
 
     Args:
         design_module_in (module): Design
+        token_file_path_str_in (str): Token file path
 
     Returns:
         dict: source name -> frame stamped with available_ts
     """
-    # THE WINDOW END IS THE LAST SESSION THE EVALUATION MAY SEE
-    end_date = get_date(get_active_holdout_window_dict()["end"])
+    # THE DECLARED NAMES, WITH SPY ALWAYS LOADED FOR THE SIMULATOR ARRAYS
     declared_name_list = get_declared_source_name_list(design_module_in)
-    # SPY IS ALWAYS LOADED FOR THE SIMULATOR ARRAYS; A DESIGN THAT DID NOT DECLARE IT IS NOT HANDED THE FRAME
     load_name_list = list(dict.fromkeys(["SPY_1MIN"] + declared_name_list))
-    frame_dict = load_source_frame_dict(load_name_list, end_date)
+    # THE QUARANTINE LOADER CHECKS THE TOKEN AND SO_QUARANTINE_PATH, THEN READS THROUGH THE WINDOW END
+    frame_dict = load_evaluation_source_frame_dict(load_name_list, token_file_path_str_in)
     # RETURN ONLY WHAT THE DESIGN DECLARED, PLUS SPY WHEN IT DECLARED SPY
     return {source_name_str: frame_dict[source_name_str] for source_name_str in load_name_list if source_name_str in declared_name_list or source_name_str == "SPY_1MIN"}
 
 # FUNCTION: LOAD BARS UP TO THE WINDOW END
-def get_evaluation_ohlcv_array_dict(design_module_in=None):
+def get_evaluation_ohlcv_array_dict(design_module_in, token_file_path_str_in):
     """
-    SPY bars through the active window end. Forward rows are dropped by the loader, before the arrays are built.
-    design_module_in is accepted so a caller can share one load; None loads SPY_1MIN only.
+    SPY bars from the quarantine root through the active window end. Forward rows are dropped by the loader, before
+    the arrays are built. Pass a design to share its declared-source load; None loads SPY_1MIN only.
 
     Args:
         design_module_in (module | None): Design, or None
+        token_file_path_str_in (str): Token file path
 
     Returns:
         dict: Output of get_ohlcv_array_dict
     """
-    # LOAD SPY THROUGH THE WINDOW END
+    # LOAD SPY THROUGH THE WINDOW END FROM THE QUARANTINE
     if design_module_in is None:
-        end_date = get_date(get_active_holdout_window_dict()["end"])
-        frame_dict = load_source_frame_dict(["SPY_1MIN"], end_date)
+        frame_dict = load_evaluation_source_frame_dict(["SPY_1MIN"], token_file_path_str_in)
     else:
-        frame_dict = get_evaluation_frame_dict(design_module_in)
+        frame_dict = get_evaluation_frame_dict(design_module_in, token_file_path_str_in)
     # RETURN THE ARRAYS
     return get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
 
@@ -103,7 +105,7 @@ if __name__ == "__main__":
     arg_dict = parser.parse_args()
     # LOAD THE DESIGN, ITS DECLARED SOURCES THROUGH THE WINDOW END, THEN EVALUATE
     design_module = load_design_module(arg_dict.design)
-    frame_dict = get_evaluation_frame_dict(design_module)
+    frame_dict = get_evaluation_frame_dict(design_module, arg_dict.token_file)
     ohlcv_array_dict = get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
     declared_name_list = get_declared_source_name_list(design_module)
     source_frame_dict = {source_name_str: frame_dict[source_name_str] for source_name_str in declared_name_list}

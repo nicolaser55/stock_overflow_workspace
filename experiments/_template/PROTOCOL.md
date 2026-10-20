@@ -26,7 +26,7 @@ A source that is not in this table is not used. When the evidence for a clock is
 
 The two features are `intraday_return_pct` (decision close over the session open) and `prev_day_return_pct` (the previous session's close-to-close return). Both are knowable at the decision moment, the end of the 15:58 bar. The same session's close, the 15:59 bar, is not a feature.
 
-A development replay loads this list with `get_development_data_context` (through the development end). The evaluation script loads the same names with `load_source_frame_dict` through the window end. A design that omits `DATA_SOURCE_LIST` is treated as `["SPY_1MIN"]`.
+A development replay loads this list with `get_development_data_context` (through the development end). `load_source_frame_dict` refuses an end on or after the active window start. The evaluation script loads the same names through the window end from the quarantine root. A design that omits `DATA_SOURCE_LIST` is treated as `["SPY_1MIN"]`.
 
 ## 4. Rules / target / features / model
 Exactly as implemented (file and function names). For every feature: what it uses up to the decision bar.
