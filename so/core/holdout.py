@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 # IMPORT THE SHARED CONFIGURATION AND THE PATHS
 from so import config, paths
+# IMPORT THE LOCKED CSV APPEND (NEW ROWS ONLY; THE EXISTING LEDGER IS NOT REWRITTEN)
+from so.core.csv_append import append_csv_record_pdf
 
 """
 Rolling 12-Month Holdout (Nicolas, 2026-10-11)
@@ -1244,10 +1246,10 @@ def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
     Returns:
         None
     """
-    # APPEND THE ROW
+    # APPEND THE ROW UNDER THE EXCLUSIVE LOCK (A MISSING COLUMN IS LEFT EMPTY, AS IN THE LEDGER SCHEMA)
     file_path_str = file_path_str_in or paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR
-    os.makedirs(os.path.dirname(file_path_str), exist_ok=True)
-    pd.DataFrame([row_dict_in], columns=EVALUATION_COLUMN_LIST).to_csv(file_path_str, mode="a", header=not os.path.isfile(file_path_str), index=False)
+    row_pdf = pd.DataFrame([row_dict_in], columns=EVALUATION_COLUMN_LIST)
+    append_csv_record_pdf(row_pdf, file_path_str, EVALUATION_COLUMN_LIST)
 
 # FUNCTION: EVALUATE ONE FROZEN DESIGN ON THE ACTIVE WINDOW
 def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_in, token_file_path_str_in, git_precondition_dict_in=None,
