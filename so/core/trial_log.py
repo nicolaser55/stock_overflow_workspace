@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import json
@@ -8,7 +9,9 @@ from so import config
 # IMPORT PATHS
 from so import paths
 # IMPORT LOCAL FILE MANAGEMENT FUNCTIONS
-from so.core.local_file_management import check_file_exists, read_csv_file_from_path, write_csv_file_to_path
+from so.core.local_file_management import check_file_exists, read_csv_file_from_path
+# IMPORT THE LOCKED CSV APPEND (NEW ROWS ONLY; THE EXISTING FILE IS NOT REWRITTEN)
+from so.core.csv_append import append_csv_record_pdf
 
 """
 Trial Log (one file shared by every experiment: paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
@@ -20,8 +23,13 @@ result was obtained (multiple testing) and of whether a test window had already 
 The trial log of the previous workspace (4,089 entries, 2026-10-03 -> 2026-10-05) is kept as
 records/legacy/trial_log_legacy_20261005.csv; those trials still count in the thesis.
 
+From 2026-10-20 a new trial_id includes the process id, so two processes that log in the same microsecond do not
+share an id. One row is "{timestamp}_{pid}_{config_hash}". A row written in a batch is
+"{timestamp}{row_index:05d}_{pid}_{config_hash}". Rows already in the log keep the earlier id (those two forms
+without the process id). They are not rewritten.
+
 Columns:
-    trial_id                unique id (logged timestamp + config hash)
+    trial_id                unique id (timestamp, process id and config hash; older rows have no process id)
     logged_ts               local time of the log entry
     experiment              experiment name (config.EXPERIMENT_NAME of the experiment, e.g. "exp02_stop_reentry")
     protocol_version        PROTOCOL_VERSION of the experiment config
@@ -36,6 +44,11 @@ Columns:
     metric_json             metrics of the entry
     note                    free text
 """
+
+# THE TRIAL LOG COLUMNS, IN THE ORDER THEY ARE WRITTEN
+TRIAL_LOG_COLUMN_LIST = ["trial_id", "logged_ts", "experiment", "protocol_version", "stage", "fold_id", "train_start",
+                         "train_end", "valid_start", "valid_end", "test_start", "test_end", "test_window_touched",
+                         "config_hash", "setting_json", "metric_json", "note"]
 
 # FUNCTION: GET THE CONSTANT SNAPSHOT OF A CONFIGURATION MODULE
 def get_module_constant_dict(module_in):
@@ -150,14 +163,15 @@ def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_d
     Returns:
         dict: The logged row
     """
-    # DEFINE THE LOGGED TIMESTAMP AND THE CONFIG HASH
+    # DEFINE THE LOGGED TIMESTAMP, THE CONFIG HASH AND THE PROCESS ID (THE ID STAYS UNIQUE ACROSS PROCESSES)
     logged_ts = datetime.now()
     config_hash_str = get_config_hash_str(experiment_config_in)
+    pid_int = os.getpid()
     # CONVERT THE FOLD ROW TO A DICTIONARY
     fold_dict = dict(fold_row_in) if fold_row_in is not None else {}
     # DEFINE THE TRIAL ROW
     trial_dict = {
-        "trial_id": f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}_{config_hash_str}",
+        "trial_id": f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}_{pid_int}_{config_hash_str}",
         "logged_ts": logged_ts.isoformat(timespec="seconds"),
         "experiment": experiment_config_in.EXPERIMENT_NAME,
         "protocol_version": experiment_config_in.PROTOCOL_VERSION,
@@ -175,8 +189,11 @@ def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_d
         "metric_json": json.dumps(to_json_safe(metric_dict_in), sort_keys=True),
         "note": note_str_in,
     }
-    # APPEND THE ROW TO THE TRIAL LOG
-    write_csv_file_to_path(pd.DataFrame([trial_dict]), file_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR, "A", alert_in=alert_in)
+    # APPEND THE ROW (THE EXISTING ROWS ARE NOT READ OR REWRITTEN)
+    file_path_str = file_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
+    append_csv_record_pdf(pd.DataFrame([trial_dict], columns=TRIAL_LOG_COLUMN_LIST), file_path_str, TRIAL_LOG_COLUMN_LIST)
+    # DISPLAY INFORMATION
+    print(f"✅ Trial appended to '{file_path_str}'") if alert_in else None
     # RETURN THE ROW
     return trial_dict
 
@@ -200,9 +217,10 @@ def log_trial_pdf(experiment_config_in, stage_str_in, setting_pdf_in, setting_co
     Returns:
         pd.DataFrame: The logged rows
     """
-    # DEFINE THE LOGGED TIMESTAMP AND THE CONFIG HASH
+    # DEFINE THE LOGGED TIMESTAMP, THE CONFIG HASH AND THE PROCESS ID (THE ID STAYS UNIQUE ACROSS PROCESSES)
     logged_ts = datetime.now()
     config_hash_str = get_config_hash_str(experiment_config_in)
+    pid_int = os.getpid()
     # INDEX THE FOLDS
     fold_dict_dict = {int(row["fold_id"]): dict(row) for _, row in fold_pdf_in.iterrows()} if fold_pdf_in is not None else {}
     # LIST TO HOLD THE ROWS
@@ -213,9 +231,9 @@ def log_trial_pdf(experiment_config_in, stage_str_in, setting_pdf_in, setting_co
         setting_dict = {col: setting_row[col] for col in setting_col_str_list_in}
         metric_dict = {col: setting_row[col] for col in metric_col_str_list_in if col in setting_row.index}
         fold_dict = fold_dict_dict.get(int(setting_row["fold_id"]), {}) if "fold_id" in setting_row.index and pd.notna(setting_row["fold_id"]) else {}
-        # DEFINE THE TRIAL ROW (THE ROW INDEX MAKES THE ID UNIQUE WITHIN THE WRITE)
+        # DEFINE THE TRIAL ROW (THE ROW INDEX MAKES THE ID UNIQUE WITHIN THE WRITE; THE PROCESS ID, ACROSS PROCESSES)
         trial_dict_list.append({
-            "trial_id": f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}{row_idx:05d}_{config_hash_str}",
+            "trial_id": f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}{row_idx:05d}_{pid_int}_{config_hash_str}",
             "logged_ts": logged_ts.isoformat(timespec="seconds"),
             "experiment": experiment_config_in.EXPERIMENT_NAME,
             "protocol_version": experiment_config_in.PROTOCOL_VERSION,
@@ -233,11 +251,11 @@ def log_trial_pdf(experiment_config_in, stage_str_in, setting_pdf_in, setting_co
             "metric_json": json.dumps(to_json_safe(metric_dict), sort_keys=True),
             "note": note_str_in,
         })
-    # CONVERT TO A DATAFRAME
-    trial_pdf = pd.DataFrame(trial_dict_list)
-    # APPEND THE ROWS TO THE TRIAL LOG
+    # CONVERT TO A DATAFRAME IN THE FIXED COLUMN ORDER
+    trial_pdf = pd.DataFrame(trial_dict_list, columns=TRIAL_LOG_COLUMN_LIST)
+    # APPEND THE ROWS (THE EXISTING ROWS ARE NOT READ OR REWRITTEN)
     if not trial_pdf.empty:
-        write_csv_file_to_path(trial_pdf, file_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR, "A", alert_in=False)
+        append_csv_record_pdf(trial_pdf, file_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR, TRIAL_LOG_COLUMN_LIST)
     # RETURN THE ROWS
     return trial_pdf
 
