@@ -13,6 +13,8 @@ import sys
 import json
 import tempfile
 import shutil
+import io
+from contextlib import redirect_stdout
 
 # POINT BOTH ROOTS AT EMPTY TEMPORARY FOLDERS BEFORE so.paths IS IMPORTED
 TEMP_VIEW_STR = tempfile.mkdtemp(prefix="so_view_")
@@ -35,8 +37,15 @@ from so import paths, config
 from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
 from so.core.holdout import compute_holdout_window_dict, open_holdout_window_dict, get_active_holdout_window_dict
 from so.features.barrier_labels import encode_TSBAR_cell_str
-from refresh_development_view import (check_refresh_roots_dict, get_file_name_date_span_tuple, run_refresh_development_view_dict,
-                                      UNRESOLVED_TSBAR_CELL_STR)
+from refresh_development_view import (
+    UNRESOLVED_TSBAR_CELL_STR,
+    check_refresh_roots_dict,
+    get_bar_position_dict,
+    get_file_name_date_span_tuple,
+    get_source_file_action_str,
+    get_tsbar_exit_on_or_after_bool,
+    run_refresh_development_view_dict,
+)
 
 # KEEP THE REAL REGISTRY UNCHANGED
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
@@ -643,17 +652,284 @@ def test_run_pipeline_copies_notebooks():
         assert os.stat(repo_path_str).st_mtime_ns == mtime_ns
     passed("run-pipeline executes copies under the quarantine and does not modify repo notebooks")
 
+# FUNCTION: LINEAR TSBAR EXIT PLACEMENT (THE PRE-SCALE RULE)
+def get_linear_tsbar_exit_on_or_after_bool(cell_str_in, entry_value_in, bar_timestamp_list_in, first_holdout_ts_in):
+    """
+    The original linear walk over bar_timestamp_list_in. Used only to check that the dict lookup agrees.
+
+    Args:
+        cell_str_in (str): Encoded cell
+        entry_value_in: entry_ts
+        bar_timestamp_list_in (list[pd.Timestamp]): Bars
+        first_holdout_ts_in (pd.Timestamp): First holdout bar
+
+    Returns:
+        bool: Exit on or after the holdout
+    """
+    # SAME RULE AS get_tsbar_exit_on_or_after_bool BEFORE THE DICT INDEX
+    from refresh_development_view import get_tsbar_cell_tuple
+    cell_tup = get_tsbar_cell_tuple(cell_str_in)
+    if cell_tup is None:
+        return False
+    count_int, _price_str, reason_str = cell_tup
+    if count_int < 0 or reason_str == config.EXIT_REASON_NA:
+        return False
+    if first_holdout_ts_in is None or not bar_timestamp_list_in:
+        return True
+    entry_ts = pd.to_datetime(entry_value_in, utc=True).tz_convert(ny_tz)
+    entry_idx = None
+    for bar_idx, bar_ts in enumerate(bar_timestamp_list_in):
+        if pd.Timestamp(bar_ts) == entry_ts:
+            entry_idx = bar_idx
+            break
+    if entry_idx is None:
+        return True
+    exit_idx = entry_idx + int(count_int)
+    if exit_idx < 0 or exit_idx >= len(bar_timestamp_list_in):
+        return True
+    return pd.Timestamp(bar_timestamp_list_in[exit_idx]) >= pd.Timestamp(first_holdout_ts_in)
+
+# FUNCTION: TEST THAT THE BAR-INDEX DICT MATCHES THE LINEAR WALK
+def test_tsbar_exit_dict_matches_linear_walk():
+    """
+    Exit placement with the timestamp->position dict gives the same answers as walking the bar list.
+
+    Returns:
+        None
+    """
+    # TWENTY ONE-MINUTE BARS; HOLDOUT STARTS AT BAR 10
+    bar_list = [pd.Timestamp("2024-01-16 09:30:00", tz=ny_tz) + pd.Timedelta(minutes=idx) for idx in range(20)]
+    position_dict = get_bar_position_dict(bar_list)
+    first_holdout_ts = bar_list[10]
+    entry_ts = bar_list[0]
+    unresolved_str = encode_TSBAR_cell_str(-1, float("nan"), config.EXIT_REASON_NA)
+    case_list = [0, 1, 9, 10, 15, 19, 20, 30]
+    for count_int in case_list:
+        cell_str = encode_TSBAR_cell_str(count_int, 100.0, "TP")
+        dict_bool = get_tsbar_exit_on_or_after_bool(cell_str, entry_ts, bar_list, first_holdout_ts, bar_position_dict_in=position_dict)
+        linear_bool = get_linear_tsbar_exit_on_or_after_bool(cell_str, entry_ts, bar_list, first_holdout_ts)
+        assert dict_bool == linear_bool, (count_int, dict_bool, linear_bool)
+    assert get_tsbar_exit_on_or_after_bool(unresolved_str, entry_ts, bar_list, first_holdout_ts, bar_position_dict_in=position_dict) is False
+    assert get_linear_tsbar_exit_on_or_after_bool(unresolved_str, entry_ts, bar_list, first_holdout_ts) is False
+    missing_entry_str = "2020-01-01 14:30:00+00:00"
+    missing_cell_str = encode_TSBAR_cell_str(1, 100.0, "TP")
+    assert get_tsbar_exit_on_or_after_bool(missing_cell_str, missing_entry_str, bar_list, first_holdout_ts, bar_position_dict_in=position_dict) is True
+    assert get_linear_tsbar_exit_on_or_after_bool(missing_cell_str, missing_entry_str, bar_list, first_holdout_ts) is True
+    passed("TSBAR exit dict lookup matches the linear walk")
+
+# FUNCTION: TEST --plan WRITES NOTHING
+def test_plan_does_not_write(tree_dict_in):
+    """
+    --plan prints per-folder counts and bytes and does not change VIEW.json or the registry.
+
+    Args:
+        tree_dict_in (dict): Tree after the first build
+
+    Returns:
+        None
+    """
+    # RECORD THE STAMP AND THE REGISTRY BEFORE THE PLAN
+    view_path_str = os.path.join(TEMP_VIEW_STR, "VIEW.json")
+    before_mtime_ns = os.stat(view_path_str).st_mtime_ns
+    before_stamp_str = open(view_path_str, encoding="utf-8").read()
+    before_registry_size_int = os.path.getsize(REGISTRY_PATH_STR)
+    stdout_buf = io.StringIO()
+    with redirect_stdout(stdout_buf):
+        result_dict = run_refresh_development_view_dict(run_pipeline_bool_in=False, plan_bool_in=True)
+    plan_text_str = stdout_buf.getvalue()
+    assert result_dict["plan_bool"] is True
+    assert result_dict["slid_bool"] is False
+    assert result_dict["view_path_str"] is None
+    assert os.stat(view_path_str).st_mtime_ns == before_mtime_ns
+    assert open(view_path_str, encoding="utf-8").read() == before_stamp_str
+    assert os.path.getsize(REGISTRY_PATH_STR) == before_registry_size_int
+    assert "folder " in plan_text_str
+    assert "copy" in plan_text_str
+    assert "skip" in plan_text_str
+    skip_total_int = sum(int(plan_dict["skip_count"]) for plan_dict in result_dict["folder_plan_list"])
+    assert skip_total_int >= 1
+    spy_action_str = get_source_file_action_str("ohlcv_data_2023.csv", "store01_rawzone/ibkr_spy_1min/ohlcv_data_2023.csv",
+                                                tree_dict_in["start_date"], set())
+    assert spy_action_str == "copy"
+    passed("--plan prints per-folder counts and does not write VIEW.json or the registry")
+
+# FUNCTION: TIMING TREE OF REALISTIC SHAPE
+def build_timing_tree_dict(quarantine_root_str_in):
+    """
+    Writes a quarantine tree shaped like production: 300 per-day ~5 MB step01 files, one yearly raw file of
+    100,000 rows, 30 TSBAR files with 390 rows and 6 distance cells, and a TSDAY table of 5,436 rows.
+
+    Args:
+        quarantine_root_str_in (str): Quarantine root
+
+    Returns:
+        dict: session list, start date, file and byte counts
+    """
+    # SESSIONS 2022-2024 SO THE HOLDOUT START IS IN 2023
+    session_2022_list = get_session_date_list("2022-01-03", "2022-12-30")
+    session_2023_list = get_session_date_list("2023-01-03", "2023-12-29")
+    session_2024_list = get_session_date_list("2024-01-02", "2024-01-16")
+    spy_session_list = session_2022_list + session_2023_list + session_2024_list
+    pad_session_list = get_session_date_list("2002-01-02", "2021-12-31")
+    tsday_session_list = (pad_session_list + spy_session_list)[-5436:]
+    assert len(tsday_session_list) == 5436
+    assert tsday_session_list[-1] == spy_session_list[-1]
+    window_dict = compute_holdout_window_dict(spy_session_list)
+    start_date = window_dict["start"]
+    spy_str = get_rel_str(quarantine_root_str_in, "store01_rawzone", "ibkr_spy_1min")
+    pa_str = get_rel_str(quarantine_root_str_in, "store02_workzone", "step01_PA_ohlcv_data")
+    tsbar_str = get_rel_str(quarantine_root_str_in, "store03_goldzone", "step05_TSBAR_data")
+    tsday_str = get_rel_str(quarantine_root_str_in, "store02_workzone", "step06_TSDAY_data")
+    os.makedirs(spy_str, exist_ok=True)
+    # YEARLY 2022: ABOUT 100,000 UNIQUE BARS
+    n_rows_int = 100000
+    n_sessions_int = len(session_2022_list)
+    bars_per_int = n_rows_int // n_sessions_int
+    extra_int = n_rows_int - bars_per_int * n_sessions_int
+    line_list = ["timestamp,open,high,low,close,volume"]
+    for session_idx, session_date in enumerate(session_2022_list):
+        n_int = bars_per_int + (1 if session_idx < extra_int else 0)
+        day_str = pd.Timestamp(session_date).strftime("%Y-%m-%d")
+        for bar_idx in range(n_int):
+            minute_int = 14 * 60 + 30 + bar_idx
+            hour_int, minute_only_int = divmod(minute_int, 60)
+            line_list.append(f"{day_str} {hour_int:02d}:{minute_only_int:02d}:00+00:00,100.0,101.0,99.0,100.5,1000")
+    os.makedirs(spy_str, exist_ok=True)
+    with open(os.path.join(spy_str, "ohlcv_data_2022.csv"), "w", encoding="utf-8", newline="\n") as spy_file:
+        spy_file.write("\n".join(line_list) + "\n")
+    write_raw_csv_bytes(os.path.join(spy_str, "ohlcv_data_2023.csv"), session_2023_list)
+    write_raw_csv_bytes(os.path.join(spy_str, "ohlcv_data_2024.csv"), session_2024_list)
+    # 300 PER-DAY ~5 MB FILES IN STEP01, DATED WELL BEFORE THE SCAN TAIL
+    pa_date_list = get_session_date_list("2021-01-04", "2022-06-30")[:300]
+    assert len(pa_date_list) == 300
+    fill_bytes = b"2020-01-02,1.0\n"
+    header_bytes = b"date,close\n"
+    target_int = 5 * 1024 * 1024
+    fill_count_int = max(1, (target_int - 80) // len(fill_bytes))
+    body_bytes = fill_bytes * fill_count_int
+    os.makedirs(pa_str, exist_ok=True)
+    for session_date in pa_date_list:
+        last_bytes = f"{session_date},100.5\n".encode("utf-8")
+        file_path_str = os.path.join(pa_str, f"PA_ohlcv_{session_date.strftime('%Y%m%d')}.csv")
+        with open(file_path_str, "wb") as pa_file:
+            pa_file.write(header_bytes)
+            pa_file.write(body_bytes)
+            pa_file.write(last_bytes)
+    # 30 TSBAR FILES: 390 ROWS, 6 DISTANCE CELLS
+    os.makedirs(tsbar_str, exist_ok=True)
+    before_s_list = [session_date for session_date in spy_session_list if session_date < start_date]
+    tsbar_date_list = before_s_list[-30:]
+    distance_list = ["0.0010", "0.0020", "0.0030", "0.0040", "0.0050", "0.0060"]
+    near_cell_str = encode_TSBAR_cell_str(1, 100.10, "SL")
+    for session_date in tsbar_date_list:
+        stamp_str = get_session_bar_str_list(session_date)[0]
+        day_str = str(session_date)
+        row_dict_list = []
+        for row_idx in range(390):
+            row_dict = {"decision_ts": stamp_str, "entry_ts": stamp_str, "entry_price": "100.0",
+                        "horizon_complete": "True", "rr_ratio": "1.0", "date": day_str}
+            for column_str in distance_list:
+                row_dict[column_str] = near_cell_str
+            row_dict_list.append(row_dict)
+        pd.DataFrame(row_dict_list).to_csv(os.path.join(tsbar_str, f"TSBAR_{session_date.strftime('%Y%m%d')}.csv"), index=False)
+    write_dated_csv(os.path.join(tsday_str, "TSDAY_data.csv"), tsday_session_list,
+                    {"close": "100.5", "fwd_net_return_20d": "0.01", "y_fwd_positive": "1"})
+    for folder_str in (
+        get_rel_str(quarantine_root_str_in, "store01_rawzone", "ibkr_vix_family", "vix_1min"),
+        get_rel_str(quarantine_root_str_in, "store01_rawzone", "ibkr_vix_family", "vix_daily"),
+        get_rel_str(quarantine_root_str_in, "store01_rawzone", "ibkr_vix_family", "vix3m_1min"),
+        get_rel_str(quarantine_root_str_in, "store01_rawzone", "ibkr_vix_family", "vix3m_daily"),
+        get_rel_str(quarantine_root_str_in, "store02_workzone", "step02_TSIND_data"),
+        get_rel_str(quarantine_root_str_in, "store02_workzone", "step03_TSSEG_data"),
+        get_rel_str(quarantine_root_str_in, "store02_workzone", "step04_TSCTX_data"),
+    ):
+        os.makedirs(folder_str, exist_ok=True)
+    file_count_int = 0
+    byte_count_int = 0
+    for walk_root_str, _dir_list, file_list in os.walk(quarantine_root_str_in):
+        for file_name_str in file_list:
+            file_path_str = os.path.join(walk_root_str, file_name_str)
+            file_count_int += 1
+            byte_count_int += int(os.path.getsize(file_path_str))
+    return {"session_date_list": spy_session_list, "start_date": start_date, "window_dict": window_dict,
+            "file_count": file_count_int, "byte_count": byte_count_int, "pa_file_count": 300}
+
+# FUNCTION: TIMING AND PROJECTION ON A REALISTIC-SHAPE TREE
+def test_refresh_timing_and_projection():
+    """
+    Build and scan a tree of realistic shape, print seconds, and project the real 61,405-file / 62 GB tree.
+
+    Returns:
+        dict: Timings and projection
+    """
+    # ISOLATED ROOTS SO THE SMALL-TREE TESTS ARE UNTOUCHED
+    timing_view_str = tempfile.mkdtemp(prefix="so_timing_view_")
+    timing_quarantine_str = tempfile.mkdtemp(prefix="so_timing_q_")
+    saved_view_str = os.environ["SO_DATA_PATH"]
+    saved_quarantine_str = os.environ["SO_QUARANTINE_PATH"]
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    try:
+        os.environ["SO_DATA_PATH"] = timing_view_str
+        os.environ["SO_QUARANTINE_PATH"] = timing_quarantine_str
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(timing_view_str, "holdout_windows.csv")
+        tree_dict = build_timing_tree_dict(timing_quarantine_str)
+        open_holdout_window_dict(tree_dict["session_date_list"],
+                                 f"OPEN {tree_dict['window_dict']['start']} {tree_dict['window_dict']['end']}",
+                                 file_path_str_in=paths.HOLDOUT_WINDOWS_FILE_PATH_STR)
+        result_dict = run_refresh_development_view_dict(run_pipeline_bool_in=False)
+        build_seconds = float(result_dict["build_seconds"])
+        scan_seconds = float(result_dict["scan_seconds"])
+        n_int = int(tree_dict["file_count"])
+        bytes_int = int(tree_dict["byte_count"])
+        real_files_int = 61405
+        real_bytes_int = 62 * (10 ** 9)
+        file_scale_float = real_files_int / max(n_int, 1)
+        byte_scale_float = real_bytes_int / max(bytes_int, 1)
+        proj_build_files_float = build_seconds * file_scale_float
+        proj_build_bytes_float = build_seconds * byte_scale_float
+        proj_scan_float = scan_seconds * file_scale_float
+        proj_total_float = proj_build_bytes_float + proj_scan_float
+        print(
+            f"TIMING build={build_seconds:.3f}s scan={scan_seconds:.3f}s "
+            f"files={n_int} bytes={bytes_int} pa_files={tree_dict['pa_file_count']}"
+        )
+        print(
+            f"PROJECTION 61405 files / 62 GB: "
+            f"build_file_scaled={proj_build_files_float:.1f}s "
+            f"build_byte_scaled={proj_build_bytes_float:.1f}s "
+            f"scan_file_scaled={proj_scan_float:.1f}s "
+            f"total_byte_plus_scan={proj_total_float:.1f}s"
+        )
+        assert build_seconds >= 0.0
+        assert scan_seconds >= 0.0
+        assert n_int >= 300
+        assert os.path.isfile(os.path.join(timing_view_str, "VIEW.json"))
+        passed("timing tree: build and scan seconds plus real-tree projection")
+        return {"build_seconds": build_seconds, "scan_seconds": scan_seconds, "file_count": n_int,
+                "byte_count": bytes_int, "proj_build_files": proj_build_files_float,
+                "proj_build_bytes": proj_build_bytes_float, "proj_scan": proj_scan_float,
+                "proj_total": proj_total_float}
+    finally:
+        os.environ["SO_DATA_PATH"] = saved_view_str
+        os.environ["SO_QUARANTINE_PATH"] = saved_quarantine_str
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+        shutil.rmtree(timing_view_str, ignore_errors=True)
+        shutil.rmtree(timing_quarantine_str, ignore_errors=True)
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY FOLDERS
     try:
         test_file_name_span()
         test_refresh_refuses_without_roots()
+        test_tsbar_exit_dict_matches_linear_walk()
         tree_dict = test_first_view_cut_and_redact()
+        test_plan_does_not_write(tree_dict)
         test_second_run_copies_nothing(tree_dict)
         test_run_pipeline_copies_notebooks()
         slid_tree_dict = test_slide_moves_sessions_and_fills_labels(tree_dict)
         test_planted_file_fails_scan(slid_tree_dict)
+        test_refresh_timing_and_projection()
         # THE REAL REGISTRY IS UNCHANGED
         assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
         if REAL_WINDOWS_EXISTS_BOOL:
