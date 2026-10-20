@@ -5,8 +5,10 @@ Stock Overflow Data Paths
 
 Forward slashes are used on purpose: they work on Windows and the file helpers (so.core.local_file_management) expect them.
 The data root is the folder in the environment variable SO_DATA_PATH. There is no default. The variable is read at the
-first use of a data path, not at import, so this module can be imported before the variable is set. The experiment zone
-is store04_experiments under that root.
+first use of a data path, not at import, so this module can be imported before the variable is set. That root is the
+development view: sessions before the active holdout start. SO_QUARANTINE_PATH is the complete data tree (every
+session). It has no default, and development code does not read it. The experiment zone is store04_experiments under
+the data root.
 
 Four zones:
     store01_rawzone         raw IBKR minute bars (corrected once for bad ticks, records/bad_tick_corrections.csv)
@@ -69,6 +71,52 @@ def get_data_root_str():
         raise RuntimeError("SO_DATA_PATH is not set. Set it to the data folder before using a data path.")
     # FORWARD SLASHES AND ONE TRAILING SLASH
     return data_path_str.replace("\\", "/").rstrip("/") + "/"
+
+# FUNCTION: GET THE QUARANTINE ROOT FROM SO_QUARANTINE_PATH
+def get_quarantine_root_str():
+    """
+    The complete data tree, the folder in SO_QUARANTINE_PATH. There is no default folder. Development code does not
+    call this. The evaluation loader does, after the evaluation token has been checked.
+
+    Returns:
+        str: Quarantine root, with forward slashes and a trailing slash
+    """
+    # READ THE SETTING WHEN THE QUARANTINE IS USED, NOT WHEN THIS MODULE IS IMPORTED
+    quarantine_path_str = os.environ.get("SO_QUARANTINE_PATH", "").strip()
+    # AN UNSET OR BLANK SETTING IS AN ERROR (THERE IS NO FALLBACK ROOT)
+    if quarantine_path_str == "":
+        raise RuntimeError("SO_QUARANTINE_PATH is not set. Set it to the complete data folder. Development code does not read it.")
+    # FORWARD SLASHES AND ONE TRAILING SLASH
+    return quarantine_path_str.replace("\\", "/").rstrip("/") + "/"
+
+# FUNCTION: LIST THE DATA-PATH NAMES
+def get_data_path_name_list():
+    """
+    The data-path attribute names, in definition order.
+
+    Returns:
+        list[str]: Attribute names
+    """
+    # THE REGISTERED NAMES, NOT AN ASSIGNMENT A CALLER MADE AFTER IMPORT
+    return list(_DATA_PATH_SUFFIX_DICT)
+
+# FUNCTION: MAP ONE DATA-PATH NAME ONTO THE QUARANTINE ROOT
+def get_quarantine_named_path_str(name_str_in):
+    """
+    The same relative layout as a data-path name, under the quarantine root. An assignment on this module is a
+    development-view override and does not apply here.
+
+    Args:
+        name_str_in (str): Attribute name, for example "LOCAL_OHLCV_DATA_FILE_PATH_STR"
+
+    Returns:
+        str: Path under the quarantine root
+    """
+    # UNKNOWN NAMES ARE ORDINARY MISSING ATTRIBUTES
+    if name_str_in not in _DATA_PATH_SUFFIX_DICT:
+        raise AttributeError(f"module 'so.paths' has no attribute {name_str_in!r}")
+    # THE QUARANTINE ROOT PLUS THE SAME RELATIVE SUFFIX THE DEVELOPMENT VIEW USES
+    return get_quarantine_root_str() + _DATA_PATH_SUFFIX_DICT[name_str_in]
 
 # FUNCTION: GET ONE DATA PATH, HONOURING AN ASSIGNMENT ON THIS MODULE
 def get_named_data_path_str(name_str_in):

@@ -87,6 +87,8 @@ if __name__ == "__main__":
     before_stamp_tuple = get_trial_log_stamp_tuple(caller_data_path_str) if caller_data_path_str else None
     # SUITES INHERIT THIS ENVIRONMENT, THEN RECEIVE THEIR OWN EMPTY DATA FOLDER
     suite_env_base_dict = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    # A PARENT SHELL MUST NOT HAND A REAL QUARANTINE ROOT TO A SUITE
+    suite_env_base_dict.pop("SO_QUARANTINE_PATH", None)
     exit_code_int = 0
     try:
         # ITERATE OVER THE SUITES

@@ -1094,14 +1094,12 @@ def get_registry_frame_pdf(source_name_str_in, end_date_in):
         return read_csv_files_from_path(paths.LOCAL_TSDAY_DATA_FILE_PATH_STR, enforce_holdout_bool_in=True)
     raise ValueError(f"{source_name_str_in} is registered but has no disk loader.")
 
-# FUNCTION: LOAD DECLARED SOURCES THROUGH AN END DATE
-def load_source_frame_dict(source_name_list_in, end_date_in):
+# FUNCTION: STAMP DECLARED SOURCES THROUGH AN END DATE
+def get_stamped_source_frame_dict(source_name_list_in, end_date_in):
     """
     Loads each declared source through its registry loader and stamps available_ts (and label_known_ts for a label).
-    Rows after end_date_in are dropped. end_date_in is the window end for the evaluation script and the development
-    boundary for a development replay. A load whose end is on or after the window start is a holdout load: the runner
-    flag is set for the call so the loaders allow the window and still refuse the day after it. The direct-read block
-    stays off, because this load happens before a replay starts.
+    Rows after end_date_in are dropped. This function does not set the runner flag and does not decide whether the
+    end date is allowed. The development loader and the evaluation loader own those checks.
 
     Args:
         source_name_list_in (list[str]): Registry names
@@ -1110,29 +1108,46 @@ def load_source_frame_dict(source_name_list_in, end_date_in):
     Returns:
         dict: source name -> stamped frame
     """
-    # THE HOLDOUT MODULE OWNS THE RUNNER FLAG THE LOADERS ALREADY CONSULT
-    import so.core.holdout as holdout_module
+    # THE CALLER HAS ALREADY DECIDED THAT THIS END DATE MAY BE READ
     end_date = pd.Timestamp(end_date_in).date()
-    window_dict = holdout_module.get_active_holdout_window_dict(missing_ok_bool_in=True)
-    holdout_load_bool = window_dict is not None and end_date >= holdout_module.get_date(window_dict["start"])
-    previous_bool = holdout_module._RUNNER_ACTIVE_BOOL
-    # A WINDOW-END LOAD MAY READ THE WINDOW; A DEVELOPMENT LOAD STOPS AT THE WINDOW START
-    if holdout_load_bool:
-        holdout_module._RUNNER_ACTIVE_BOOL = True
-    try:
-        frame_dict = {}
-        for source_name_str in source_name_list_in:
-            # AN UNREGISTERED NAME RAISES BEFORE ANY FILE IS USED FOR THAT NAME
-            get_source_spec_dict(source_name_str)
-            loaded_pdf = get_frame_through_end_date_pdf(get_registry_frame_pdf(source_name_str, end_date), end_date)
-            if source_name_str == "TSBAR" and len(loaded_pdf):
-                # PLACE THE STORED EXIT BARS ON THE SPY MINUTES ALREADY LOADED FOR THIS CONTEXT
-                spy_pdf = frame_dict.get("SPY_1MIN")
-                timestamp_index = spy_pdf["timestamp"] if spy_pdf is not None and len(spy_pdf) and "timestamp" in spy_pdf.columns else None
-                frame_dict[source_name_str] = add_tsbar_label_known_ts_pdf(loaded_pdf, timestamp_index_in=timestamp_index)
-            else:
-                frame_dict[source_name_str] = add_available_ts_pdf(source_name_str, loaded_pdf) if len(loaded_pdf) else loaded_pdf
-        return frame_dict
-    finally:
-        # RESTORE THE FLAG THE CALLER HAD
-        holdout_module._RUNNER_ACTIVE_BOOL = previous_bool
+    frame_dict = {}
+    for source_name_str in source_name_list_in:
+        # AN UNREGISTERED NAME RAISES BEFORE ANY FILE IS USED FOR THAT NAME
+        get_source_spec_dict(source_name_str)
+        loaded_pdf = get_frame_through_end_date_pdf(get_registry_frame_pdf(source_name_str, end_date), end_date)
+        if source_name_str == "TSBAR" and len(loaded_pdf):
+            # PLACE THE STORED EXIT BARS ON THE SPY MINUTES ALREADY LOADED FOR THIS CONTEXT
+            spy_pdf = frame_dict.get("SPY_1MIN")
+            timestamp_index = spy_pdf["timestamp"] if spy_pdf is not None and len(spy_pdf) and "timestamp" in spy_pdf.columns else None
+            frame_dict[source_name_str] = add_tsbar_label_known_ts_pdf(loaded_pdf, timestamp_index_in=timestamp_index)
+        else:
+            frame_dict[source_name_str] = add_available_ts_pdf(source_name_str, loaded_pdf) if len(loaded_pdf) else loaded_pdf
+    # RETURN THE STAMPED FRAMES
+    return frame_dict
+
+# FUNCTION: LOAD DECLARED SOURCES THROUGH A DEVELOPMENT END DATE
+def load_source_frame_dict(source_name_list_in, end_date_in):
+    """
+    Loads each declared source through its registry loader and stamps available_ts (and label_known_ts for a label).
+    Rows after end_date_in are dropped. The development view stamp is checked first. An end date on or after the
+    active window start raises. This function does not set the runner flag. The direct-read block stays off, because
+    this load happens before a replay starts.
+
+    Args:
+        source_name_list_in (list[str]): Registry names
+        end_date_in (datetime.date | str): Last session kept
+
+    Returns:
+        dict: source name -> stamped frame
+    """
+    # THE HOLDOUT MODULE OWNS THE VIEW STAMP AND THE WINDOW START
+    import so.core.holdout as holdout_module
+    # REFUSE A MISSING OR STALE DEVELOPMENT VIEW BEFORE ANY SOURCE IS OPENED
+    holdout_module.check_development_view()
+    end_date = pd.Timestamp(end_date_in).date()
+    window_dict = holdout_module.get_active_holdout_window_dict()
+    # A DEVELOPMENT LOAD STOPS BEFORE THE WINDOW. THE WINDOW ITSELF IS NOT READ HERE
+    if end_date >= holdout_module.get_date(window_dict["start"]):
+        raise ValueError(f"❌ {end_date} is on or after the holdout start {window_dict['start']}.")
+    # STAMP THE FRAMES. THE RUNNER FLAG IS LEFT AS THE CALLER SET IT
+    return get_stamped_source_frame_dict(source_name_list_in, end_date)

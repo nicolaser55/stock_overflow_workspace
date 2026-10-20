@@ -393,7 +393,8 @@ def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_conte
 def get_development_data_context(session_date_list_in):
     """
     Loads DATA_SOURCE_LIST through the development end (embargo sessions before the active window start) and returns
-    a development DataContext. The holdout evaluation script loads the same list through the window end instead.
+    a development DataContext. The holdout evaluation script loads the same list through the window end from the
+    quarantine root instead.
     The runner does not call this function; it passes its own context.
 
     Args:

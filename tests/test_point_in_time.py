@@ -6,11 +6,12 @@ Run from the workspace root:   python tests/test_point_in_time.py   (or python t
 
 Synthetic data only. The registry, the ledger, the trial log and SO_DATA_PATH are temporary. The data root is a
 temporary folder. records/holdout_windows.csv is not written. SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are set
-only inside this file, to temporary values.
+only inside this file, to temporary values. SO_QUARANTINE_PATH is set only inside this file, to the same temporary root.
 """
 
 import os
 import sys
+import json
 import types
 import tempfile
 import shutil
@@ -22,6 +23,7 @@ TEMP_ROOT_STR = tempfile.mkdtemp(prefix="so_pit_data_")
 os.environ["SO_DATA_PATH"] = TEMP_ROOT_STR
 os.environ.pop("SO_HOLDOUT_PATH", None)
 os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+os.environ.pop("SO_QUARANTINE_PATH", None)
 # ADD THE WORKSPACE ROOT TO THE PATH
 WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, WORKSPACE_PATH_STR)
@@ -653,7 +655,11 @@ def test_declared_load():
         bad_module = get_design_module("exp_pit_e2e_bad", run_dummy_candidate_replay_dict, run_undeclared_path_dict, ["NOT_A_SOURCE"])
         # THE SCRIPT LOADS THE DECLARED SOURCES; ITS __main__ IS NOT RUN
         evaluate_module = get_evaluate_script_module()
-        frame_dict = evaluate_module.get_evaluation_frame_dict(prev_module)
+        # THE DEVELOPMENT VIEW STAMP MATCHES THIS WINDOW. THE FILES ALREADY WRITTEN ARE THE QUARANTINE TREE
+        with open(os.path.join(TEMP_ROOT_STR, "VIEW.json"), "w", encoding="utf-8") as view_file:
+            json.dump({"window_start": str(pd.Timestamp(get_active_holdout_window_dict()["start"]).date())}, view_file)
+        os.environ["SO_QUARANTINE_PATH"] = TEMP_ROOT_STR
+        frame_dict = evaluate_module.get_evaluation_frame_dict(prev_module, token_path_str)
         ohlcv_array_dict = get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
         assert get_runner_active_bool() is False
         # THE FORWARD VIX CLOSE AND THE FORWARD SPY BAR ARE NOT IN THE FRAMES
@@ -707,8 +713,9 @@ def test_declared_load():
         assert "VIX_DAILY" in prev_row["sources_read"]
         passed("vix_level_prev loaded through the evaluation script is valid")
     finally:
-        # PUT THE EARLIER REGISTRY BACK
+        # PUT THE EARLIER REGISTRY BACK AND DROP THE QUARANTINE ROOT
         paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+        os.environ.pop("SO_QUARANTINE_PATH", None)
 
 # RUN THE SUITE
 if __name__ == "__main__":
@@ -732,3 +739,4 @@ if __name__ == "__main__":
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)
         os.environ.pop("SO_HOLDOUT_PATH", None)
         os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+        os.environ.pop("SO_QUARANTINE_PATH", None)

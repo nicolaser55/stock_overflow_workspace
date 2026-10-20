@@ -299,32 +299,63 @@ def get_cache_file_date(file_path_str_in):
 # FUNCTION: DROP CACHE FILES ON OR AFTER THE HOLDOUT BOUNDARY
 def get_cache_file_list_before_boundary(file_path_str_list_in, boundary_date_in):
     """
-    Drops files whose name date is on or after the boundary. Files with no date stamp are kept.
+    Drops files whose name date is on or after the boundary. When a boundary applies, a file with no date in its
+    name is not returned here: the reader opens it and cuts rows by the date column.
 
     Args:
         file_path_str_list_in (list[str]): File paths
         boundary_date_in (datetime.date | None): Boundary (None keeps every file)
 
     Returns:
-        list[str]: The files that may be read
+        list[str]: The files that may be read whole
     """
     # KEEP EVERY FILE WHEN THERE IS NO BOUNDARY
     if boundary_date_in is None:
         return list(file_path_str_list_in)
-    # DROP A FILE DATED ON OR AFTER THE BOUNDARY
+    # DROP A FILE DATED ON OR AFTER THE BOUNDARY, AND LEAVE UNDATED FILES TO THE ROW CUT
     kept_list = []
     for file_path_str in file_path_str_list_in:
         file_date = get_cache_file_date(file_path_str)
-        if file_date is not None and file_date >= boundary_date_in:
+        # A NAME WITHOUT A DATE IS NOT RETURNED WHOLE WHEN A BOUNDARY APPLIES
+        if file_date is None:
+            continue
+        # DROP A FILE DATED ON OR AFTER THE BOUNDARY
+        if file_date >= boundary_date_in:
             continue
         kept_list.append(file_path_str)
     return kept_list
+
+# FUNCTION: CUT AN UNDATED CACHE FILE AT THE BOUNDARY
+def get_cache_frame_before_boundary_pdf(frame_pdf_in, boundary_date_in):
+    """
+    Drops rows on or after the boundary. Used for a cache file whose name has no date, inside the work zone or the
+    gold zone. A row is kept only when its date column is strictly before the boundary.
+
+    Args:
+        frame_pdf_in (pd.DataFrame): Rows of one undated cache file
+        boundary_date_in (datetime.date): First date that must not be returned
+
+    Returns:
+        pd.DataFrame: Rows strictly before the boundary
+    """
+    # AN EMPTY FILE HAS NO HOLDOUT ROW TO RETURN
+    if frame_pdf_in is None or len(frame_pdf_in) == 0:
+        return frame_pdf_in if frame_pdf_in is not None else pd.DataFrame()
+    # REFUSE TO RETURN THE FILE WHOLE WHEN IT HAS NO DATE COLUMN TO CUT
+    if "date" not in frame_pdf_in.columns:
+        raise ValueError("❌ A cache file with no date in its name has no date column to cut at the holdout boundary.")
+    # THE DATE COLUMN IS THE SESSION
+    day_series = pd.to_datetime(frame_pdf_in["date"])
+    if getattr(day_series.dt, "tz", None) is not None:
+        day_series = day_series.dt.tz_convert("America/New_York")
+    # KEEP THE SESSIONS STRICTLY BEFORE THE BOUNDARY
+    return frame_pdf_in.loc[day_series.dt.date < boundary_date_in].reset_index(drop=True)
 
 # FUNCTION: COLLECT TRANSACTION DATA FROM PATH
 def read_csv_files_from_path(file_path_str_in, enforce_holdout_bool_in=True):
     """
     Reads all CSV files in directory into single DataFrame. Inside the work zone or the gold zone, files dated
-    on or after the holdout boundary are skipped.
+    on or after the holdout boundary are skipped, and a file with no date in its name is cut by its date column.
     
     Args:
         file_path_str_in: String path to directory containing CSV files
@@ -344,10 +375,26 @@ def read_csv_files_from_path(file_path_str_in, enforce_holdout_bool_in=True):
     boundary_date = get_cache_holdout_boundary_date(file_path_str_in, enforce_holdout_bool_in)
     # COLLECT ALL THE FILES IN THE DIRECTORY
     file_path_str_list = get_path_file_list(file_path_str_in)
-    # FILTER OUT NON-CSV FILES AND FILES ON OR AFTER THE BOUNDARY
-    valid_file_path_str_list = get_cache_file_list_before_boundary([f for f in file_path_str_list if f.endswith(".csv")], boundary_date)
-    # CALL FUNCTION TO COLLECT DATA
-    return read_pdf_from_csv_file_path_list(valid_file_path_str_list)
+    # CSV FILES ONLY
+    csv_path_str_list = [file_path_str for file_path_str in file_path_str_list if file_path_str.endswith(".csv")]
+    # DATED FILES ON OR AFTER THE BOUNDARY ARE DROPPED; UNDATED FILES ARE NOT IN THIS LIST WHEN A BOUNDARY APPLIES
+    valid_file_path_str_list = get_cache_file_list_before_boundary(csv_path_str_list, boundary_date)
+    # OUTSIDE THE WORK AND GOLD ZONES, AND FOR THE PIPELINE, RETURN THE FILES WHOLE
+    if boundary_date is None:
+        return read_pdf_from_csv_file_path_list(valid_file_path_str_list)
+    # UNDATED FILES ARE OPENED AND CUT BY THE DATE COLUMN (THEY ARE NOT RETURNED WHOLE)
+    undated_path_str_list = [file_path_str for file_path_str in csv_path_str_list if get_cache_file_date(file_path_str) is None]
+    part_list = []
+    for file_path_str in valid_file_path_str_list:
+        part_list.append(read_pdf_from_csv_file_path_list([file_path_str]))
+    for file_path_str in undated_path_str_list:
+        undated_pdf = read_pdf_from_csv_file_path_list([file_path_str])
+        part_list.append(get_cache_frame_before_boundary_pdf(undated_pdf, boundary_date))
+    # DROP AN EMPTY READ AND COMBINE THE REST
+    part_list = [part_pdf for part_pdf in part_list if part_pdf is not None]
+    if not part_list:
+        return read_pdf_from_csv_file_path_list([])
+    return pd.concat(part_list, axis=0).reset_index(drop=True)
 
 # FUNCTION: LIST THE DATE FILES OF A DIRECTORY WITHIN A DATE RANGE
 def get_date_range_file_path_list(file_path_str_in, date1_str_in=None, date2_str_in=None):
