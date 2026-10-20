@@ -45,7 +45,7 @@ secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no defaul
 WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "months_covered", "opened_ts", "opened_by",
                       "data_last_session_at_open", "retired_ts", "retire_reason"]
 # DEFINE THE LEDGER COLUMNS
-EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status",
+EVALUATION_COLUMN_LIST = ["window_id", "design_id", "experiment_name", "design_hash", "commit", "evaluated_ts", "status",
                           "reported_start", "reported_end", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
@@ -578,24 +578,32 @@ def get_overlapping_evaluation_pdf(ledger_pdf_in, window_dict_in, file_path_str_
             keep_idx_list.append(row_idx)
     return ledger_pdf_in.loc[keep_idx_list]
 
-# FUNCTION: THE LATEST REPORTED END OF A DESIGN HASH
-def get_latest_reported_end_date(ledger_pdf_in, design_hash_str_in, file_path_str_in=None):
+# FUNCTION: THE LATEST REPORTED END OF THE SAME DESIGN
+def get_latest_reported_end_date(ledger_pdf_in, design_hash_str_in, experiment_name_str_in=None, file_path_str_in=None):
     """
-    The latest reported_end on ledger rows of this design hash. A blank reported_end falls back to the registry
-    window end of that row.
+    The latest reported_end on ledger rows of this design hash or this EXPERIMENT_NAME. A new protocol version uses a
+    new EXPERIMENT_NAME, so it is a new design. A blank reported_end falls back to the registry window end of that row.
 
     Args:
         ledger_pdf_in (pd.DataFrame): Ledger
         design_hash_str_in (str): Design hash
+        experiment_name_str_in (str | None): Design EXPERIMENT_NAME
         file_path_str_in (str | None): Registry CSV
 
     Returns:
-        datetime.date | None: Latest reported end, or None when the hash is new
+        datetime.date | None: Latest reported end, or None when the design is new
     """
-    # NO ROW OF THIS HASH
-    if ledger_pdf_in is None or len(ledger_pdf_in) == 0 or "design_hash" not in ledger_pdf_in.columns:
+    # NO LEDGER ROW TO MATCH
+    if ledger_pdf_in is None or len(ledger_pdf_in) == 0:
         return None
-    hash_pdf = ledger_pdf_in[ledger_pdf_in["design_hash"] == design_hash_str_in]
+    # A ROW MATCHES WHEN THE HASH MATCHES OR THE EXPERIMENT NAME MATCHES
+    false_series = pd.Series(False, index=ledger_pdf_in.index)
+    hash_match_series = ledger_pdf_in["design_hash"] == design_hash_str_in if "design_hash" in ledger_pdf_in.columns else false_series
+    name_str = str(experiment_name_str_in or "").strip()
+    name_match_series = false_series
+    if name_str and "experiment_name" in ledger_pdf_in.columns:
+        name_match_series = ledger_pdf_in["experiment_name"].astype(str) == name_str
+    hash_pdf = ledger_pdf_in[hash_match_series | name_match_series]
     if len(hash_pdf) == 0:
         return None
     # REGISTRY ENDS FOR A BLANK reported_end
@@ -757,8 +765,8 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
     """
     Hard checks, in order: SO_HOLDOUT_PATH set and existing; token; clean git tree; design commit on main; a
     preregister commit; fewer than HOLDOUT_EVALUATION_BUDGET ledger rows whose window overlaps the active window;
-    a new design hash, or a repeat whose active window ends after its latest reported_end and has at least
-    HOLDOUT_MIN_FORWARD_SESSIONS new sessions.
+    a new design (neither design_hash nor EXPERIMENT_NAME already in the ledger), or a repeat whose active window
+    ends after its latest reported_end and has at least HOLDOUT_MIN_FORWARD_SESSIONS new sessions.
 
     Args:
         design_module_in (module): Design module (uppercase constants are hashed)
@@ -788,12 +796,13 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
         raise ValueError("❌ The design has no preregister commit.")
     # BUILD THE DESIGN HASH (THE DESIGN TREE, THE SHARED-CODE TREE, AND THE CONFIG HASH)
     design_hash_str = get_design_hash_str(design_module_in, design_folder_str_in, git_dict.get("design_tree_str"), git_dict.get("so_tree_str"))
+    experiment_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME", "") or "")
     # REFUSE AN ELEVENTH OVERLAPPING ROW AND A REPEAT THAT IS NOT FORWARD
     ledger_pdf = read_holdout_evaluation_pdf(ledger_path_str_in)
     overlap_pdf = get_overlapping_evaluation_pdf(ledger_pdf, window_dict)
     if len(overlap_pdf) >= config.HOLDOUT_EVALUATION_BUDGET:
         raise ValueError(f"❌ {config.HOLDOUT_EVALUATION_BUDGET} evaluations already overlap the active window.")
-    reported_end_date = get_latest_reported_end_date(ledger_pdf, design_hash_str)
+    reported_end_date = get_latest_reported_end_date(ledger_pdf, design_hash_str, experiment_name_str)
     report_session_list = get_report_session_date_list(session_date_list_in or [], window_dict, reported_end_date)
     if reported_end_date is not None:
         if get_date(window_dict["end"]) <= reported_end_date:
@@ -1583,7 +1592,9 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         _RUNNER_ACTIVE_BOOL = False
         set_direct_read_blocked_bool(False)
     # BUILD THE LEDGER ROW, INCLUDING THE SOURCES THE DESIGN READ
-    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
+    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in,
+                "experiment_name": str(getattr(design_module_in, "EXPERIMENT_NAME", "") or ""),
+                "design_hash": precondition_dict["design_hash_str"],
                 "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
                 "reported_start": precondition_dict["reported_start"], "reported_end": precondition_dict["reported_end"],
                 "sources_read": ",".join(data_context.get_access_name_list())}

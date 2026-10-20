@@ -1365,6 +1365,48 @@ def test_forward_evaluation():
         paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
     passed("forward evaluation (too few new sessions refused; enough reports only the new sessions)")
 
+# FUNCTION: TEST THAT THE SAME EXPERIMENT NAME IS A REPEAT EVEN WHEN THE HASH CHANGES
+def test_experiment_name_repeat():
+    """
+    A ledger row with the same EXPERIMENT_NAME and a different so-tree hash is the same design. A second evaluation
+    on the same sessions is refused.
+
+    Returns:
+        None
+    """
+    # A PRIVATE REGISTRY SO THE SUITE WINDOW STAYS WHERE IT IS
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    name_path_str = os.path.join(TEMP_ROOT_STR, "name_windows.csv")
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = name_path_str
+    try:
+        session_date_list = get_session_date_list("2022-01-03", "2024-06-28")
+        proposed_dict = compute_holdout_window_dict(session_date_list)
+        open_holdout_window_dict(session_date_list, f"OPEN {proposed_dict['start']} {proposed_dict['end']}", file_path_str_in=name_path_str)
+        window_dict = get_active_holdout_window_dict()
+        design_module = get_selection_design()
+        design_module.EXPERIMENT_NAME = "exp_holdout_name_match"
+        old_hash_str = get_design_hash_str(design_module, design_tree_str_in="design-tree", so_tree_str_in="so-tree")
+        new_hash_str = get_design_hash_str(design_module, design_tree_str_in="design-tree", so_tree_str_in="so-tree-changed")
+        assert old_hash_str != new_hash_str
+        # A PRIOR ROW OF THIS NAME WITH THE OLD HASH, ALREADY REPORTED THROUGH THE WINDOW END
+        ledger_str = os.path.join(TEMP_ROOT_STR, "name_evaluations.csv")
+        pd.DataFrame({"window_id": [window_dict["window_id"]], "design_id": ["name_first"],
+                      "experiment_name": ["exp_holdout_name_match"], "design_hash": [old_hash_str], "status": ["valid"],
+                      "reported_start": [window_dict["start"]], "reported_end": [window_dict["end"]]}).to_csv(ledger_str, index=False)
+        path_dict = get_evaluation_path_dict()
+        os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+        os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+        try:
+            run_holdout_evaluation(design_module, "name_again", {"session_date_list": session_date_list},
+                                   path_dict["token_path_str"], get_git_dict(so_tree_str_in="so-tree-changed"),
+                                   ledger_path_str_in=ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+            raise AssertionError("the same EXPERIMENT_NAME with a new so-tree hash was accepted on the same sessions")
+        except ValueError as error:
+            assert "already evaluated" in str(error)
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+    passed("same EXPERIMENT_NAME with a different so-tree hash is refused on the same sessions")
+
 # FUNCTION: TEST THE UNREAD FIELDS ON A WINDOW THAT STRADDLES THE PRIOR-READ DATE
 def test_unread_fields():
     """
@@ -1451,6 +1493,7 @@ if __name__ == "__main__":
         test_slide_window()
         test_overlapping_budget()
         test_forward_evaluation()
+        test_experiment_name_repeat()
         test_unread_fields()
         test_walk_forward_unchanged()
         # THE REAL REGISTRY IS UNCHANGED (IT MAY ALREADY EXIST; THIS SUITE MUST NOT WRITE IT)
