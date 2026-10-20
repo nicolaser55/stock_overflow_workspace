@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from so import config
 # IMPORT THE HOLDOUT REGISTRY
 from so.core.holdout import (compute_holdout_window_dict, get_active_holdout_window_dict, get_forward_session_count,
-                             get_latest_session_date, get_raw_session_date_list, open_holdout_window_dict,
-                             read_holdout_evaluation_pdf, roll_holdout_window_dict)
+                             get_latest_session_date, get_overlapping_evaluation_pdf, get_raw_session_date_list,
+                             open_holdout_window_dict, read_holdout_evaluation_pdf, roll_holdout_window_dict)
 
 """
 Holdout Window (Nicolas only)
@@ -70,7 +70,7 @@ def run_status():
     # READ THE WINDOW, THE LEDGER AND THE SESSION COUNT AFTER THE END
     window_dict = get_active_holdout_window_dict()
     ledger_pdf = read_holdout_evaluation_pdf()
-    used_count = int((ledger_pdf["window_id"] == window_dict["window_id"]).sum()) if len(ledger_pdf) else 0
+    used_count = len(get_overlapping_evaluation_pdf(ledger_pdf, window_dict)) if len(ledger_pdf) else 0
     forward_count = get_forward_session_count(get_raw_session_date_list())
     # PRINT THE STATUS
     print(f"Active window {window_dict['window_id']}: {window_dict['start']} -> {window_dict['end']} "

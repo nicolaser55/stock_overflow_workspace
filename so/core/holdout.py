@@ -28,12 +28,14 @@ The holdout is the last HOLDOUT_WINDOW_MONTHS calendar months of the data, endin
 the window is opened. It replaces the per-fold 3-month test windows and the fixed untouched window 2026-05-14 ->
 2026-08-13.
 
-Once opened, the window is frozen: new downloads do not move it. Sessions after its end are forward data and are
-refused everywhere this module guards (a later task adds forward evaluation). Each frozen design may be evaluated once
-per window, and at most HOLDOUT_EVALUATION_BUDGET designs per window. Only scripts/holdout_evaluate.py, run by
-Nicolas, may read the window, and it reads that window from the quarantine root (SO_QUARANTINE_PATH), not from the
-development view. Development code stops at get_development_end_date (the session an embargo before the window start)
-and reads only SO_DATA_PATH.
+Once opened, the window is frozen: new downloads do not move it. Sessions after its end are forward data. slide
+moves the window to the latest 12 months with no 6-month minimum and no typed confirmation; roll stays the
+non-overlapping successor. A design hash is evaluated once, then only the sessions after its latest reported_end
+when the active window ends later and at least HOLDOUT_MIN_FORWARD_SESSIONS new sessions exist. At most
+HOLDOUT_EVALUATION_BUDGET ledger rows, any status, may have a window that overlaps the active window. Only
+scripts/holdout_evaluate.py, run by Nicolas, may read the window, and it reads that window from the quarantine root
+(SO_QUARANTINE_PATH), not from the development view. Development code stops at get_development_end_date (the session
+an embargo before the window start) and reads only SO_DATA_PATH.
 
 records/holdout_windows.csv and records/holdout_evaluations.csv are versioned (dates and summary metrics are not
 secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no default.
@@ -43,12 +45,14 @@ secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no defaul
 WINDOW_COLUMN_LIST = ["window_id", "status", "start", "end", "session_count", "months_covered", "opened_ts", "opened_by",
                       "data_last_session_at_open", "retired_ts", "retire_reason"]
 # DEFINE THE LEDGER COLUMNS
-EVALUATION_COLUMN_LIST = ["window_id", "design_id", "design_hash", "commit", "evaluated_ts", "status", "total_return",
+EVALUATION_COLUMN_LIST = ["window_id", "design_id", "experiment_name", "design_hash", "commit", "evaluated_ts", "status",
+                          "reported_start", "reported_end", "total_return",
                           "buy_hold_total_return", "annualized_log_excess", "log_excess_ci_low", "log_excess_ci_high",
                           "in_market_pct", "sharpe_ratio", "max_drawdown", "mde", "primary_pass", "secondary_pass",
                           "comparable_pass", "baselines_beaten", "baseline_returns", "carried_weight", "holdout_candidates", "sources_read",
                           "retrain_frequency", "train_window_candidates", "holdout_refit_count", "average_share_purged",
-                          "turnover", "candidate_switches"]
+                          "turnover", "candidate_switches",
+                          "unread_start", "unread_session_count", "unread_total_return", "unread_buy_hold_total_return"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
 # DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE THE QUARANTINE WINDOW-END LOAD IS IN PROGRESS)
@@ -325,6 +329,49 @@ def roll_holdout_window_dict(session_date_list_in, reason_str_in, confirm_str_in
     # RETURN THE NEW ROW
     return row_dict
 
+# FUNCTION: SLIDE THE ACTIVE WINDOW TO THE LATEST TWELVE MONTHS
+def slide_holdout_window_dict(session_date_list_in, reason_str_in, file_path_str_in=None):
+    """
+    Retires the active window and opens the latest HOLDOUT_WINDOW_MONTHS window (compute_holdout_window_dict, no
+    start_after, no 6-month minimum, no typed confirmation). A no-op when that window equals the active one. Raises
+    when the new start is not after the old start. Nothing is written if the start check fails.
+
+    Args:
+        session_date_list_in (list[datetime.date]): Sessions available now
+        reason_str_in (str): Why the window is retired
+        file_path_str_in (str | None): Registry CSV
+
+    Returns:
+        dict: The active row (unchanged on a no-op, otherwise the new row)
+    """
+    # REQUIRE A REASON AND AN ACTIVE WINDOW
+    if not str(reason_str_in).strip():
+        raise ValueError("❌ A slide needs a retire reason.")
+    active_dict = get_active_holdout_window_dict(file_path_str_in=file_path_str_in)
+    # THE LATEST TWELVE MONTHS, WITH NO MINIMUM AND NO START_AFTER
+    window_dict = compute_holdout_window_dict(session_date_list_in)
+    # THE SAME BOUNDS ARE A NO-OP
+    if get_date(window_dict["start"]) == get_date(active_dict["start"]) and get_date(window_dict["end"]) == get_date(active_dict["end"]):
+        return active_dict
+    # A START THAT DOES NOT MOVE FORWARD IS REFUSED BEFORE ANY WRITE
+    if get_date(window_dict["start"]) <= get_date(active_dict["start"]):
+        raise ValueError("❌ The new holdout start is not after the active start.")
+    # RETIRE THE ACTIVE ROW (ONLY retired_ts, retire_reason AND status)
+    window_pdf = read_holdout_window_pdf(file_path_str_in)
+    active_idx = window_pdf.index[window_pdf["status"] == "active"][0]
+    window_pdf.loc[active_idx, "status"] = "retired"
+    window_pdf.loc[active_idx, "retired_ts"] = datetime.now().isoformat(timespec="seconds")
+    window_pdf.loc[active_idx, "retire_reason"] = reason_str_in
+    # APPEND THE NEW ACTIVE ROW AND WRITE ONCE
+    row_dict = {"window_id": f"w{window_dict['start']:%Y%m%d}_{window_dict['end']:%Y%m%d}", "status": "active",
+                "start": window_dict["start"], "end": window_dict["end"], "session_count": window_dict["session_count"],
+                "months_covered": round(window_dict["months_covered"], 4), "opened_ts": datetime.now().isoformat(timespec="seconds"),
+                "opened_by": "slide", "data_last_session_at_open": get_date(session_date_list_in[-1]),
+                "retired_ts": "", "retire_reason": ""}
+    write_holdout_window_pdf(pd.concat([window_pdf, pd.DataFrame([row_dict])], ignore_index=True), file_path_str_in)
+    # RETURN THE NEW ROW
+    return row_dict
+
 # FUNCTION: COUNT SESSIONS OF FORWARD DATA AFTER THE ACTIVE WINDOW
 def get_forward_session_count(session_date_list_in, file_path_str_in=None):
     """
@@ -487,6 +534,120 @@ def read_holdout_evaluation_pdf(file_path_str_in=None):
     # RETURN THE LEDGER
     return pd.read_csv(file_path_str)
 
+# FUNCTION: WHETHER TWO DATE SPANS OVERLAP
+def get_span_overlap_bool(start1_in, end1_in, start2_in, end2_in):
+    """
+    True when the inclusive spans overlap.
+
+    Args:
+        start1_in, end1_in, start2_in, end2_in: Inclusive bounds
+
+    Returns:
+        bool: Overlap
+    """
+    # TWO CLOSED INTERVALS OVERLAP WHEN EACH STARTS ON OR BEFORE THE OTHER END
+    return get_date(start1_in) <= get_date(end2_in) and get_date(start2_in) <= get_date(end1_in)
+
+# FUNCTION: LEDGER ROWS WHOSE WINDOW OVERLAPS THE ACTIVE WINDOW
+def get_overlapping_evaluation_pdf(ledger_pdf_in, window_dict_in, file_path_str_in=None):
+    """
+    Ledger rows of any status whose registry window overlaps window_dict_in. A ledger window_id that is not in the
+    registry is counted (the conservative reading).
+
+    Args:
+        ledger_pdf_in (pd.DataFrame): Ledger
+        window_dict_in (dict): Active window
+        file_path_str_in (str | None): Registry CSV
+
+    Returns:
+        pd.DataFrame: Overlapping rows
+    """
+    # NOTHING OVERLAPS AN EMPTY LEDGER
+    if ledger_pdf_in is None or len(ledger_pdf_in) == 0:
+        return ledger_pdf_in if ledger_pdf_in is not None else pd.DataFrame(columns=EVALUATION_COLUMN_LIST)
+    # MAP EACH WINDOW_ID TO ITS REGISTERED BOUNDS
+    registry_pdf = read_holdout_window_pdf(file_path_str_in)
+    bound_dict = {str(row.window_id): (get_date(row.start), get_date(row.end))
+                  for row in registry_pdf.itertuples(index=False)} if len(registry_pdf) else {}
+    active_start, active_end = get_date(window_dict_in["start"]), get_date(window_dict_in["end"])
+    keep_idx_list = []
+    for row_idx, row in ledger_pdf_in.iterrows():
+        bound_tup = bound_dict.get(str(row["window_id"]))
+        # A MISSING REGISTRY ROW IS COUNTED, NOT DROPPED
+        if bound_tup is None or get_span_overlap_bool(bound_tup[0], bound_tup[1], active_start, active_end):
+            keep_idx_list.append(row_idx)
+    return ledger_pdf_in.loc[keep_idx_list]
+
+# FUNCTION: THE LATEST REPORTED END OF THE SAME DESIGN
+def get_latest_reported_end_date(ledger_pdf_in, design_hash_str_in, experiment_name_str_in=None, file_path_str_in=None):
+    """
+    The latest reported_end on ledger rows of this design hash or this EXPERIMENT_NAME. A new protocol version uses a
+    new EXPERIMENT_NAME, so it is a new design. A blank reported_end falls back to the registry window end of that row.
+
+    Args:
+        ledger_pdf_in (pd.DataFrame): Ledger
+        design_hash_str_in (str): Design hash
+        experiment_name_str_in (str | None): Design EXPERIMENT_NAME
+        file_path_str_in (str | None): Registry CSV
+
+    Returns:
+        datetime.date | None: Latest reported end, or None when the design is new
+    """
+    # NO LEDGER ROW TO MATCH
+    if ledger_pdf_in is None or len(ledger_pdf_in) == 0:
+        return None
+    # A ROW MATCHES WHEN THE HASH MATCHES OR THE EXPERIMENT NAME MATCHES
+    false_series = pd.Series(False, index=ledger_pdf_in.index)
+    hash_match_series = ledger_pdf_in["design_hash"] == design_hash_str_in if "design_hash" in ledger_pdf_in.columns else false_series
+    name_str = str(experiment_name_str_in or "").strip()
+    name_match_series = false_series
+    if name_str and "experiment_name" in ledger_pdf_in.columns:
+        name_match_series = ledger_pdf_in["experiment_name"].astype(str) == name_str
+    hash_pdf = ledger_pdf_in[hash_match_series | name_match_series]
+    if len(hash_pdf) == 0:
+        return None
+    # REGISTRY ENDS FOR A BLANK reported_end
+    registry_pdf = read_holdout_window_pdf(file_path_str_in)
+    end_dict = {str(row.window_id): get_date(row.end) for row in registry_pdf.itertuples(index=False)} if len(registry_pdf) else {}
+    end_list = []
+    for _, row in hash_pdf.iterrows():
+        reported_str = str(row["reported_end"]).strip() if "reported_end" in hash_pdf.columns else ""
+        if reported_str not in ("", "nan", "None"):
+            try:
+                end_list.append(get_date(reported_str))
+                continue
+            except (ValueError, TypeError):
+                pass
+        if str(row["window_id"]) in end_dict:
+            end_list.append(end_dict[str(row["window_id"])])
+    # NOTHING PARSEABLE
+    if not end_list:
+        return None
+    return max(end_list)
+
+# FUNCTION: THE SESSIONS THIS EVALUATION MAY REPORT
+def get_report_session_date_list(session_date_list_in, window_dict_in, reported_end_in):
+    """
+    Sessions inside the active window. When reported_end_in is set, only sessions strictly after it.
+
+    Args:
+        session_date_list_in (list): Session dates
+        window_dict_in (dict): Active window
+        reported_end_in (datetime.date | None): Previous reported end of this hash
+
+    Returns:
+        list[datetime.date]: Sessions to report
+    """
+    # KEEP SESSIONS INSIDE THE ACTIVE WINDOW
+    start_date, end_date = get_date(window_dict_in["start"]), get_date(window_dict_in["end"])
+    session_date_list = [get_date(session_date) for session_date in session_date_list_in]
+    inside_list = [session_date for session_date in session_date_list if start_date <= session_date <= end_date]
+    # A NEW HASH REPORTS THE WHOLE WINDOW
+    if reported_end_in is None:
+        return inside_list
+    # A REPEAT REPORTS ONLY THE SESSIONS AFTER THE LAST REPORTED END
+    return [session_date for session_date in inside_list if session_date > get_date(reported_end_in)]
+
 # FUNCTION: WHETHER A PATH IS INSIDE A ROOT
 def get_path_inside_bool(path_str_in, root_str_in):
     """
@@ -600,11 +761,12 @@ def get_git_precondition_dict(design_folder_str_in):
 
 # FUNCTION: CHECK THAT A DESIGN MAY BE EVALUATED
 def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token_file_path_str_in, git_precondition_dict_in=None,
-                                       design_folder_str_in=".", ledger_path_str_in=None):
+                                       design_folder_str_in=".", ledger_path_str_in=None, session_date_list_in=None):
     """
     Hard checks, in order: SO_HOLDOUT_PATH set and existing; token; clean git tree; design commit on main; a
-    preregister commit; the (design hash, window) pair is new; the window has fewer than HOLDOUT_EVALUATION_BUDGET
-    evaluations.
+    preregister commit; fewer than HOLDOUT_EVALUATION_BUDGET ledger rows whose window overlaps the active window;
+    a new design (neither design_hash nor EXPERIMENT_NAME already in the ledger), or a repeat whose active window
+    ends after its latest reported_end and has at least HOLDOUT_MIN_FORWARD_SESSIONS new sessions.
 
     Args:
         design_module_in (module): Design module (uppercase constants are hashed)
@@ -613,9 +775,10 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
         git_precondition_dict_in (dict | None): Injected git result (None = read git)
         design_folder_str_in (str): Folder passed to git when the probe is not injected
         ledger_path_str_in (str | None): Ledger CSV
+        session_date_list_in (list | None): Sessions in the bars (required to count new sessions)
 
     Returns:
-        dict: window_dict, design_hash_str, commit_str
+        dict: window_dict, design_hash_str, commit_str, reported_start, reported_end
     """
     # REQUIRE A RESULTS FOLDER
     results_path_str = os.environ.get("SO_HOLDOUT_PATH") or None
@@ -633,15 +796,24 @@ def check_evaluation_precondition_dict(design_module_in, design_id_str_in, token
         raise ValueError("❌ The design has no preregister commit.")
     # BUILD THE DESIGN HASH (THE DESIGN TREE, THE SHARED-CODE TREE, AND THE CONFIG HASH)
     design_hash_str = get_design_hash_str(design_module_in, design_folder_str_in, git_dict.get("design_tree_str"), git_dict.get("so_tree_str"))
-    # REFUSE A REPEATED DESIGN AND AN ELEVENTH DESIGN
+    experiment_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME", "") or "")
+    # REFUSE AN ELEVENTH OVERLAPPING ROW AND A REPEAT THAT IS NOT FORWARD
     ledger_pdf = read_holdout_evaluation_pdf(ledger_path_str_in)
-    window_pdf = ledger_pdf[ledger_pdf["window_id"] == window_dict["window_id"]] if len(ledger_pdf) else ledger_pdf
-    if len(window_pdf) and (window_pdf["design_hash"] == design_hash_str).any():
-        raise ValueError("❌ This design hash was already evaluated on the active window.")
-    if len(window_pdf) >= config.HOLDOUT_EVALUATION_BUDGET:
-        raise ValueError(f"❌ The active window already has {config.HOLDOUT_EVALUATION_BUDGET} evaluations.")
-    # RETURN THE CHECKED CONTEXT
-    return {"window_dict": window_dict, "design_hash_str": design_hash_str, "commit_str": git_dict["commit_str"]}
+    overlap_pdf = get_overlapping_evaluation_pdf(ledger_pdf, window_dict)
+    if len(overlap_pdf) >= config.HOLDOUT_EVALUATION_BUDGET:
+        raise ValueError(f"❌ {config.HOLDOUT_EVALUATION_BUDGET} evaluations already overlap the active window.")
+    reported_end_date = get_latest_reported_end_date(ledger_pdf, design_hash_str, experiment_name_str)
+    report_session_list = get_report_session_date_list(session_date_list_in or [], window_dict, reported_end_date)
+    if reported_end_date is not None:
+        if get_date(window_dict["end"]) <= reported_end_date:
+            raise ValueError("❌ This design hash was already evaluated on the active window.")
+        if len(report_session_list) < int(config.HOLDOUT_MIN_FORWARD_SESSIONS):
+            raise ValueError(f"❌ fewer than {config.HOLDOUT_MIN_FORWARD_SESSIONS} new sessions after {reported_end_date}.")
+    if not report_session_list:
+        raise ValueError("❌ This design hash has no new sessions to report on the active window.")
+    # RETURN THE CHECKED CONTEXT AND THE REPORTED SPAN
+    return {"window_dict": window_dict, "design_hash_str": design_hash_str, "commit_str": git_dict["commit_str"],
+            "reported_start": report_session_list[0], "reported_end": report_session_list[-1]}
 
 """
 Prior-Only Replay
@@ -1164,10 +1336,11 @@ def get_design_baseline_dict(design_module_in, ohlcv_array_dict_in, date1_in, da
 # FUNCTION: REBASE THE HOLDOUT SEGMENT AND BUILD THE REPORT
 def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_in, result_dict_in, data_context_in=None):
     """
-    Reports only the holdout sessions. Equity is rebased so the equity entering the window equals the initial capital.
-    Buy-and-hold and the design's baselines are computed on the holdout sessions only. The baseline returns, including
-    random-family percentiles and counts, are stored on the ledger. The success flags compare the returns the design
-    names, not the percentiles or the counts.
+    Reports only the reported sessions (window_dict_in start through end). Equity is rebased so the equity entering
+    that span equals the initial capital. Buy-and-hold and the design's baselines are computed on those sessions only.
+    Reported sessions after PRIOR_READ_LAST_DATE_STR fill the unread fields; they are NaN when there are none. The
+    baseline returns, including random-family percentiles and counts, are stored on the ledger. The success flags
+    compare the returns the design names, not the percentiles or the counts.
 
     Args:
         design_module_in (module): Design (get_baseline_return_dict)
@@ -1267,6 +1440,24 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
                    "holdout_refit_count": int(len(holdout_refit_pdf)) if holdout_refit_pdf is not None else np.nan,
                    "average_share_purged": refit_report_dict["mean_share_purged"],
                    "turnover": turnover_float, "candidate_switches": switch_count}
+    # THE UNREAD FIELDS ARE THE REPORTED SESSIONS AFTER THE LAST PROTOCOL-1.0 LOAD
+    prior_read_date = get_date(config.PRIOR_READ_LAST_DATE_STR)
+    unread_pdf = holdout_pdf[holdout_pdf["date"] > prior_read_date].copy()
+    if len(unread_pdf) == 0:
+        report_dict["unread_start"] = np.nan
+        report_dict["unread_session_count"] = np.nan
+        report_dict["unread_total_return"] = np.nan
+        report_dict["unread_buy_hold_total_return"] = np.nan
+    else:
+        unread_start_date = unread_pdf["date"].iloc[0]
+        unread_prior_pdf = holdout_pdf[holdout_pdf["date"] < unread_start_date]
+        unread_base_float = float(unread_prior_pdf["equity"].iloc[-1]) if len(unread_prior_pdf) else config.INITIAL_CAPITAL
+        unread_pdf["equity"] = unread_pdf["equity"] * (config.INITIAL_CAPITAL / unread_base_float)
+        unread_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, unread_start_date, end_date)
+        report_dict["unread_start"] = unread_start_date
+        report_dict["unread_session_count"] = int(len(unread_pdf))
+        report_dict["unread_total_return"] = get_equity_total_return_float(unread_pdf)
+        report_dict["unread_buy_hold_total_return"] = unread_buy_hold_dict["metric_dict"]["total_return"]
     return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"],
             "refit_log_pdf": holdout_refit_pdf}
 
@@ -1365,8 +1556,12 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
                                        get_source_spec_dict, set_direct_read_blocked_bool)
     # CHECK EVERY PRECONDITION BEFORE READING THE WINDOW FOR A RESULT
     precondition_dict = check_evaluation_precondition_dict(design_module_in, design_id_str_in, token_file_path_str_in,
-                                                           git_precondition_dict_in, design_folder_str_in, ledger_path_str_in)
+                                                           git_precondition_dict_in, design_folder_str_in, ledger_path_str_in,
+                                                           session_date_list_in=ohlcv_array_dict_in["session_date_list"])
     window_dict = precondition_dict["window_dict"]
+    # THE REPLAY USES THE ACTIVE WINDOW; THE REPORT AND THE CUTS USE THE REPORTED SEGMENT
+    report_window_dict = {"start": precondition_dict["reported_start"], "end": precondition_dict["reported_end"],
+                          "window_id": window_dict["window_id"]}
     # AN UNREGISTERED DECLARATION STOPS HERE: NO REPLAY, NO LEDGER ROW
     declared_name_list = get_declared_source_name_list(design_module_in)
     for source_name_str in declared_name_list:
@@ -1383,8 +1578,8 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     try:
         # REPLAY THE PATH, THEN THE TRUNCATION TEST, BEFORE ANY RESULT IS WRITTEN
         full_result_dict = get_prior_only_result_dict(design_module_in, ohlcv_array_dict_in, window_dict, data_context)
-        failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
-        report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict, full_result_dict, data_context)
+        failure_str = get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, report_window_dict, full_result_dict, data_context)
+        report_dict = None if failure_str else get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, report_window_dict, full_result_dict, data_context)
     except ValueError as error:
         # A READ OUTSIDE DATA_SOURCE_LIST IS INVALID; ANY OTHER ERROR STILL PROPAGATES
         if "undeclared source" not in str(error):
@@ -1397,8 +1592,11 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         _RUNNER_ACTIVE_BOOL = False
         set_direct_read_blocked_bool(False)
     # BUILD THE LEDGER ROW, INCLUDING THE SOURCES THE DESIGN READ
-    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"],
+    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in,
+                "experiment_name": str(getattr(design_module_in, "EXPERIMENT_NAME", "") or ""),
+                "design_hash": precondition_dict["design_hash_str"],
                 "commit": precondition_dict["commit_str"], "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
+                "reported_start": precondition_dict["reported_start"], "reported_end": precondition_dict["reported_end"],
                 "sources_read": ",".join(data_context.get_access_name_list())}
     # A SOURCE IN THE ACCESS LOG THAT THE DESIGN DID NOT DECLARE IS NOT A VALID RESULT
     undeclared_name_list = [source_name_str for source_name_str in data_context.get_access_name_list() if source_name_str not in declared_name_list]
@@ -1408,7 +1606,7 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
         from so.core.trial_log import log_trial_dict
         log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
-                       {}, True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
+                       {}, True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                        note_str_in="invalid_undeclared", file_path_str_in=trial_log_path_str_in, alert_in=False)
         return row_dict
     # A LEAK COUNTS AGAINST THE BUDGET AND WRITES NO PATH
@@ -1418,7 +1616,7 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
         append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
         from so.core.trial_log import log_trial_dict
         log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
-                       {}, True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
+                       {}, True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                        note_str_in="invalid_lookahead", file_path_str_in=trial_log_path_str_in, alert_in=False)
         return row_dict
     # WRITE THE HOLDOUT PATHS ONLY UNDER SO_HOLDOUT_PATH
@@ -1438,6 +1636,6 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     from so.core.trial_log import log_trial_dict
     log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
                    {key_str: report_fields_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
-                   True, fold_row_in={"test_start": window_dict["start"], "test_end": window_dict["end"]},
+                   True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                    note_str_in="holdout evaluation", file_path_str_in=trial_log_path_str_in, alert_in=False)
     return row_dict

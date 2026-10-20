@@ -36,11 +36,12 @@ assert_temporary_data_root()
 from so import paths, config
 from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, roll_holdout_window_dict,
-                             get_active_holdout_window_dict, get_development_end_date, get_latest_session_date,
-                             check_development_date, get_replay_boundary_date, read_holdout_evaluation_pdf,
-                             run_holdout_evaluation, get_design_hash_str, get_prior_only_result_dict,
-                             get_perturbed_ohlcv_dict, get_truncation_cut_date_list, get_runner_active_bool,
-                             load_evaluation_source_frame_dict, NO_WINDOW_MESSAGE_STR, VIEW_STALE_MESSAGE_STR)
+                             slide_holdout_window_dict, get_active_holdout_window_dict, get_development_end_date,
+                             get_latest_session_date, check_development_date, get_replay_boundary_date,
+                             read_holdout_evaluation_pdf, run_holdout_evaluation, get_design_hash_str,
+                             get_prior_only_result_dict, get_holdout_report_dict, get_perturbed_ohlcv_dict,
+                             get_truncation_cut_date_list, get_runner_active_bool, load_evaluation_source_frame_dict,
+                             NO_WINDOW_MESSAGE_STR, VIEW_STALE_MESSAGE_STR)
 from so.core.local_file_management import read_csv_files_from_path, read_date_range_csv_files_from_path
 from so.core.fractional_exposure import simulate_fractional_exposure_dict
 from so.features.daily_features import get_session_decision_idx_dict
@@ -1210,7 +1211,245 @@ def test_holdout_flag_scan():
     assert quarantine_offender_list == []
     passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests; quarantine root only in paths, holdout, the evaluation script and tests")
 
+# FUNCTION: TEST SLIDING THE ACTIVE WINDOW
+def test_slide_window():
+    """
+    slide_holdout_window_dict moves to the latest 12 months, is a no-op when the bounds are unchanged, and refuses
+    a new start that is not after the old start. roll_holdout_window_dict is not used here.
 
+    Returns:
+        None
+    """
+    # A PRIVATE REGISTRY SO THE SUITE WINDOW STAYS WHERE IT IS
+    slide_path_str = os.path.join(TEMP_ROOT_STR, "slide_windows.csv")
+    base_list = get_session_date_list("2022-01-03", "2024-06-28")
+    proposed_dict = compute_holdout_window_dict(base_list)
+    open_holdout_window_dict(base_list, f"OPEN {proposed_dict['start']} {proposed_dict['end']}", file_path_str_in=slide_path_str)
+    # THE SAME SESSION LIST IS A NO-OP
+    same_dict = slide_holdout_window_dict(base_list, "no-op", file_path_str_in=slide_path_str)
+    assert same_dict["start"] == proposed_dict["start"] and same_dict["end"] == proposed_dict["end"]
+    still_active_dict = get_active_holdout_window_dict(file_path_str_in=slide_path_str)
+    assert still_active_dict["status"] == "active" and str(still_active_dict["retired_ts"]).strip() in ("", "nan")
+    assert len(pd.read_csv(slide_path_str)) == 1
+    # AN EARLIER END MOVES THE START BACKWARDS AND IS REFUSED
+    early_list = get_session_date_list("2022-01-03", "2023-06-30")
+    try:
+        slide_holdout_window_dict(early_list, "backwards", file_path_str_in=slide_path_str)
+        raise AssertionError("a backwards slide was accepted")
+    except ValueError as error:
+        assert "not after the active start" in str(error)
+    assert get_active_holdout_window_dict(file_path_str_in=slide_path_str)["end"] == proposed_dict["end"]
+    # A LATER LAST SESSION OPENS THE LATEST 12 MONTHS AND RETIRES THE OLD ROW
+    later_list = get_session_date_list("2022-01-03", "2025-08-29")
+    later_dict = compute_holdout_window_dict(later_list)
+    assert later_dict["start"] > proposed_dict["start"]
+    slid_dict = slide_holdout_window_dict(later_list, "latest 12 months", file_path_str_in=slide_path_str)
+    assert slid_dict["start"] == later_dict["start"] and slid_dict["end"] == later_dict["end"]
+    assert slid_dict["status"] == "active"
+    registry_pdf = pd.read_csv(slide_path_str)
+    assert list(registry_pdf["status"]) == ["retired", "active"]
+    assert registry_pdf["retire_reason"].iloc[0] == "latest 12 months"
+    passed("slide (normal, no-op, refused backwards)")
+
+# FUNCTION: TEST THE OVERLAPPING-WINDOW BUDGET
+def test_overlapping_budget():
+    """
+    Ten ledger rows on a retired window that overlaps the active window consume the budget. A new design is refused
+    before any replay.
+
+    Returns:
+        None
+    """
+    # A PRIVATE REGISTRY AND LEDGER
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    budget_path_str = os.path.join(TEMP_ROOT_STR, "budget_windows.csv")
+    ledger_str = os.path.join(TEMP_ROOT_STR, "budget_evaluations.csv")
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = budget_path_str
+    try:
+        base_list = get_session_date_list("2022-01-03", "2024-06-28")
+        first_dict = compute_holdout_window_dict(base_list)
+        open_holdout_window_dict(base_list, f"OPEN {first_dict['start']} {first_dict['end']}", file_path_str_in=budget_path_str)
+        first_id_str = get_active_holdout_window_dict()["window_id"]
+        # TEN ROWS ON THE FIRST WINDOW, ANY STATUS
+        pad_pdf = pd.DataFrame({"window_id": [first_id_str] * config.HOLDOUT_EVALUATION_BUDGET,
+                                "design_hash": [f"pad_hash_{idx}" for idx in range(config.HOLDOUT_EVALUATION_BUDGET)],
+                                "status": ["invalid_lookahead"] * config.HOLDOUT_EVALUATION_BUDGET,
+                                "reported_start": [first_dict["start"]] * config.HOLDOUT_EVALUATION_BUDGET,
+                                "reported_end": [first_dict["end"]] * config.HOLDOUT_EVALUATION_BUDGET})
+        pad_pdf.to_csv(ledger_str, index=False)
+        # SLIDE BY A FEW MONTHS SO THE NEW 12-MONTH WINDOW OVERLAPS THE FIRST
+        later_list = get_session_date_list("2022-01-03", "2024-12-31")
+        later_dict = compute_holdout_window_dict(later_list)
+        assert later_dict["start"] <= first_dict["end"]
+        slide_holdout_window_dict(later_list, "overlap", file_path_str_in=budget_path_str)
+        assert get_active_holdout_window_dict()["window_id"] != first_id_str
+        path_dict = get_evaluation_path_dict()
+        os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+        os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+        design_module = get_selection_design()
+        design_module.EXPERIMENT_NAME = "exp_holdout_overlap_budget"
+        try:
+            run_holdout_evaluation(design_module, "overlap_budget", {"session_date_list": later_list},
+                                   path_dict["token_path_str"], get_git_dict(), ledger_path_str_in=ledger_str,
+                                   trial_log_path_str_in=path_dict["trial_log_path_str"])
+            raise AssertionError("an overlapping eleventh evaluation was accepted")
+        except ValueError as error:
+            assert "evaluations" in str(error) and "overlap" in str(error)
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+    passed("budget across two overlapping windows")
+
+# FUNCTION: TEST A FORWARD-ONLY REPEAT OF A DESIGN HASH
+def test_forward_evaluation():
+    """
+    A design hash already in the ledger is refused when the new sessions are fewer than HOLDOUT_MIN_FORWARD_SESSIONS
+    and accepted when there are enough. The accepted row reports only the new sessions.
+
+    Returns:
+        None
+    """
+    # A PRIVATE REGISTRY SO THE SUITE WINDOW STAYS WHERE IT IS
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    fwd_path_str = os.path.join(TEMP_ROOT_STR, "fwd_windows.csv")
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = fwd_path_str
+    try:
+        base_list = get_session_date_list("2022-01-03", "2024-06-28")
+        first_dict = compute_holdout_window_dict(base_list)
+        open_holdout_window_dict(base_list, f"OPEN {first_dict['start']} {first_dict['end']}", file_path_str_in=fwd_path_str)
+        # ENOUGH SESSIONS AFTER THE FIRST END FOR THE ACCEPTED REPEAT
+        after_list = [session_date for session_date in get_session_date_list("2024-06-28", "2024-08-30") if session_date > first_dict["end"]]
+        assert len(after_list) >= config.HOLDOUT_MIN_FORWARD_SESSIONS
+        few_list = base_list + after_list[: config.HOLDOUT_MIN_FORWARD_SESSIONS - 1]
+        enough_list = base_list + after_list
+        ohlcv_pdf = get_synthetic_ohlcv_pdf("2022-01-03", str(enough_list[-1]), minute_vol_in=0.0004, seed_in=21)
+        def get_cut_dict(end_in):
+            # KEEP BARS THROUGH THE REQUESTED END
+            end_date = pd.Timestamp(end_in).date()
+            cut_pdf = ohlcv_pdf[ohlcv_pdf["date"].map(lambda value: pd.Timestamp(value).date()) <= end_date]
+            return get_ohlcv_array_dict(cut_pdf)
+        path_dict = get_evaluation_path_dict()
+        os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+        os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+        design_module = get_selection_design()
+        design_module.EXPERIMENT_NAME = "exp_holdout_forward"
+        ledger_str = os.path.join(TEMP_ROOT_STR, "fwd_evaluations.csv")
+        first_row = run_holdout_evaluation(design_module, "forward_first", get_cut_dict(first_dict["end"]),
+                                           path_dict["token_path_str"], get_git_dict(), ledger_path_str_in=ledger_str,
+                                           trial_log_path_str_in=path_dict["trial_log_path_str"])
+        assert first_row["status"] == "valid"
+        assert pd.Timestamp(first_row["reported_start"]).date() == first_dict["start"]
+        assert pd.Timestamp(first_row["reported_end"]).date() == first_dict["end"]
+        # TOO FEW NEW SESSIONS AFTER A SLIDE
+        slide_holdout_window_dict(few_list, "few forward", file_path_str_in=fwd_path_str)
+        try:
+            run_holdout_evaluation(design_module, "forward_few", get_cut_dict(few_list[-1]), path_dict["token_path_str"],
+                                   get_git_dict(), ledger_path_str_in=ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+            raise AssertionError("a repeat with too few new sessions was accepted")
+        except ValueError as error:
+            assert "new sessions" in str(error)
+        assert len(read_holdout_evaluation_pdf(ledger_str)) == 1
+        # ENOUGH NEW SESSIONS: ONLY THOSE SESSIONS ARE REPORTED
+        slide_holdout_window_dict(enough_list, "enough forward", file_path_str_in=fwd_path_str)
+        second_row = run_holdout_evaluation(design_module, "forward_enough", get_cut_dict(enough_list[-1]),
+                                            path_dict["token_path_str"], get_git_dict(), ledger_path_str_in=ledger_str,
+                                            trial_log_path_str_in=path_dict["trial_log_path_str"])
+        assert second_row["status"] == "valid"
+        assert pd.Timestamp(second_row["reported_start"]).date() == after_list[0]
+        assert pd.Timestamp(second_row["reported_end"]).date() == enough_list[-1]
+        equity_path_str = os.path.join(path_dict["results_path_str"], second_row["window_id"], "forward_enough", "strategy_daily_equity.csv")
+        equity_pdf = pd.read_csv(equity_path_str)
+        equity_date_list = [pd.Timestamp(day).date() for day in equity_pdf["date"]]
+        assert min(equity_date_list) == after_list[0] and max(equity_date_list) == enough_list[-1]
+        assert first_dict["end"] not in equity_date_list
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+    passed("forward evaluation (too few new sessions refused; enough reports only the new sessions)")
+
+# FUNCTION: TEST THAT THE SAME EXPERIMENT NAME IS A REPEAT EVEN WHEN THE HASH CHANGES
+def test_experiment_name_repeat():
+    """
+    A ledger row with the same EXPERIMENT_NAME and a different so-tree hash is the same design. A second evaluation
+    on the same sessions is refused.
+
+    Returns:
+        None
+    """
+    # A PRIVATE REGISTRY SO THE SUITE WINDOW STAYS WHERE IT IS
+    saved_registry_str = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+    name_path_str = os.path.join(TEMP_ROOT_STR, "name_windows.csv")
+    paths.HOLDOUT_WINDOWS_FILE_PATH_STR = name_path_str
+    try:
+        session_date_list = get_session_date_list("2022-01-03", "2024-06-28")
+        proposed_dict = compute_holdout_window_dict(session_date_list)
+        open_holdout_window_dict(session_date_list, f"OPEN {proposed_dict['start']} {proposed_dict['end']}", file_path_str_in=name_path_str)
+        window_dict = get_active_holdout_window_dict()
+        design_module = get_selection_design()
+        design_module.EXPERIMENT_NAME = "exp_holdout_name_match"
+        old_hash_str = get_design_hash_str(design_module, design_tree_str_in="design-tree", so_tree_str_in="so-tree")
+        new_hash_str = get_design_hash_str(design_module, design_tree_str_in="design-tree", so_tree_str_in="so-tree-changed")
+        assert old_hash_str != new_hash_str
+        # A PRIOR ROW OF THIS NAME WITH THE OLD HASH, ALREADY REPORTED THROUGH THE WINDOW END
+        ledger_str = os.path.join(TEMP_ROOT_STR, "name_evaluations.csv")
+        pd.DataFrame({"window_id": [window_dict["window_id"]], "design_id": ["name_first"],
+                      "experiment_name": ["exp_holdout_name_match"], "design_hash": [old_hash_str], "status": ["valid"],
+                      "reported_start": [window_dict["start"]], "reported_end": [window_dict["end"]]}).to_csv(ledger_str, index=False)
+        path_dict = get_evaluation_path_dict()
+        os.environ["SO_HOLDOUT_PATH"] = path_dict["results_path_str"]
+        os.environ["SO_HOLDOUT_EVALUATION_TOKEN"] = "holdout-token"
+        try:
+            run_holdout_evaluation(design_module, "name_again", {"session_date_list": session_date_list},
+                                   path_dict["token_path_str"], get_git_dict(so_tree_str_in="so-tree-changed"),
+                                   ledger_path_str_in=ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
+            raise AssertionError("the same EXPERIMENT_NAME with a new so-tree hash was accepted on the same sessions")
+        except ValueError as error:
+            assert "already evaluated" in str(error)
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = saved_registry_str
+    passed("same EXPERIMENT_NAME with a different so-tree hash is refused on the same sessions")
+
+# FUNCTION: TEST THE UNREAD FIELDS ON A WINDOW THAT STRADDLES THE PRIOR-READ DATE
+def test_unread_fields():
+    """
+    Reported sessions after PRIOR_READ_LAST_DATE_STR fill the unread fields. A span that does not go past that date
+    stores NaN.
+
+    Returns:
+        None
+    """
+    # A SHORT STRADDLE: LAST PROTOCOL-1.0 DATE IS INSIDE THE REPORTED SPAN
+    prior_date = pd.Timestamp(config.PRIOR_READ_LAST_DATE_STR).date()
+    straddle_list = get_session_date_list("2026-04-01", "2026-05-15")
+    assert straddle_list[0] <= prior_date < straddle_list[-1]
+    unread_list = [session_date for session_date in straddle_list if session_date > prior_date]
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2026-04-01", "2026-05-15", minute_vol_in=0.0004, seed_in=7)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    equity_pdf = pd.DataFrame({"date": straddle_list,
+                               "equity": [config.INITIAL_CAPITAL * (1.0 + 0.01 * (idx + 1)) for idx in range(len(straddle_list))],
+                               "in_position": [True] * len(straddle_list), "weight": [1.0] * len(straddle_list)})
+    period_pdf = pd.DataFrame({"period_id": [1], "period_start": [straddle_list[0]], "period_end": [straddle_list[-1]]})
+    selection_pdf = pd.DataFrame({"period_id": [1], "candidate": ["up"]})
+    result_dict = {"period_pdf": period_pdf, "selection_pdf": selection_pdf,
+                   "path_dict": {"daily_equity_pdf": equity_pdf, "trade_pdf": pd.DataFrame()}}
+    design_module = get_selection_design()
+    window_dict = {"start": straddle_list[0], "end": straddle_list[-1], "window_id": "w_straddle"}
+    report_pack_dict = get_holdout_report_dict(design_module, ohlcv_array_dict, window_dict, result_dict)
+    report_dict = report_pack_dict["report_dict"]
+    assert pd.Timestamp(report_dict["unread_start"]).date() == unread_list[0]
+    assert int(report_dict["unread_session_count"]) == len(unread_list)
+    assert np.isfinite(report_dict["unread_total_return"]) and np.isfinite(report_dict["unread_buy_hold_total_return"])
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    unread_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict, unread_list[0], straddle_list[-1])
+    assert abs(float(report_dict["unread_buy_hold_total_return"]) - float(unread_buy_hold_dict["metric_dict"]["total_return"])) <= config.NUMERIC_TOLERANCE
+    # A SPAN THAT ENDS ON THE PRIOR-READ DATE HAS NO UNREAD SESSION
+    before_list = [session_date for session_date in straddle_list if session_date <= prior_date]
+    before_equity_pdf = equity_pdf[equity_pdf["date"].map(lambda value: pd.Timestamp(value).date() <= prior_date)].reset_index(drop=True)
+    before_result_dict = {"period_pdf": pd.DataFrame({"period_id": [1], "period_start": [before_list[0]], "period_end": [before_list[-1]]}),
+                          "selection_pdf": selection_pdf, "path_dict": {"daily_equity_pdf": before_equity_pdf, "trade_pdf": pd.DataFrame()}}
+    before_window_dict = {"start": before_list[0], "end": before_list[-1], "window_id": "w_before"}
+    before_report_dict = get_holdout_report_dict(design_module, ohlcv_array_dict, before_window_dict, before_result_dict)["report_dict"]
+    assert pd.isna(before_report_dict["unread_start"]) and pd.isna(before_report_dict["unread_session_count"])
+    assert pd.isna(before_report_dict["unread_total_return"]) and pd.isna(before_report_dict["unread_buy_hold_total_return"])
+    passed("unread fields (straddle fills them; a span that does not go past the date is NaN)")
 
 # FUNCTION: TEST THAT THE ARCHIVED SCHEDULE STILL HAS TEST WINDOWS
 def test_walk_forward_unchanged():
@@ -1251,6 +1490,11 @@ if __name__ == "__main__":
         test_evaluation()
         test_baseline_ledger()
         test_holdout_flag_scan()
+        test_slide_window()
+        test_overlapping_budget()
+        test_forward_evaluation()
+        test_experiment_name_repeat()
+        test_unread_fields()
         test_walk_forward_unchanged()
         # THE REAL REGISTRY IS UNCHANGED (IT MAY ALREADY EXIST; THIS SUITE MUST NOT WRITE IT)
         assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
