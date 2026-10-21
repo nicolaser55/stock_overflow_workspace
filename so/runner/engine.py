@@ -10,7 +10,9 @@ from so.core.performance_metrics import get_sharpe_ratio, get_max_drawdown
 """
 Engine Interface (infrastructure step 4a)
 
-The design decides. The engine fills. The loop is the only caller.
+The design decides. The position engine turns decisions into trades. Anything that needs memory across minutes
+(being in a position, the entry price, a trailing high, take-profit and stop-loss) lives here, not in design code.
+An engine sees the fill or mark it is given and its own state only.
 
     open_window      buy initial_weight at the first 10:00 open
     apply_decision   rebalance at the 15:59 fill (daily mode)
@@ -19,8 +21,12 @@ The design decides. The engine fills. The loop is the only caller.
     close_window     sell everything at the last close
     get_result_dict  trades, daily equity, metrics
 
-The one 4a engine is fractional weight, same rules as so.core.fractional_exposure. Barrier and trailing-stop
-engines are 4b and are not in this module. A float decision is target_weight. NaN or a missing weight means keep.
+A fill event has bar_idx, timestamp, raw_price (the open, except END which is the close). A mark event has
+session_date and close. A bar event (4b) has bar_idx, timestamp, open, high, low, close.
+
+4a ports fractional weight from so.core.fractional_exposure and must reproduce it exactly. 4b ports barrier trades
+from so.core.trade_execution / so.core.backtest_simulation, and trailing stop and re-entry from
+so.core.reentry_simulation. A float decision is target_weight. NaN or a missing weight means keep.
 stop_price, take_profit_price, trail_multiple and flatten_bool are reserved for 4b and are ignored here.
 """
 

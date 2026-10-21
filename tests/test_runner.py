@@ -31,10 +31,11 @@ assert_temporary_data_root()
 from so.core.holdout import get_perturbed_ohlcv_dict
 from so.core.point_in_time import (get_ny_timestamp, get_minute_bar_available_ts, get_runner_context,
                                    register_source_dict, unregister_source, SOURCE_SPEC_DICT)
+from so.core.fractional_exposure import simulate_fractional_exposure_dict
 from so.core.reentry_simulation import get_buy_and_hold_result_dict
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_session_decision_idx_dict
-from so.runner import run_daily_dict
+from so.runner import run_daily_dict, check_design_file
 from synthetic_data import get_synthetic_ohlcv_pdf
 
 # A NEW YORK CLOCK USED BY THE SMALL FRAMES
@@ -189,6 +190,176 @@ class RecordingDesign:
         return 1.0
 
 
+# FUNCTION: WHETHER A BUFFER TAIL AFTER THE FILLED PREFIX IS EMPTY
+def get_nan_tail_bool(array_in, filled_count_in):
+    """
+    True when every value at or after filled_count_in is NaN, NaT, or None.
+
+    Args:
+        array_in (np.ndarray): Buffer or slice
+        filled_count_in (int): Length of the visible prefix
+
+    Returns:
+        bool: True if the tail is empty
+    """
+    # A SLICE HAS NO TAIL; ITS .base MIGHT
+    if filled_count_in >= len(array_in):
+        return True
+    tail_arr = array_in[int(filled_count_in):]
+    if np.issubdtype(array_in.dtype, np.datetime64):
+        return bool(np.isnat(tail_arr).all())
+    if np.issubdtype(array_in.dtype, np.floating):
+        return bool(np.isnan(tail_arr).all())
+    if array_in.dtype == object:
+        return all(value is None for value in tail_arr)
+    if np.issubdtype(array_in.dtype, np.integer):
+        return bool((tail_arr == np.iinfo(array_in.dtype).min).all())
+    return False
+
+
+# FUNCTION: NUMPY ARRAYS REACHABLE FROM THE VIEW, INCLUDING .base
+def get_reachable_array_list(root_in):
+    """
+    Walks dicts, lists, runner objects and frames. Does not walk pandas internals.
+
+    Args:
+        root_in (object): Usually a DecisionView
+
+    Returns:
+        list[np.ndarray]: Arrays
+    """
+    # IDENTITY SET SO A BUFFER IS YIELDED ONCE
+    seen_set, array_list, stack_list = set(), [], [root_in]
+    while stack_list:
+        obj = stack_list.pop()
+        obj_id = id(obj)
+        if obj_id in seen_set:
+            continue
+        seen_set.add(obj_id)
+        if isinstance(obj, np.ndarray):
+            array_list.append(obj)
+            if obj.base is not None:
+                stack_list.append(obj.base)
+            continue
+        if isinstance(obj, pd.DatetimeIndex):
+            array_list.append(obj.asi8)
+            continue
+        if isinstance(obj, pd.DataFrame):
+            for column_str in obj.columns:
+                stack_list.append(obj[column_str].to_numpy())
+            continue
+        if isinstance(obj, pd.Series):
+            stack_list.append(obj.to_numpy())
+            continue
+        if isinstance(obj, dict):
+            stack_list.extend(obj.values())
+            continue
+        if isinstance(obj, (list, tuple)):
+            stack_list.extend(obj)
+            continue
+        if hasattr(obj, "__dict__") and type(obj).__module__.startswith("so.runner"):
+            stack_list.extend(vars(obj).values())
+    return array_list
+
+
+# FUNCTION: NUMERIC VALUES IN DATAFRAMES REACHABLE FROM THE VIEW
+def get_reachable_frame_value_list(root_in):
+    """
+    Values in DataFrame columns reachable from the view.
+
+    Args:
+        root_in (object): Usually a DecisionView
+
+    Returns:
+        list: Cell values
+    """
+    # SAME WALK AS THE ARRAYS, COLLECTING FRAME CELLS
+    seen_set, value_list, stack_list = set(), [], [root_in]
+    while stack_list:
+        obj = stack_list.pop()
+        obj_id = id(obj)
+        if obj_id in seen_set:
+            continue
+        seen_set.add(obj_id)
+        if isinstance(obj, pd.DataFrame):
+            for column_str in obj.columns:
+                value_list.extend(list(obj[column_str]))
+            continue
+        if isinstance(obj, dict):
+            stack_list.extend(obj.values())
+            continue
+        if isinstance(obj, (list, tuple)):
+            stack_list.extend(obj)
+            continue
+        if hasattr(obj, "__dict__") and type(obj).__module__.startswith("so.runner"):
+            stack_list.extend(vars(obj).values())
+    return value_list
+
+
+# FUNCTION: A DESIGN THAT RETURNS A PRECOMPUTED WEIGHT PER SESSION
+class ScriptedWeightDesign:
+    """Returns target_weight_arr[session] from a date lookup. Used for engine parity."""
+
+    # SPY ONLY
+    DATA_SOURCE_LIST = ["SPY_1MIN"]
+
+    # FUNCTION: STORE THE WEIGHTS
+    def __init__(self, weight_arr_in, session_date_list_in):
+        """
+        Args:
+            weight_arr_in (np.ndarray): One weight per session (NaN = keep)
+            session_date_list_in (list): Session dates aligned with the array
+        """
+        # THE CURRENT SESSION DATE IS KNOWABLE AT THE DECISION
+        self.weight_dict = {session_date: float(weight) for session_date, weight in zip(session_date_list_in, weight_arr_in)}
+
+    # FUNCTION: THE WEIGHT FOR THIS SESSION
+    def decide(self, view_in):
+        """
+        Args:
+            view_in (DecisionView): View at this moment
+
+        Returns:
+            float: Target weight
+        """
+        # LOOK UP BY THE SESSION BEING DECIDED
+        return self.weight_dict[view_in.session_date]
+
+
+# FUNCTION: WHETHER EVERY ARRAY BEHIND THE VIEW IS EMPTY AFTER THE MOMENT
+def get_view_tail_ok_bool(view_in):
+    """
+    True when every 1-d array reachable from the view, including each slice's .base, is NaN / NaT / None after the
+    visible prefix (bars through the decision bar, sessions through this session).
+
+    Args:
+        view_in (DecisionView): View at this moment
+
+    Returns:
+        bool: True if no later bar or session value is stored
+    """
+    # THE VISIBLE PREFIX LENGTHS ARE THE SLICE LENGTHS
+    bar_array_dict = view_in.get_bar_array_dict()
+    close_arr = bar_array_dict["close_arr"]
+    filled_bar_count = len(close_arr)
+    filled_session_count = int(view_in.session_idx) + 1
+    bar_buffer_len = len(close_arr.base) if close_arr.base is not None else filled_bar_count
+    session_end_arr = bar_array_dict["session_end_idx_arr"]
+    session_buffer_len = len(session_end_arr.base) if session_end_arr.base is not None else len(session_end_arr)
+    ok_bool = True
+    for array in get_reachable_array_list(view_in):
+        if array.ndim != 1:
+            continue
+        if len(array) == bar_buffer_len and not get_nan_tail_bool(array, filled_bar_count):
+            ok_bool = False
+        if len(array) == session_buffer_len and not get_nan_tail_bool(array, filled_session_count):
+            ok_bool = False
+        if array.base is not None and getattr(array.base, "ndim", 1) == 1 and len(array.base) > len(array):
+            if not get_nan_tail_bool(array.base, len(array)):
+                ok_bool = False
+    return ok_bool
+
+
 # FUNCTION: A DESIGN THAT RECORDS THE LAST VISIBLE CLOSE AND PROBES THE THREE DOORS
 class ProbeDesign:
     """Tries to read past the moment; records what the view actually returned."""
@@ -207,6 +378,13 @@ class ProbeDesign:
         self.slice_len_list = []
         self.feat_value_list = []
         self.label_value_list = []
+        self.new_feat_value_list = []
+        self.new_label_value_list = []
+        self.first_tail_ok_bool = None
+        self.first_late_reachable_bool = None
+        self.first_has_data_context_bool = None
+        self.first_close_base_len = None
+        self.first_forbidden_type_list = []
 
     # FUNCTION: PROBE BARS, A SOURCE AND A LABEL, THEN RETURN 1
     def decide(self, view_in):
@@ -256,7 +434,57 @@ class ProbeDesign:
         self.label_value_list.append(list(label_pdf["value"]) if len(label_pdf) else [])
         if len(label_pdf):
             assert (pd.to_datetime(label_pdf["label_known_ts"]).map(get_ny_timestamp) < view_in.decision_ts).all()
+        # ROWS NEW SINCE THE PREVIOUS CALL
+        new_feat_pdf = view_in.get_new(TEST_FEAT_STR)
+        new_label_pdf = view_in.get_new(TEST_LABEL_STR)
+        self.new_feat_value_list.append(list(new_feat_pdf["value"]) if len(new_feat_pdf) else [])
+        self.new_label_value_list.append(list(new_label_pdf["value"]) if len(new_label_pdf) else [])
+        # AT THE FIRST DECISION, NOTHING AFTER THE MOMENT MAY BE REACHABLE
+        if self.first_tail_ok_bool is None:
+            self.first_close_base_len = 0 if close_arr.base is None else len(close_arr.base)
+            self.first_tail_ok_bool = get_view_tail_ok_bool(view_in)
+            late_value_set = {999999.0, 20.0, 30.0}
+            reachable_value_list = get_reachable_frame_value_list(view_in)
+            self.first_late_reachable_bool = any(
+                isinstance(value, (int, float, np.integer, np.floating)) and float(value) in late_value_set
+                for value in reachable_value_list)
+            self.first_has_data_context_bool = hasattr(view_in, "_data_context")
+            self.first_forbidden_type_list = [type_name_str for type_name_str in get_reachable_type_name_set(view_in)
+                                              if type_name_str in {"DataContext", "SourceFeed"}]
         return 1.0
+
+
+# FUNCTION: TYPE NAMES OF so OBJECTS REACHABLE FROM THE VIEW
+def get_reachable_type_name_set(root_in):
+    """
+    Walks runner objects hanging off the view.
+
+    Args:
+        root_in (object): Usually a DecisionView
+
+    Returns:
+        set[str]: Type names
+    """
+    # IDENTITY SET SO A BUFFER IS VISITED ONCE
+    seen_set, name_set, stack_list = set(), set(), [root_in]
+    while stack_list:
+        obj = stack_list.pop()
+        obj_id = id(obj)
+        if obj_id in seen_set:
+            continue
+        seen_set.add(obj_id)
+        name_set.add(type(obj).__name__)
+        if isinstance(obj, (np.ndarray, pd.DataFrame, pd.Series, pd.DatetimeIndex)):
+            continue
+        if isinstance(obj, dict):
+            stack_list.extend(obj.values())
+            continue
+        if isinstance(obj, (list, tuple)):
+            stack_list.extend(obj)
+            continue
+        if hasattr(obj, "__dict__") and type(obj).__module__.startswith("so."):
+            stack_list.extend(vars(obj).values())
+    return name_set
 
 
 # FUNCTION: BUILD SYNTHETIC BARS AND A RUNNER CONTEXT WITH PLANTED SOURCES
@@ -278,7 +506,7 @@ def get_runner_fixture_dict():
     first_decision_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][first_decision_idx])
     last_session_date = ohlcv_array_dict["session_date_list"][-1]
     # ONE FEATURE ROW KNOWABLE AT THE FIRST DECISION, ONE KNOWABLE AFTER THE LAST SESSION
-    feat_pdf = pd.DataFrame({"value": [1.0, 99.0],
+    feat_pdf = pd.DataFrame({"value": [1.0, 999999.0],
                              "available_ts": [first_decision_ts, pd.Timestamp(year=last_session_date.year, month=last_session_date.month,
                                                                              day=last_session_date.day, hour=18, minute=0, tz=NY)]})
     # LABELS: BEFORE THE FIRST DECISION, AT THE FIRST DECISION (EXCLUDED), AND AFTER THE LAST SESSION
@@ -325,14 +553,156 @@ def test_lookahead_cut():
         assert probe.slice_len_list[0] == fill_idx
         # THE LATE FEATURE ROW IS NEVER VISIBLE; THE EARLY ONE IS
         assert probe.feat_value_list[0] == [1.0]
-        assert 99.0 not in [value for row_list in probe.feat_value_list for value in row_list]
+        assert 999999.0 not in [value for row_list in probe.feat_value_list for value in row_list]
         # THE LABEL AT THE FIRST DECISION IS EXCLUDED THEN, AND VISIBLE ON THE NEXT SESSION (STRICTLY BEFORE)
         assert probe.label_value_list[0] == [10.0]
         assert 20.0 in probe.label_value_list[1]
         assert 30.0 not in [value for row_list in probe.label_value_list for value in row_list]
+        # get_new ON THE FIRST CALL IS THE VISIBLE PREFIX; THE NEXT CALL ADDS THE LABEL NOW KNOWN
+        assert probe.new_feat_value_list[0] == [1.0]
+        assert probe.new_label_value_list[0] == [10.0]
+        assert probe.new_feat_value_list[1] == []
+        assert probe.new_label_value_list[1] == [20.0]
     finally:
         unregister_test_sources()
     passed("lookahead cut (bars, source, label)")
+
+
+# FUNCTION: TEST THAT THE FIRST-DECISION VIEW HOLDS NO FUTURE
+def test_first_decision_no_future():
+    """
+    At the first decide(), every array behind the view (including .base) is NaN / NaT after the decision bar, and no
+    source or label row after the moment is reachable. The view does not hold a DataContext or a SourceFeed.
+
+    Returns:
+        None
+    """
+    # THE SAME FIXTURE AS THE LOOK-AHEAD CUT
+    register_test_sources()
+    try:
+        fixture_dict = get_runner_fixture_dict()
+        probe = ProbeDesign(["SPY_1MIN", TEST_FEAT_STR, TEST_LABEL_STR])
+        run_daily_dict(probe, fixture_dict["ohlcv_array_dict"], fixture_dict["date1"], fixture_dict["date2"],
+                       data_context_in=fixture_dict["data_context"])
+        close_len = len(fixture_dict["ohlcv_array_dict"]["close_arr"])
+        assert probe.first_close_base_len == close_len
+        assert probe.slice_len_list[0] == fixture_dict["first_decision_idx"] + 1
+        assert probe.slice_len_list[0] < close_len
+        assert probe.first_tail_ok_bool is True
+        assert probe.first_late_reachable_bool is False
+        assert probe.first_has_data_context_bool is False
+        assert probe.first_forbidden_type_list == []
+    finally:
+        unregister_test_sources()
+    passed("first decision: .base tail empty, no later source or label row reachable")
+
+
+# FUNCTION: ONE BANNED DESIGN-FILE SNIPPET
+def get_banned_snippet_list():
+    """
+    One (name, source) pair per banned identifier. Each file is refused on its own.
+
+    Args:
+        None
+
+    Returns:
+        list[tuple]: (banned name, python source)
+    """
+    # EACH SNIPPET IS A MINIMAL DESIGN FILE
+    header_str = "class Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n    def decide(self, view_in):\n"
+    return [
+        ("base", header_str + "        x = view_in.get_bar_array_dict()['close_arr'].base\n        return 1.0\n"),
+        ("__closure__", header_str + "        x = (lambda: 0).__closure__\n        return 1.0\n"),
+        ("__self__", header_str + "        x = view_in.get.__self__\n        return 1.0\n"),
+        ("__globals__", header_str + "        x = view_in.get.__globals__\n        return 1.0\n"),
+        ("__dict__", header_str + "        x = view_in.__dict__\n        return 1.0\n"),
+        ("gc", "import gc\n" + header_str + "        gc.collect()\n        return 1.0\n"),
+        ("inspect", "import inspect\n" + header_str + "        inspect.getsource(self.decide)\n        return 1.0\n"),
+        ("_getframe", "import sys\n" + header_str + "        sys._getframe()\n        return 1.0\n"),
+        ("ctypes", "import ctypes\n" + header_str + "        ctypes.c_int(0)\n        return 1.0\n"),
+        ("so.runner", "import so.runner\n" + header_str + "        return 1.0\n"),
+        ("so.core.point_in_time", "from so.core.point_in_time import DataContext\n" + header_str + "        return 1.0\n"),
+        ("so.core.holdout", "from so.core.holdout import get_perturbed_ohlcv_dict\n" + header_str + "        return 1.0\n"),
+    ]
+
+
+# FUNCTION: TEST THAT EACH BANNED NAME IN A DESIGN FILE IS REFUSED
+def test_preflight_refuses_banned_names():
+    """
+    check_design_file and run_daily_dict both refuse a design file that uses each banned name.
+
+    Returns:
+        None
+    """
+    # A CLEAN FILE PASSES; EACH BANNED FILE RAISES BEFORE decide()
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-18", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    temp_dir_str = tempfile.mkdtemp(prefix="so_runner_preflight_")
+    try:
+        clean_path_str = os.path.join(temp_dir_str, "clean_design.py")
+        with open(clean_path_str, "w", encoding="utf-8") as clean_file:
+            clean_file.write("class Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n    def decide(self, view_in):\n        return 1.0\n")
+        check_design_file(clean_path_str)
+        run_daily_dict(ConstantOneDesign(), ohlcv_array_dict, date1, date2, design_file_path_str_in=clean_path_str)
+        for banned_str, source_str in get_banned_snippet_list():
+            file_path_str = os.path.join(temp_dir_str, f"banned_{banned_str.replace('.', '_')}.py")
+            with open(file_path_str, "w", encoding="utf-8") as banned_file:
+                banned_file.write(source_str)
+            raised_bool = False
+            try:
+                check_design_file(file_path_str)
+            except ValueError:
+                raised_bool = True
+            assert raised_bool, f"check_design_file accepted {banned_str}"
+            loop_raised_bool = False
+            try:
+                run_daily_dict(ConstantOneDesign(), ohlcv_array_dict, date1, date2, design_file_path_str_in=file_path_str)
+            except ValueError:
+                loop_raised_bool = True
+            assert loop_raised_bool, f"run_daily_dict accepted {banned_str}"
+    finally:
+        shutil.rmtree(temp_dir_str, ignore_errors=True)
+    passed("preflight refuses each banned name in a design file")
+
+
+# FUNCTION: TEST THAT THE FRACTIONAL ENGINE MATCHES simulate_fractional_exposure_dict
+def test_engine_parity_synthetic_year():
+    """
+    Random target weights with NaNs, dead band 0 and 0.1, initial weight 0.5, over a synthetic year, give the same
+    trades and equity as simulate_fractional_exposure_dict.
+
+    Returns:
+        None
+    """
+    # ONE SYNTHETIC YEAR, THE SAME WEIGHT PATH FOR BOTH DEAD BANDS
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-01-04", "2010-12-31", seed_in=8)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    session_date_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_date_list[0], session_date_list[-1]
+    rng = np.random.default_rng(21)
+    weight_arr = rng.uniform(0.0, 1.0, len(session_date_list))
+    weight_arr[rng.random(len(session_date_list)) < 0.2] = np.nan
+    for dead_band in (0.0, 0.1):
+        design = ScriptedWeightDesign(weight_arr, session_date_list)
+        runner_dict = run_daily_dict(design, ohlcv_array_dict, date1, date2, dead_band_in=dead_band, initial_weight_in=0.5)
+        sim_dict = simulate_fractional_exposure_dict(ohlcv_array_dict, date1, date2, weight_arr, dead_band, 0.5)
+        runner_trade_pdf, sim_trade_pdf = runner_dict["trade_pdf"], sim_dict["trade_pdf"]
+        assert list(runner_trade_pdf.columns) == list(sim_trade_pdf.columns)
+        assert len(runner_trade_pdf) == len(sim_trade_pdf)
+        if len(runner_trade_pdf):
+            assert runner_trade_pdf["delta_share_count"].tolist() == sim_trade_pdf["delta_share_count"].tolist()
+            assert runner_trade_pdf["fill_price"].tolist() == sim_trade_pdf["fill_price"].tolist()
+            assert runner_trade_pdf["reason"].tolist() == sim_trade_pdf["reason"].tolist()
+            assert runner_trade_pdf["raw_price"].tolist() == sim_trade_pdf["raw_price"].tolist()
+            assert runner_trade_pdf["trade_idx"].tolist() == sim_trade_pdf["trade_idx"].tolist()
+            assert runner_trade_pdf["fee"].tolist() == sim_trade_pdf["fee"].tolist()
+            assert runner_trade_pdf["share_count_after"].tolist() == sim_trade_pdf["share_count_after"].tolist()
+        assert runner_dict["daily_equity_pdf"]["date"].tolist() == sim_dict["daily_equity_pdf"]["date"].tolist()
+        assert runner_dict["daily_equity_pdf"]["equity"].tolist() == sim_dict["daily_equity_pdf"]["equity"].tolist()
+        assert runner_dict["daily_equity_pdf"]["in_position"].tolist() == sim_dict["daily_equity_pdf"]["in_position"].tolist()
+        assert runner_dict["metric_dict"] == sim_dict["metric_dict"]
+    passed("engine parity vs simulate_fractional_exposure_dict (year, NaNs, dead band 0 and 0.1, w0=0.5)")
 
 
 # FUNCTION: TEST THAT WEIGHT 1 MATCHES BUY-AND-HOLD
@@ -418,9 +788,12 @@ if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY FOLDER
     try:
         test_lookahead_cut()
+        test_first_decision_no_future()
+        test_preflight_refuses_banned_names()
         test_weight_one_is_buy_and_hold()
         test_identical_runs()
         test_later_bar_perturbation()
+        test_engine_parity_synthetic_year()
         assert TEST_FEAT_STR not in SOURCE_SPEC_DICT
         assert TEST_LABEL_STR not in SOURCE_SPEC_DICT
         print("\nAll runner tests passed ✅")
