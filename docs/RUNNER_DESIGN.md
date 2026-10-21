@@ -88,7 +88,12 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
-- **Look-ahead check on every run:** truncation and perturbation at sampled cuts run automatically, as a second line.
+- **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) cut dates, one
+  drawn with a fixed seed from each third of the development span. For each cut and each candidate the stream is
+  re-run on bars and sources truncated after the cut, and again with bars after the cut's decision bar perturbed
+  (`get_perturbed_ohlcv_dict`) and declared feature / label rows after the cut perturbed (`get_perturbed_feature_pdf`).
+  Every decision up to and including the cut must match the full run. Jobs use the same spawn pool as the candidate
+  streams. A failure fails the verdict. The re-runs write no trial-log rows. Results go to `lookahead.json`.
 
 ## Holdout evaluation uses the same runner (agreed 2026-10-21)
 

@@ -30,13 +30,16 @@ from so.runner.baselines import get_runner_baseline_dict
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
                                write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, LOOK_AHEAD_PENDING_STR,
                                REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR)
+from so.runner.lookahead import run_lookahead_check_dict, LOOKAHEAD_FILE_STR
 
 """
-Development Run (infrastructure steps 4b-1a and 4b-1b)
+Development Run (infrastructure steps 4b-1a, 4b-1b and 4b-1c)
 
 Candidates, periods, pooled prior-only selection, trial logging, checkpoints and parallel streams on top of the 4a
 daily loop. 4b-1b adds baselines over the prior-only span, the shared verdict, report.json / report.md, and
-manifest.json written last. Development view only: the quarantine root is refused (holdout evaluation is 4b-1c).
+manifest.json written last. 4b-1c fills the look-ahead part of the verdict: truncation and perturbation at sampled
+cuts, run in the same spawn pool, written to lookahead.json. Those re-runs never write a trial-log row. Development
+view only: the quarantine root is refused (holdout evaluation is a later 4b part).
 
 The design module declares CANDIDATE_LIST and get_candidate_design(candidate), which returns a fresh design object
 per candidate. Each candidate is its own stream over the span (first period start through last period end). At the
@@ -498,12 +501,13 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
                          n_jobs_int_in=None, period_pdf_in=None, trial_log_path_str_in=None, commit_str_in=None,
                          crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
                          check_view_bool_in=True, baseline_seed_count_int_in=None,
-                         look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR):
+                         look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, run_lookahead_bool_in=True):
     """
     Development view. Refuses the quarantine root. Forms periods from PERIOD_RULE unless period_pdf_in is passed
     (tests). Streams each candidate, logs each candidate-period as it is scored, then builds the prior-only path
-    from the recorded decisions. After a finished path it runs the shared baselines, applies the verdict, writes
-    report.json and report.md, and writes manifest.json last.
+    from the recorded decisions. After a finished path it runs the shared baselines, the look-ahead check
+    (truncation and perturbation at sampled cuts), applies the verdict, writes report.json and report.md, and
+    writes manifest.json last.
 
     Args:
         design_module_in (module): Design (CANDIDATE_LIST, get_candidate_design, PERIOD_RULE, SELECTION_RULE)
@@ -519,11 +523,12 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         check_clean_tree_bool_in (bool): Refuse uncommitted changes in the code this run uses
         check_view_bool_in (bool): Call check_development_view (tests that inject periods may pass False)
         baseline_seed_count_int_in (int | None): Random-timing draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
-        look_ahead_status_str_in (str): pending until 4b-1c fills pass or fail
+        look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
+        run_lookahead_bool_in (bool): Run the automatic look-ahead check (default True)
 
     Returns:
         dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list,
-              baseline_dict, verdict_dict, report_dict, manifest_dict
+              baseline_dict, verdict_dict, report_dict, manifest_dict, lookahead_dict
     """
     # THE DEVELOPMENT VIEW NEVER OPENS THE QUARANTINE
     check_quarantine_refused()
@@ -608,10 +613,22 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
                                                          initial_weight)
     baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1, date2, prior_only_dict,
                                              seed_count_int_in=baseline_seed_count_int_in)
+    lookahead_dict = None
+    look_ahead_status_str = look_ahead_status_str_in
+    if run_lookahead_bool_in:
+        lookahead_dict = run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str, date1, date2,
+                                                  candidate_list, window_session_date_list, n_jobs_int,
+                                                  design_file_path_str, ohlcv_path_str, context_path_str,
+                                                  run_folder_str)
+        look_ahead_status_str = lookahead_dict["status_str"]
     strategy_return_pdf = get_equity_daily_return_pdf(prior_only_dict["daily_equity_pdf"])
     buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
     verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
-                                           look_ahead_status_str_in=look_ahead_status_str_in)
+                                           look_ahead_status_str_in=look_ahead_status_str)
+    if lookahead_dict is not None:
+        verdict_dict["look_ahead_dict"]["cut_date_list"] = list(lookahead_dict["cut_date_list"])
+        verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
+        verdict_dict["look_ahead_dict"]["elapsed_seconds"] = lookahead_dict.get("elapsed_seconds")
     view_stamp_dict = get_view_stamp_dict()
     report_dict = get_report_payload_dict(verdict_dict, {
         "run_id_str": run_id_str, "experiment_name_str": experiment_name_str,
@@ -621,15 +638,19 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         "date1": str(date1), "date2": str(date2),
     })
     write_run_report_dict(run_folder_str, report_dict)
+    output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR]
+    if lookahead_dict is not None:
+        output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, LOOKAHEAD_FILE_STR, MANIFEST_FILE_STR]
     manifest_dict = {"status": "finished", "run_id": run_id_str, "commit": commit_str, "code_hash": code_hash_str,
                      "view_stamp": view_stamp_dict,
                      "design": {"experiment_name": experiment_name_str,
                                 "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
                                 "file": design_file_path_str},
                      "candidate_list": list(candidate_list), "trial_id_list": list(trial_id_list),
-                     "output_files": [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR],
+                     "output_files": list(output_file_list),
                      "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
-                                 "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"])}}
+                                 "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
+                                 "look_ahead": look_ahead_status_str}}
     write_run_manifest_dict(run_folder_str, manifest_dict)
     return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
             "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
@@ -637,4 +658,4 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
             "candidate_decision_dict": candidate_decision_dict, "commit_str": commit_str,
             "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
             "run_folder_str": run_folder_str, "baseline_dict": baseline_dict, "verdict_dict": verdict_dict,
-            "report_dict": report_dict, "manifest_dict": manifest_dict}
+            "report_dict": report_dict, "manifest_dict": manifest_dict, "lookahead_dict": lookahead_dict}

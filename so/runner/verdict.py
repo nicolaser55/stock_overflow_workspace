@@ -19,7 +19,8 @@ One shared function, applied to the prior-only path:
     consistency  ahead of buy-and-hold on at least 60% of rolling 12-month windows, stepped monthly.
     baselines    total return strictly above the constant-exposure baseline and above at least 95% of the random
                  draws.
-    look-ahead   "pending" until 4b-1c fills it.
+    look-ahead   "pass" or "fail" from the automatic truncation and perturbation check (4b-1c). "pending" is not a
+                 pass (only used when that check is skipped).
 
 The verdict is "email-worthy" only if every part passes. look-ahead "pending" is not a pass. Otherwise
 "not email-worthy", listing what failed.
@@ -33,7 +34,7 @@ REPORT_JSON_FILE_STR = "report.json"
 REPORT_MD_FILE_STR = "report.md"
 MANIFEST_FILE_STR = "manifest.json"
 MANIFEST_TMP_FILE_STR = "manifest.json.tmp"
-# LOOK-AHEAD STATUSES 4B-1C WILL FILL
+# LOOK-AHEAD STATUSES (4B-1C FILLS PASS OR FAIL)
 LOOK_AHEAD_PENDING_STR = "pending"
 LOOK_AHEAD_PASS_STR = "pass"
 LOOK_AHEAD_FAIL_STR = "fail"
@@ -226,7 +227,7 @@ def get_baseline_verdict_dict(strategy_total_return_in, baseline_dict_in, beat_s
 # FUNCTION: THE LOOK-AHEAD PART OF THE VERDICT
 def get_look_ahead_verdict_dict(status_str_in=LOOK_AHEAD_PENDING_STR):
     """
-    4b-1c fills pass or fail. pending is not a pass.
+    The automatic look-ahead check fills pass or fail. pending is not a pass.
 
     Args:
         status_str_in (str): pending, pass, or fail
@@ -377,8 +378,17 @@ def get_report_markdown_str(report_dict_in):
         f"{'pass' if baseline_dict['random_pass_bool'] else 'fail'}."
     )
     line_list.extend(["", "### Look-ahead", ""])
-    line_list.append(f"{look_ahead_dict['status_str']}" +
-                     (" (filled in 4b-1c)." if look_ahead_dict["status_str"] == LOOK_AHEAD_PENDING_STR else "."))
+    if look_ahead_dict["status_str"] == LOOK_AHEAD_PENDING_STR:
+        line_list.append("pending.")
+    elif look_ahead_dict["status_str"] == LOOK_AHEAD_FAIL_STR:
+        fail_dict = look_ahead_dict.get("first_fail_dict") or {}
+        session_str = str(fail_dict.get("session_date") or "")
+        if session_str:
+            line_list.append(f"fail (first differing session {session_str}).")
+        else:
+            line_list.append("fail.")
+    else:
+        line_list.append(f"{look_ahead_dict['status_str']}.")
     line_list.append("")
     return "\r\n".join(line_list)
 

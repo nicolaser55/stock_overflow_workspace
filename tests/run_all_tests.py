@@ -30,6 +30,7 @@ folder must keep the same size and modification time.
     tests/test_runner.py             point-in-time runner view, daily loop, fractional engine (synthetic data only)
     tests/test_runner_candidates.py  runner 4b-1a: candidates, selection, trial log, checkpoints, parallel (synthetic)
     tests/test_runner_verdict.py     runner 4b-1b: baselines, verdict, report, manifest, imported-folder guards (synthetic)
+    tests/test_runner_lookahead.py   runner 4b-1c: automatic look-ahead check (truncation, perturbation, leaks; synthetic)
     tests/test_rolling_retrain.py    rolling retrain sessions, purge, windows, label leak, selection, reporting (synthetic data only)
     tests/test_execute_notebook.py   notebook execution saves a failed run (synthetic notebook only)
     tests/test_port_queue.py         the port queue on synthetic notebooks
@@ -42,7 +43,7 @@ folder must keep the same size and modification time.
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py", "test_holdout_baselines.py", "test_lookahead_audit.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py", "test_holdout_baselines.py", "test_lookahead_audit.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 

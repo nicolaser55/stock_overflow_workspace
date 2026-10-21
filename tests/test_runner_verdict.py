@@ -48,7 +48,7 @@ from so.runner import (run_development_dict, check_clean_tree, CLEAN_TREE_MESSAG
                        get_random_timing_seed_list, run_weight_path_dict, get_runner_verdict_dict,
                        get_return_verdict_dict, get_consistency_verdict_dict, get_baseline_verdict_dict,
                        LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR, EMAIL_WORTHY_STR,
-                       NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR)
+                       NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR, LOOKAHEAD_FILE_STR)
 from so.runner.checkpoint import get_run_folder_str
 from so.runner.baselines import (get_unique_weight_list, get_weight_run_list, get_weight_time_dict,
                                  get_base_weight_float, get_non_base_spell_list, get_base_gap_list,
@@ -496,7 +496,7 @@ def test_random_timing_preserves_ninety_four_percent_invested():
 def test_crashed_run_leaves_no_manifest():
     """
     Crash after the first period's checkpoint. The run folder has no manifest.json. A finished run has the
-    manifest, the two report files, and look-ahead pending.
+    manifest, the two report files, lookahead.json, and look-ahead pass.
 
     Returns:
         None
@@ -534,12 +534,15 @@ def test_crashed_run_leaves_no_manifest():
     assert manifest_dict["status"] == "finished" and manifest_dict["run_id"] == "verdict_finish"
     assert manifest_dict["commit"] == "testcommit" and manifest_dict["code_hash"] == "testhash"
     assert manifest_dict["verdict"]["label"] == NOT_EMAIL_WORTHY_STR
-    assert "look-ahead" in manifest_dict["verdict"]["failed_list"]
+    assert manifest_dict["verdict"]["look_ahead"] == LOOK_AHEAD_PASS_STR
+    assert "look-ahead" not in manifest_dict["verdict"]["failed_list"]
     assert REPORT_JSON_FILE_STR in manifest_dict["output_files"]
+    assert LOOKAHEAD_FILE_STR in manifest_dict["output_files"]
     with open(os.path.join(run_folder_str, REPORT_JSON_FILE_STR), "r", encoding="utf-8") as report_file:
         report_dict = json.load(report_file)
-    assert report_dict["look_ahead_dict"]["status_str"] == LOOK_AHEAD_PENDING_STR
+    assert report_dict["look_ahead_dict"]["status_str"] == LOOK_AHEAD_PASS_STR
     assert "strategy_total_return" in report_dict["return_dict"]
+    assert os.path.isfile(os.path.join(run_folder_str, LOOKAHEAD_FILE_STR))
     with open(os.path.join(run_folder_str, REPORT_MD_FILE_STR), "r", encoding="utf-8") as markdown_file:
         markdown_str = markdown_file.read()
     assert "two window edges" in markdown_str
