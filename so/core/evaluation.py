@@ -414,6 +414,49 @@ def get_performance_over_time_pdf(strategy_daily_return_pdf_in, buy_hold_daily_r
         "buy_hold_drawdown": buy_hold_equity_arr / np.maximum.accumulate(buy_hold_equity_arr) - 1.0,
     })
 
+# FUNCTION: ROLLING CALENDAR-MONTH WINDOWS OF TOTAL RETURN
+def get_rolling_month_window_pdf(strategy_return_pdf_in, buy_hold_return_pdf_in, window_months_in=12, step_months_in=1):
+    """
+    One row per rolling block of window_months_in calendar months, stepped by step_months_in. Each block's returns
+    are the chained daily returns that fall in those months. Ahead means the strategy's total return is strictly
+    above buy-and-hold's. Months with no sessions are omitted (the remaining months stay in calendar order).
+
+    Args:
+        strategy_return_pdf_in (pd.DataFrame): date, daily_return
+        buy_hold_return_pdf_in (pd.DataFrame): date, daily_return, same dates
+        window_months_in (int): Block length in calendar months
+        step_months_in (int): Step between block starts
+
+    Returns:
+        pd.DataFrame: start_month, end_month, strategy_return, buy_hold_return, excess_return, ahead_bool
+    """
+    # ALIGN THE TWO SERIES ON THE DATE
+    merged_pdf = strategy_return_pdf_in.merge(buy_hold_return_pdf_in, on="date", suffixes=("_strategy", "_buy_hold"))
+    if len(merged_pdf) != len(strategy_return_pdf_in) or len(merged_pdf) != len(buy_hold_return_pdf_in):
+        raise ValueError("strategy and buy-and-hold dates differ.")
+    merged_pdf = merged_pdf.sort_values("date").reset_index(drop=True)
+    merged_pdf["month"] = pd.to_datetime(merged_pdf["date"]).dt.to_period("M")
+    month_pdf = merged_pdf.groupby("month", sort=True).agg(
+        strategy_factor=("daily_return_strategy", lambda s: float(np.prod(1.0 + s))),
+        buy_hold_factor=("daily_return_buy_hold", lambda s: float(np.prod(1.0 + s))),
+    )
+    window_int, step_int = int(window_months_in), int(step_months_in)
+    if window_int < 1 or step_int < 1:
+        raise ValueError("window_months_in and step_months_in must be at least 1.")
+    row_dict_list = []
+    month_count = int(len(month_pdf))
+    for start_idx in range(0, month_count - window_int + 1, step_int):
+        end_idx = start_idx + window_int
+        block_pdf = month_pdf.iloc[start_idx:end_idx]
+        strategy_return = float(block_pdf["strategy_factor"].prod() - 1.0)
+        buy_hold_return = float(block_pdf["buy_hold_factor"].prod() - 1.0)
+        row_dict_list.append({"start_month": str(month_pdf.index[start_idx]), "end_month": str(month_pdf.index[end_idx - 1]),
+                              "strategy_return": strategy_return, "buy_hold_return": buy_hold_return,
+                              "excess_return": strategy_return - buy_hold_return,
+                              "ahead_bool": bool(strategy_return > buy_hold_return)})
+    return pd.DataFrame(row_dict_list)
+
+
 # FUNCTION: THE SAME PATH SUMMED BY CALENDAR QUARTER
 def get_performance_quarter_pdf(strategy_daily_return_pdf_in, buy_hold_daily_return_pdf_in):
     """

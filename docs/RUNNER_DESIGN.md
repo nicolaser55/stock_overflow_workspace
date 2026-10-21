@@ -69,10 +69,17 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 ## What the runner does around a run
 
 - **Candidates and selection:** each candidate is its own stream; periods, pooled prior-only selection and the
-  carried position are done once in shared code (no copies per experiment).
+  carried position are done once in shared code (no copies per experiment). Candidate-period scores are slices of
+  each candidate's continuous stream (result over the period's dates, including any position carried in), minus
+  buy-and-hold sliced the same way. exp01-exp03 and the old holdout scorer used fresh windows; their ports are
+  labelled protocol amendments, not pure re-runs. (Decided 2026-10-21.)
+- **Run guards:** a run refuses uncommitted changes in the code it uses, a missing or stale `VIEW.json`, and the
+  quarantine root; a resume refuses a checkpoint from a different commit or code hash. (Decided 2026-10-21.)
 - **Baselines:** buy-and-hold, constant exposure at the same average weight (daily rebalanced), and random timing
-  with the same number of switches. Random timing uses 100 fixed seeds; to count as ahead of it, a design must beat at
-  least 95% of the draws.
+  that places the path's non-base spells at random (same time at each weight; switch count may differ from the
+  path only at the two window edges). Random timing uses 100 fixed seeds; to count as ahead of it, a design must
+  beat at least 95% of the draws. Placing switches independently does not preserve exposure; shuffling run lengths
+  in place does not move a one-exit path. Neither is the baseline.
 - **Trial log:** rows are written as each candidate-period is scored, before any summary is shown. Trial ids are
   stable (built from the run, candidate and period), so a resumed run never logs the same trial twice. Tested with
   several processes writing at once.
