@@ -369,7 +369,8 @@ def get_report_markdown_str(report_dict_in):
     random_share_str = (get_report_float_str(baseline_dict["random_timing_beaten_share"])
                         if np.isfinite(baseline_dict["random_timing_beaten_share"]) else "n/a")
     line_list.append(
-        f"Random timing ({baseline_dict['random_timing_count']} seeds, "
+        f"Random timing ({baseline_dict['random_timing_count']} seeds; same time at each weight as the path; "
+        f"switch count may differ from the path only at the two window edges; path has "
         f"{baseline_dict['random_timing_switch_count']} switches): path above "
         f"{baseline_dict['random_timing_beaten_count']} of {baseline_dict['random_timing_count']} "
         f"({random_share_str}; need {get_report_float_str(baseline_dict['random_timing_min_share'])}): "

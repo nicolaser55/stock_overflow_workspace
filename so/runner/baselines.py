@@ -11,14 +11,17 @@ from so.runner.loop import run_engine_decisions_dict
 Runner Baselines (infrastructure step 4b-1b)
 
 Buy-and-hold, constant exposure at the prior-only path's average weight (rebalanced daily), and random timing with
-the path's time at each weight and the same number of switches. All three use the fractional-weight engine and the
-shared costs. Random timing uses config.RANDOM_SEED .. RANDOM_SEED + RUNNER_RANDOM_TIMING_SEED_COUNT - 1 (100 fixed
-seeds).
+the path's time at each weight. All three use the fractional-weight engine and the shared costs. Random timing uses
+config.RANDOM_SEED .. RANDOM_SEED + RUNNER_RANDOM_TIMING_SEED_COUNT - 1 (100 fixed seeds).
 
-A switch is a change in the filled target-weight sequence larger than NUMERIC_TOLERANCE. Random timing splits that
-sequence into runs (weight, length), keeps the run order of weights, and for each weight permutes the lengths among
-that weight's runs. The first run stays put when the path starts at the window's initial weight, so only the timing
-of later spells moves. Placing switches independently would not preserve exposure.
+A switch is a change in the filled target-weight sequence larger than NUMERIC_TOLERANCE. The base weight is the
+weight the path spends the most sessions at (first-seen on a tie). A spell is a maximal run of sessions not at the
+base weight; its internal weight sequence is kept. Each draw shuffles the spells and places them by splitting the
+base-weight sessions into k+1 gaps, uniformly over compositions with middle gaps at least 1 (spells never merge)
+and first and last gaps at least 0. Time at each weight is then the path's. The switch count may differ from the
+path's only at the two window edges (a spell sitting at the start or the end has one side that does not touch
+base). A path with no spells is returned unchanged. Shuffling run lengths in place does not move one-exit paths
+and is not the baseline.
 """
 
 
@@ -131,6 +134,154 @@ def get_weight_time_dict(target_weight_arr_in):
     return time_dict
 
 
+# FUNCTION: WHETHER TWO WEIGHTS MATCH AT THE NUMERIC TOLERANCE
+def get_weight_equal_bool(left_in, right_in):
+    """
+    Args:
+        left_in, right_in (float): Weights
+
+    Returns:
+        bool: True if they match
+    """
+    # THE SAME BAND AS A SWITCH
+    return abs(float(left_in) - float(right_in)) <= float(config.NUMERIC_TOLERANCE)
+
+
+# FUNCTION: THE WEIGHT THE PATH SPENDS THE MOST SESSIONS AT
+def get_base_weight_float(target_weight_arr_in):
+    """
+    First-seen unique weight among those with the maximum session count.
+
+    Args:
+        target_weight_arr_in (array-like): One target per window session
+
+    Returns:
+        float: Base weight (NaN if the path is empty)
+    """
+    # FIRST-SEEN WINS A TIE
+    unique_list = get_unique_weight_list(target_weight_arr_in)
+    if not unique_list:
+        return float("nan")
+    time_dict = get_weight_time_dict(target_weight_arr_in)
+    max_count = max(time_dict.values())
+    for weight in unique_list:
+        if time_dict[weight] == max_count:
+            return float(weight)
+    return float(unique_list[0])
+
+
+# FUNCTION: MAXIMAL NON-BASE SPELLS AND THE BASE-WEIGHT SESSION COUNT
+def get_non_base_spell_list(target_weight_arr_in, base_weight_in=None):
+    """
+    Each spell is the weight sequence of a maximal run of sessions not at the base weight.
+
+    Args:
+        target_weight_arr_in (array-like): One target per window session
+        base_weight_in (float | None): Base weight (None = get_base_weight_float)
+
+    Returns:
+        tuple: (list[list[float]] spells in path order, int base-weight session count)
+    """
+    # EMPTY PATHS HAVE NO SPELLS
+    filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
+    if len(filled_arr) == 0:
+        return [], 0
+    base_weight = float(get_base_weight_float(filled_arr) if base_weight_in is None else base_weight_in)
+    spell_list = []
+    current_list = None
+    base_count = 0
+    for weight in filled_arr:
+        if get_weight_equal_bool(weight, base_weight):
+            base_count += 1
+            if current_list is not None:
+                spell_list.append(current_list)
+                current_list = None
+        elif current_list is None:
+            current_list = [float(weight)]
+        else:
+            current_list.append(float(weight))
+    if current_list is not None:
+        spell_list.append(current_list)
+    return spell_list, int(base_count)
+
+
+# FUNCTION: k+1 GAP LENGTHS OVER THE BASE-WEIGHT SESSIONS
+def get_random_timing_gap_list(base_count_int_in, spell_count_int_in, rng_in):
+    """
+    Uniform over compositions of base_count_int_in into spell_count_int_in + 1 gaps. Middle gaps are at least 1
+    so spells never merge. First and last gaps are at least 0.
+
+    Args:
+        base_count_int_in (int): Sessions at the base weight
+        spell_count_int_in (int): Number of spells k
+        rng_in (np.random.Generator): Generator
+
+    Returns:
+        list[int]: k+1 gap lengths, summing to base_count_int_in
+    """
+    # NO SPELLS: ONE GAP HOLDING EVERY BASE SESSION
+    spell_count = int(spell_count_int_in)
+    base_count = int(base_count_int_in)
+    if spell_count <= 0:
+        return [base_count]
+    middle_min_int = max(spell_count - 1, 0)
+    if base_count < middle_min_int:
+        raise ValueError("not enough base-weight sessions to separate the spells.")
+    remainder_int = base_count - middle_min_int
+    part_count = spell_count + 1
+    if remainder_int == 0:
+        extra_list = [0] * part_count
+    elif part_count == 1:
+        extra_list = [remainder_int]
+    else:
+        cut_arr = np.sort(rng_in.choice(remainder_int + part_count - 1, size=part_count - 1, replace=False))
+        padded_arr = np.concatenate([[-1], cut_arr, [remainder_int + part_count - 1]])
+        extra_list = [int(value) for value in (np.diff(padded_arr) - 1)]
+    gap_list = list(extra_list)
+    for middle_idx in range(1, spell_count):
+        gap_list[middle_idx] += 1
+    return gap_list
+
+
+# FUNCTION: BASE-WEIGHT GAP LENGTHS OF A PLACED PATH
+def get_base_gap_list(target_weight_arr_in, base_weight_in=None):
+    """
+    First and last gaps may be 0. Middle gaps are the base-weight runs between spells.
+
+    Args:
+        target_weight_arr_in (array-like): One target per window session
+        base_weight_in (float | None): Base weight (None = get_base_weight_float)
+
+    Returns:
+        list[int]: spell_count + 1 gap lengths
+    """
+    # ONE GAP BEFORE EACH SPELL, THEN THE TRAILING GAP
+    filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
+    if len(filled_arr) == 0:
+        return []
+    base_weight = float(get_base_weight_float(filled_arr) if base_weight_in is None else base_weight_in)
+    spell_list, _base_count = get_non_base_spell_list(filled_arr, base_weight)
+    if len(spell_list) == 0:
+        return [int(len(filled_arr))]
+    gap_list = []
+    idx = 0
+    session_count = int(len(filled_arr))
+    for _spell in spell_list:
+        gap_int = 0
+        while idx < session_count and get_weight_equal_bool(filled_arr[idx], base_weight):
+            gap_int += 1
+            idx += 1
+        gap_list.append(int(gap_int))
+        while idx < session_count and not get_weight_equal_bool(filled_arr[idx], base_weight):
+            idx += 1
+    gap_int = 0
+    while idx < session_count and get_weight_equal_bool(filled_arr[idx], base_weight):
+        gap_int += 1
+        idx += 1
+    gap_list.append(int(gap_int))
+    return gap_list
+
+
 # FUNCTION: THE FIXED RANDOM-TIMING SEEDS
 def get_random_timing_seed_list(count_int_in=None):
     """
@@ -149,52 +300,39 @@ def get_random_timing_seed_list(count_int_in=None):
     return [int(config.RANDOM_SEED) + idx for idx in range(count_int)]
 
 
-# FUNCTION: A RANDOM TARGET-WEIGHT PATH THAT SHUFFLES SPELL LENGTHS
-def get_random_timing_weight_arr(target_weight_arr_in, seed_in, initial_weight_in=None):
+# FUNCTION: A RANDOM TARGET-WEIGHT PATH BY PLACING SPELLS
+def get_random_timing_weight_arr(target_weight_arr_in, seed_in):
     """
-    Same time at each weight and the same number of switches; only the timing of spells moves. Splits the filled
-    path into runs, keeps the run order of weights, and for each weight permutes the lengths among that weight's
-    runs. When the path starts at initial_weight_in (the window's opening weight; default = the path's first
-    weight), the first run keeps its length. One run, or one unique weight, returns the filled path.
+    Same time at each weight as the path. The switch count may differ from the path's only at the two window
+    edges. Base weight = the weight with the most sessions. Each spell is a maximal non-base run (internal
+    sequence kept). The draw shuffles the spells and places them at uniformly random non-overlapping positions:
+    the base-weight sessions are split into k+1 gaps (middle >= 1, first and last >= 0). A path with no spells
+    is returned unchanged.
 
     Args:
         target_weight_arr_in (array-like): Path targets
         seed_in (int): Generator seed
-        initial_weight_in (float | None): Window opening weight (None = the path's first weight)
 
     Returns:
         np.ndarray: One weight per session
     """
-    # FILL KEEP-NaN, THEN SPLIT INTO SPELLS
+    # NO SPELLS: THE PATH IS ALREADY THE BASE WEIGHT
     filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
-    run_list = get_weight_run_list(filled_arr)
-    if len(run_list) <= 1:
+    if len(filled_arr) == 0:
         return filled_arr
-    first_weight = float(run_list[0][0])
-    open_weight = first_weight if initial_weight_in is None else float(initial_weight_in)
-    freeze_first_bool = abs(first_weight - open_weight) <= float(config.NUMERIC_TOLERANCE)
-    unique_list = get_unique_weight_list(filled_arr)
-    idx_list_by_weight = {weight: [] for weight in unique_list}
-    for run_idx, (run_weight, _length_int) in enumerate(run_list):
-        for weight in unique_list:
-            if abs(run_weight - weight) <= float(config.NUMERIC_TOLERANCE):
-                idx_list_by_weight[weight].append(run_idx)
-                break
+    base_weight = get_base_weight_float(filled_arr)
+    spell_list, base_count = get_non_base_spell_list(filled_arr, base_weight)
+    if len(spell_list) == 0:
+        return filled_arr
     rng = np.random.default_rng(int(seed_in))
-    length_list = [int(length_int) for _weight, length_int in run_list]
-    for weight in unique_list:
-        shuffle_idx_list = list(idx_list_by_weight[weight])
-        if freeze_first_bool and shuffle_idx_list and shuffle_idx_list[0] == 0:
-            shuffle_idx_list = shuffle_idx_list[1:]
-        if len(shuffle_idx_list) <= 1:
-            continue
-        source_length_list = [length_list[run_idx] for run_idx in shuffle_idx_list]
-        perm_arr = rng.permutation(len(source_length_list))
-        for source_idx, run_idx in enumerate(shuffle_idx_list):
-            length_list[run_idx] = int(source_length_list[int(perm_arr[source_idx])])
+    order_arr = rng.permutation(len(spell_list))
+    placed_spell_list = [spell_list[int(idx)] for idx in order_arr]
+    gap_list = get_random_timing_gap_list(base_count, len(placed_spell_list), rng)
     out_list = []
-    for (run_weight, _old_length_int), length_int in zip(run_list, length_list):
-        out_list.extend([run_weight] * int(length_int))
+    for spell_idx, spell in enumerate(placed_spell_list):
+        out_list.extend([base_weight] * int(gap_list[spell_idx]))
+        out_list.extend(spell)
+    out_list.extend([base_weight] * int(gap_list[-1]))
     return np.asarray(out_list, dtype=float)
 
 
@@ -245,8 +383,8 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
     """
     Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean_weight
-    and rebalances daily (dead band 0). Random timing shuffles spell lengths (same time at each weight, same
-    switch count).
+    and rebalances daily (dead band 0). Random timing places the path's non-base spells at random (same time at
+    each weight; switch count may differ only at the two window edges).
 
     Args:
         ohlcv_array_dict_in (dict): Bars
@@ -275,7 +413,7 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
     constant_arr = np.full(session_count, mean_weight, dtype=float)
     constant_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, constant_arr, mean_weight, 0.0,
                                          initial_capital_in, entry_slippage_in, market_exit_slippage_in)
-    # RANDOM TIMING: SAME SWITCH COUNT BETWEEN THE SAME WEIGHTS, FIXED SEEDS
+    # RANDOM TIMING: SAME TIME AT EACH WEIGHT, SPELLS PLACED AT RANDOM, FIXED SEEDS
     seed_list = get_random_timing_seed_list(seed_count_int_in)
     random_return_list = []
     for seed_int in seed_list:
