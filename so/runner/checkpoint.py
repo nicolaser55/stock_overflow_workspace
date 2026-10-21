@@ -18,6 +18,7 @@ CHECKPOINT_FILE_STR = "checkpoint.pkl"
 DECISIONS_FILE_STR = "decisions.pkl"
 SCORES_FILE_STR = "scores.pkl"
 DONE_FILE_STR = "done.marker"
+IDENTITY_FILE_STR = "identity.pkl"
 
 
 # FUNCTION: THE RUNS ROOT UNDER THE EXPERIMENT ZONE
@@ -238,6 +239,39 @@ def write_done_marker(run_id_str_in, candidate_token_str_in):
     make_folder(os.path.dirname(file_path_str))
     with open(file_path_str, "w", encoding="utf-8") as done_file:
         done_file.write("done\n")
+
+
+# FUNCTION: WRITE THE RUN IDENTITY (COMMIT AND CODE HASH)
+def write_run_identity_dict(run_id_str_in, identity_dict_in):
+    """
+    One pickle at the run folder root. Written once when the run starts.
+
+    Args:
+        run_id_str_in (str): Run id
+        identity_dict_in (dict): commit_str, code_hash_str
+
+    Returns:
+        None
+    """
+    # THE PARENT CHECKS THIS BEFORE ANY WORKER RUNS
+    file_path_str = os.path.join(get_run_folder_str(run_id_str_in), IDENTITY_FILE_STR)
+    write_pickle(file_path_str, dict(identity_dict_in))
+
+
+# FUNCTION: READ THE RUN IDENTITY
+def read_run_identity_dict(run_id_str_in):
+    """
+    Args:
+        run_id_str_in (str): Run id
+
+    Returns:
+        dict | None: commit_str and code_hash_str, or None if the run has not started
+    """
+    # A FRESH RUN ID HAS NO FILE
+    file_path_str = os.path.join(get_run_folder_str(run_id_str_in), IDENTITY_FILE_STR)
+    if not get_file_exists_bool(file_path_str):
+        return None
+    return read_pickle(file_path_str)
 
 
 # FUNCTION: WHETHER A CANDIDATE STREAM HAS FINISHED

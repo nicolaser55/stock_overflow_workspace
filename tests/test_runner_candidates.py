@@ -39,13 +39,14 @@ from temporary_data_root import assert_temporary_data_root
 assert_temporary_data_root()
 # IMPORT THE SHARED MODULES
 from so import paths
-from so.core.holdout import NO_WINDOW_MESSAGE_STR
+from so.core.holdout import NO_WINDOW_MESSAGE_STR, VIEW_STALE_MESSAGE_STR
 from so.core.trial_log import read_trial_log_pdf, TRIAL_LOG_COLUMN_LIST
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.core.datetime_utils import get_date_range_market_schedule_pdf
 from so.runner import (run_development_dict, run_daily_dict, run_engine_decisions_dict, get_trial_id_str,
                        get_runner_selection_pdf, get_governing_candidate_dict, check_quarantine_refused,
-                       get_development_run_period_pdf)
+                       get_development_run_period_pdf, check_clean_tree, RESUME_IDENTITY_MESSAGE_STR,
+                       CLEAN_TREE_MESSAGE_STR)
 from so.runner.engine import get_decision_dict
 from so.paths import QUARANTINE_REFUSED_MESSAGE_STR
 from so.runner.run import log_candidate_period_trial_dict, get_candidate_token_str
@@ -219,7 +220,9 @@ def test_missing_window_is_refused():
     ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
     raised_bool = False
     try:
-        run_development_dict(cand_design, ohlcv_array_dict, n_jobs_int_in=1, trial_log_path_str_in=get_test_trial_log_path_str("missing_window.csv"))
+        run_development_dict(cand_design, ohlcv_array_dict, n_jobs_int_in=1,
+                             trial_log_path_str_in=get_test_trial_log_path_str("missing_window.csv"),
+                             check_clean_tree_bool_in=False, check_view_bool_in=False)
     except ValueError as error:
         raised_bool = NO_WINDOW_MESSAGE_STR in str(error)
     assert raised_bool, "run_development_dict accepted a missing holdout window"
@@ -227,15 +230,18 @@ def test_missing_window_is_refused():
 
 
 # FUNCTION: A SHORT SYNTHETIC RUN
-def run_short_dict(n_jobs_int_in, run_id_str_in, trial_log_path_str_in, crash_after_period_id_in=None):
+def run_short_dict(n_jobs_int_in, run_id_str_in, trial_log_path_str_in, crash_after_period_id_in=None,
+                   commit_str_in="testcommit", code_hash_str_in=None):
     """
-    Three injected periods on a few weeks of synthetic bars.
+    Three injected periods on a few weeks of synthetic bars. Tests bypass the clean-tree and VIEW.json guards.
 
     Args:
         n_jobs_int_in (int): Process count
         run_id_str_in (str): Run id
         trial_log_path_str_in (str): Trial log
         crash_after_period_id_in (int | None): Crash hook
+        commit_str_in (str): Injected commit
+        code_hash_str_in (str | None): Injected code hash (None = hash the files)
 
     Returns:
         dict: run_development_dict output plus ohlcv_array_dict
@@ -246,7 +252,9 @@ def run_short_dict(n_jobs_int_in, run_id_str_in, trial_log_path_str_in, crash_af
     period_pdf = get_injected_period_pdf(ohlcv_array_dict["session_date_list"])
     result_dict = run_development_dict(cand_design, ohlcv_array_dict, run_id_str_in=run_id_str_in, n_jobs_int_in=n_jobs_int_in,
                                        period_pdf_in=period_pdf, trial_log_path_str_in=trial_log_path_str_in,
-                                       commit_str_in="testcommit", crash_after_period_id_in=crash_after_period_id_in)
+                                       commit_str_in=commit_str_in, code_hash_str_in=code_hash_str_in,
+                                       crash_after_period_id_in=crash_after_period_id_in,
+                                       check_clean_tree_bool_in=False, check_view_bool_in=False)
     result_dict["ohlcv_array_dict"] = ohlcv_array_dict
     return result_dict
 
@@ -319,6 +327,7 @@ def test_killed_run_resumes():
     # THE FIRST CANDIDATE WAS CHECKPOINTED AT PERIOD 0 BEFORE THE CRASH
     first_checkpoint_dict = read_checkpoint_dict("resume_run", get_candidate_token_str(cand_design.CANDIDATE_LIST[0]))
     assert first_checkpoint_dict is not None and int(first_checkpoint_dict["period_id"]) == 0
+    assert first_checkpoint_dict.get("commit_str") == "testcommit" and first_checkpoint_dict.get("code_hash_str")
     resumed_dict = run_short_dict(1, "resume_run", crash_log_str)
     clean_log_str = get_test_trial_log_path_str("resume_clean_trial_log.csv")
     clean_dict = run_short_dict(1, "resume_clean_run", clean_log_str)
@@ -453,6 +462,119 @@ def test_trial_row_carries_commit_and_hash():
     passed("each trial row carries the commit, the design-folder hash and a stable trial id")
 
 
+# FUNCTION: RESUME AFTER A CODE CHANGE IS REFUSED
+def test_resume_after_code_change_is_refused():
+    """
+    Crash after period 0. Resume the same run id with a different commit, then with a different code hash. Both raise
+    and tell the caller to start a new run id.
+
+    Returns:
+        None
+    """
+    # DIFFERENT COMMIT
+    commit_log_str = get_test_trial_log_path_str("resume_commit_change.csv")
+    crashed_bool = False
+    try:
+        run_short_dict(1, "resume_commit_change", commit_log_str, crash_after_period_id_in=0, commit_str_in="commit_a")
+    except RuntimeError as error:
+        crashed_bool = "runner crash after period 0" in str(error)
+    assert crashed_bool, "the crash hook did not fire"
+    commit_raised_bool = False
+    try:
+        run_short_dict(1, "resume_commit_change", commit_log_str, commit_str_in="commit_b")
+    except RuntimeError as error:
+        commit_raised_bool = RESUME_IDENTITY_MESSAGE_STR in str(error)
+    assert commit_raised_bool, "a different commit was allowed to resume"
+    # DIFFERENT CODE HASH
+    hash_log_str = get_test_trial_log_path_str("resume_hash_change.csv")
+    crashed_bool = False
+    try:
+        run_short_dict(1, "resume_hash_change", hash_log_str, crash_after_period_id_in=0, code_hash_str_in="hash_a")
+    except RuntimeError as error:
+        crashed_bool = "runner crash after period 0" in str(error)
+    assert crashed_bool, "the crash hook did not fire"
+    hash_raised_bool = False
+    try:
+        run_short_dict(1, "resume_hash_change", hash_log_str, code_hash_str_in="hash_b")
+    except RuntimeError as error:
+        hash_raised_bool = RESUME_IDENTITY_MESSAGE_STR in str(error)
+    assert hash_raised_bool, "a different code hash was allowed to resume"
+    passed("resume after a code change is refused")
+
+
+# FUNCTION: A DIRTY so/ IS REFUSED
+def test_dirty_so_is_refused():
+    """
+    git status lines under so/ or the design folder refuse. Untracked files elsewhere are allowed.
+
+    Returns:
+        None
+    """
+    # THE DESIGN FILE LIVES IN tests/
+    design_folder_str = os.path.dirname(os.path.abspath(cand_design.__file__))
+    so_raised_bool = False
+    try:
+        check_clean_tree(design_folder_str, porcelain_str_in=" M so/runner/run.py\n")
+    except RuntimeError as error:
+        so_raised_bool = CLEAN_TREE_MESSAGE_STR in str(error) and "so/runner/run.py" in str(error)
+    assert so_raised_bool, "a dirty so/ was accepted"
+    design_raised_bool = False
+    try:
+        check_clean_tree(design_folder_str, porcelain_str_in="?? tests/extra.py\n")
+    except RuntimeError as error:
+        design_raised_bool = CLEAN_TREE_MESSAGE_STR in str(error)
+    assert design_raised_bool, "a dirty design folder was accepted"
+    check_clean_tree(design_folder_str, porcelain_str_in="?? scripts/foo.py\n")
+    check_clean_tree(design_folder_str, porcelain_str_in="")
+    passed("a dirty so/ is refused")
+
+
+# FUNCTION: A MISSING OR MISMATCHED VIEW.json IS REFUSED
+def test_missing_or_mismatched_view_is_refused():
+    """
+    check_development_view at the start of run_development_dict. Tests that inject periods still hit this when
+    check_view_bool_in is True.
+
+    Returns:
+        None
+    """
+    # INJECTED PERIODS, NO VIEW.json
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-22", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    period_pdf = get_injected_period_pdf(ohlcv_array_dict["session_date_list"])
+    view_path_str = os.path.join(TEMP_ROOT_STR, "VIEW.json")
+    if os.path.isfile(view_path_str):
+        os.remove(view_path_str)
+    missing_raised_bool = False
+    try:
+        run_development_dict(cand_design, ohlcv_array_dict, run_id_str_in="view_missing", n_jobs_int_in=1,
+                             period_pdf_in=period_pdf, trial_log_path_str_in=get_test_trial_log_path_str("view_missing.csv"),
+                             check_clean_tree_bool_in=False, check_view_bool_in=True)
+    except ValueError as error:
+        missing_raised_bool = str(error) == VIEW_STALE_MESSAGE_STR
+    assert missing_raised_bool, "a missing VIEW.json was accepted"
+    # A STAMP FOR A DIFFERENT WINDOW
+    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
+    window_start = session_date_list[-1]
+    pd.DataFrame([{"window_id": "wview", "status": "active", "start": window_start, "end": window_start,
+                   "session_count": 1, "months_covered": 12.0, "opened_ts": "", "opened_by": "test",
+                   "data_last_session_at_open": window_start, "retired_ts": "", "retire_reason": ""}]).to_csv(
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR, index=False)
+    with open(view_path_str, "w", encoding="utf-8") as view_file:
+        json.dump({"window_start": "1999-01-04"}, view_file)
+    mismatch_raised_bool = False
+    try:
+        run_development_dict(cand_design, ohlcv_array_dict, run_id_str_in="view_mismatch", n_jobs_int_in=1,
+                             period_pdf_in=period_pdf, trial_log_path_str_in=get_test_trial_log_path_str("view_mismatch.csv"),
+                             check_clean_tree_bool_in=False, check_view_bool_in=True)
+    except ValueError as error:
+        mismatch_raised_bool = str(error) == VIEW_STALE_MESSAGE_STR
+    assert mismatch_raised_bool, "a mismatched VIEW.json was accepted"
+    if os.path.isfile(view_path_str):
+        os.remove(view_path_str)
+    passed("a missing or mismatched VIEW.json is refused")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
@@ -466,6 +588,9 @@ if __name__ == "__main__":
         test_concurrent_stable_trial_rows()
         test_parallel_matches_single_process()
         test_trial_row_carries_commit_and_hash()
+        test_resume_after_code_change_is_refused()
+        test_dirty_so_is_refused()
+        test_missing_or_mismatched_view_is_refused()
         print("\nAll runner candidate tests passed ✅")
     finally:
         paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REAL_WINDOWS_PATH_STR
