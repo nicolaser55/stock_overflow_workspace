@@ -1193,7 +1193,8 @@ def test_holdout_flag_scan():
     # FAIL WHEN THE ARGUMENT APPEARS ANYWHERE ELSE
     assert offender_list == []
     # THE QUARANTINE ROOT MAY BE NAMED ONLY IN THE PATHS MODULE, THE EVALUATION LOADER, THE EVALUATION SCRIPT AND TESTS
-    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "scripts/holdout_evaluate.py", "scripts/refresh_development_view.py"}
+    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "so/runner/run.py", "scripts/holdout_evaluate.py",
+                              "scripts/refresh_development_view.py"}
     quarantine_offender_list = []
     for root_str, dir_list, file_list in os.walk(WORKSPACE_PATH_STR):
         dir_list[:] = [dir_name for dir_name in dir_list if dir_name not in {".git", "venv-main", "__pycache__", "logs"}]
@@ -1209,7 +1210,7 @@ def test_holdout_flag_scan():
                 if needle_str in text:
                     quarantine_offender_list.append(f"{rel_str}: {needle_str}")
     assert quarantine_offender_list == []
-    passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests; quarantine root only in paths, holdout, the evaluation script and tests")
+    passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests; quarantine root only in paths, holdout, the runner, the evaluation script and tests")
 
 # FUNCTION: TEST SLIDING THE ACTIVE WINDOW
 def test_slide_window():

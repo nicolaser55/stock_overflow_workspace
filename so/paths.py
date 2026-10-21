@@ -74,13 +74,13 @@ def get_data_root_str():
 
 # THE MESSAGE WHEN A DEVELOPMENT RUN SEES THE QUARANTINE ROOT
 QUARANTINE_REFUSED_MESSAGE_STR = ("development runner refuses the quarantine root (SO_QUARANTINE_PATH). "
-                                  "Holdout evaluation is 4b-1c.")
+                                  "Holdout evaluation is 4b-1d.")
 
 
 # FUNCTION: REFUSE THE QUARANTINE ROOT IN DEVELOPMENT CODE
 def check_quarantine_refused():
     """
-    The development runner does not read the complete data tree. Holdout evaluation is 4b-1c.
+    The development runner does not read the complete data tree. Holdout evaluation is 4b-1d.
 
     Args:
         None

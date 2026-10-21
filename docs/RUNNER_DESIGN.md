@@ -104,6 +104,9 @@ a sanity check: about 80 sessions are too few to pass or fail a design. The sepa
 is retired once the runner is calibrated, so the development result and the holdout result always come from one code
 path.
 
+Implemented 2026-10-21 on `agent/infra-04b1d-holdout`: `so.runner.run_holdout_dict`. `scripts/holdout_evaluate.py`
+uses it when the design has `get_candidate_design`, and keeps the old replay for designs not yet ported.
+
 ## What a new experiment writes
 
 `PROTOCOL.md`, `config.py`, and one `design.py` with: the candidate list, the declared sources, the engine and its
@@ -115,7 +118,7 @@ replay, selection, baseline or report code.
 - 4a: the view and the daily streaming loop, the engine interface with the fractional engine, tests that a design
   reading ahead cannot.
 - 4b, part 1: candidates, selection, baselines, trial logging, checkpoints, parallel runs, report, verdict, manifest,
-  and the holdout evaluation through the runner.
+  look-ahead, and the holdout evaluation through the runner (`run_holdout_dict`; replay fallback until 4c).
 - 4b, part 2: minute mode (row checks, row-local signal with the shuffle check, model scoring windows) and the barrier
   and trailing-stop engines, each matching its existing simulator exactly on tests.
 - 4c: the template rewritten on it; exp04 (daily) ported as a calibration against its saved v2 results, then exp02

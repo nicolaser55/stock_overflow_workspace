@@ -55,10 +55,12 @@ EVALUATION_COLUMN_LIST = ["window_id", "design_id", "experiment_name", "design_h
                           "unread_start", "unread_session_count", "unread_total_return", "unread_buy_hold_total_return"]
 # DEFINE THE MESSAGE WHEN NO WINDOW IS REGISTERED
 NO_WINDOW_MESSAGE_STR = "no holdout window registered: Nicolas must run scripts/holdout_window.py open"
-# DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation, AND WHILE THE QUARANTINE WINDOW-END LOAD IS IN PROGRESS)
+# DEFINE THE RUNNER FLAG (SET INSIDE run_holdout_evaluation / run_holdout_dict, AND WHILE THE QUARANTINE WINDOW-END LOAD IS IN PROGRESS)
 _RUNNER_ACTIVE_BOOL = False
 # DEFINE THE MESSAGE WHEN THE DEVELOPMENT VIEW STAMP IS MISSING OR DOES NOT MATCH THE ACTIVE WINDOW
 VIEW_STALE_MESSAGE_STR = "development view is missing or stale: Nicolas must run the refresh"
+# DEFINE THE LABEL ON THE NEVER-READ TAIL OF A HOLDOUT WINDOW (AFTER PRIOR_READ_LAST_DATE_STR)
+UNREAD_SANITY_CHECK_STR = "sanity check: too few sessions to pass or fail a design"
 
 """
 Dates And The Registry
@@ -422,13 +424,28 @@ def get_development_end_date(embargo_sessions_in, session_date_list_in):
 # FUNCTION: WHETHER THE HOLDOUT RUNNER IS ACTIVE
 def get_runner_active_bool():
     """
-    True inside run_holdout_evaluation and while the evaluation loader is reading the quarantine root.
+    True inside run_holdout_evaluation / run_holdout_dict and while the evaluation loader is reading the quarantine root.
 
     Returns:
         bool: Runner flag
     """
     # RETURN THE FLAG
     return bool(_RUNNER_ACTIVE_BOOL)
+
+# FUNCTION: SET THE HOLDOUT RUNNER FLAG
+def set_runner_active_bool(active_bool_in):
+    """
+    Sets the runner-scope flag so the window itself is readable and the day after it is not.
+
+    Args:
+        active_bool_in (bool): True while a holdout evaluation is running
+
+    Returns:
+        None
+    """
+    # STORE THE FLAG FOR THE LOADERS AND THE BOUNDARY
+    global _RUNNER_ACTIVE_BOOL
+    _RUNNER_ACTIVE_BOOL = bool(active_bool_in)
 
 # FUNCTION: GET THE DATE A REPLAY OR A LOADER MAY NOT REACH
 def get_replay_boundary_date(pinned_date_in=None):
@@ -1441,25 +1458,49 @@ def get_holdout_report_dict(design_module_in, ohlcv_array_dict_in, window_dict_i
                    "average_share_purged": refit_report_dict["mean_share_purged"],
                    "turnover": turnover_float, "candidate_switches": switch_count}
     # THE UNREAD FIELDS ARE THE REPORTED SESSIONS AFTER THE LAST PROTOCOL-1.0 LOAD
-    prior_read_date = get_date(config.PRIOR_READ_LAST_DATE_STR)
-    unread_pdf = holdout_pdf[holdout_pdf["date"] > prior_read_date].copy()
-    if len(unread_pdf) == 0:
-        report_dict["unread_start"] = np.nan
-        report_dict["unread_session_count"] = np.nan
-        report_dict["unread_total_return"] = np.nan
-        report_dict["unread_buy_hold_total_return"] = np.nan
-    else:
-        unread_start_date = unread_pdf["date"].iloc[0]
-        unread_prior_pdf = holdout_pdf[holdout_pdf["date"] < unread_start_date]
-        unread_base_float = float(unread_prior_pdf["equity"].iloc[-1]) if len(unread_prior_pdf) else config.INITIAL_CAPITAL
-        unread_pdf["equity"] = unread_pdf["equity"] * (config.INITIAL_CAPITAL / unread_base_float)
-        unread_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, unread_start_date, end_date)
-        report_dict["unread_start"] = unread_start_date
-        report_dict["unread_session_count"] = int(len(unread_pdf))
-        report_dict["unread_total_return"] = get_equity_total_return_float(unread_pdf)
-        report_dict["unread_buy_hold_total_return"] = unread_buy_hold_dict["metric_dict"]["total_return"]
+    report_dict.update(get_unread_report_dict(holdout_pdf, ohlcv_array_dict_in, end_date))
     return {"report_dict": report_dict, "daily_equity_pdf": holdout_pdf, "buy_hold_equity_pdf": buy_hold_dict["daily_equity_pdf"],
             "refit_log_pdf": holdout_refit_pdf}
+
+# FUNCTION: THE NEVER-READ TAIL OF A REPORTED HOLDOUT SPAN
+def get_unread_report_dict(holdout_equity_pdf_in, ohlcv_array_dict_in, end_date_in):
+    """
+    Sessions after PRIOR_READ_LAST_DATE_STR. Equity is rebased to the initial capital at the first unread session.
+    Empty when the reported span does not go past that date. The label is always the sanity-check sentence: that
+    tail is too short to pass or fail a design.
+
+    Args:
+        holdout_equity_pdf_in (pd.DataFrame): Reported-span equity (date, equity)
+        ohlcv_array_dict_in (dict): Bars
+        end_date_in (datetime.date | str): Last reported session
+
+    Returns:
+        dict: unread_start, unread_session_count, unread_total_return, unread_buy_hold_total_return, label_str
+    """
+    # IMPORT BUY-AND-HOLD HERE
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    # DATES ARE NORMALISED SO A TIMESTAMP COLUMN STILL CUTS
+    prior_read_date = get_date(config.PRIOR_READ_LAST_DATE_STR)
+    equity_pdf = holdout_equity_pdf_in.copy()
+    equity_pdf["date"] = equity_pdf["date"].map(get_date)
+    unread_pdf = equity_pdf[equity_pdf["date"] > prior_read_date].copy()
+    unread_dict = {"label_str": UNREAD_SANITY_CHECK_STR}
+    if len(unread_pdf) == 0:
+        unread_dict["unread_start"] = np.nan
+        unread_dict["unread_session_count"] = np.nan
+        unread_dict["unread_total_return"] = np.nan
+        unread_dict["unread_buy_hold_total_return"] = np.nan
+        return unread_dict
+    unread_start_date = unread_pdf["date"].iloc[0]
+    unread_prior_pdf = equity_pdf[equity_pdf["date"] < unread_start_date]
+    unread_base_float = float(unread_prior_pdf["equity"].iloc[-1]) if len(unread_prior_pdf) else config.INITIAL_CAPITAL
+    unread_pdf["equity"] = unread_pdf["equity"] * (config.INITIAL_CAPITAL / unread_base_float)
+    unread_buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, unread_start_date, get_date(end_date_in))
+    unread_dict["unread_start"] = unread_start_date
+    unread_dict["unread_session_count"] = int(len(unread_pdf))
+    unread_dict["unread_total_return"] = get_equity_total_return_float(unread_pdf)
+    unread_dict["unread_buy_hold_total_return"] = unread_buy_hold_dict["metric_dict"]["total_return"]
+    return unread_dict
 
 # FUNCTION: RUN THE TRUNCATION TEST
 def get_lookahead_failure_str(design_module_in, ohlcv_array_dict_in, window_dict_in, full_result_dict_in, data_context_in=None):

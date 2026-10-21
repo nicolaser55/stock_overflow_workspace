@@ -78,20 +78,21 @@ def get_json_value(value_in):
     return str(value_in)
 
 
-# FUNCTION: THE VIEW.json STAMP IN THE DEVELOPMENT DATA ROOT
-def get_view_stamp_dict():
+# FUNCTION: THE VIEW.json STAMP IN A DATA ROOT
+def get_view_stamp_dict(root_str_in=None):
     """
     window_start and built_ts when VIEW.json is present and readable. None when the file is missing. A broken file
     is None as well: the run guard check_development_view already refused a stale stamp when that check is on.
 
     Args:
-        None
+        root_str_in (str | None): Data root (None = the development SO_DATA_PATH root)
 
     Returns:
         dict | None: Stamp fields, or None
     """
-    # THE STAMP LIVES IN THE DEVELOPMENT VIEW, NOT IN THE QUARANTINE
-    view_path_str = paths.get_data_root_str() + "VIEW.json"
+    # THE CALLER PASSES THE QUARANTINE ROOT ON A HOLDOUT RUN; DEVELOPMENT LEAVES THIS AT THE VIEW
+    root_str = paths.get_data_root_str() if root_str_in is None else str(root_str_in)
+    view_path_str = root_str.rstrip("\\/") + "/VIEW.json"
     if not os.path.isfile(view_path_str):
         return None
     try:
@@ -389,6 +390,13 @@ def get_report_markdown_str(report_dict_in):
             line_list.append("fail.")
     else:
         line_list.append(f"{look_ahead_dict['status_str']}.")
+    unread_dict = report_dict_in.get("unread_dict") or {}
+    if unread_dict:
+        line_list.extend(["", "### Never-read tail", ""])
+        count_value = unread_dict.get("unread_session_count")
+        count_int = 0 if count_value is None or (isinstance(count_value, float) and not np.isfinite(count_value)) else int(count_value)
+        label_str = str(unread_dict.get("label_str") or "")
+        line_list.append(f"{label_str} ({count_int} sessions).")
     line_list.append("")
     return "\r\n".join(line_list)
 
