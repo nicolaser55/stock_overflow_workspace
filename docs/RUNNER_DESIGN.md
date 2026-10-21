@@ -20,11 +20,16 @@ the design is called, not checked afterwards.
 
 Engines, each ported from the existing simulator and required to reproduce it exactly on tests:
 
-| Engine | Ported from | First user |
-|---|---|---|
-| Fractional weight (costs, dead band, integer shares) | `so.core.fractional_exposure` | exp04-exp07 |
-| Barrier trades (take-profit, stop-loss, time exit) | `so.core.trade_execution`, `so.core.backtest_simulation` | exp01 |
-| Trailing stop and re-entry | `so.core.reentry_simulation` | exp02 |
+| Engine | Ported from | First user | Status |
+|---|---|---|---|
+| Fractional weight (costs, dead band, integer shares) | `so.core.fractional_exposure` | exp04-exp07 | 4a |
+| Barrier trades (take-profit, stop-loss, time exit) | `so.core.trade_execution`, `so.core.backtest_simulation` | exp01 | 4b-2a (`BarrierEngine`; daily mode now, minute mode 4b-2b) |
+| Trailing stop and re-entry | `so.core.reentry_simulation` | exp02 | 4b-2a (`TrailingStopEngine`; daily mode with a minute-checked stop) |
+
+The view carries a read-only copy of the engine state as of the decision moment (`in_position`, `share_count`,
+`last_exit_session`, `last_exit_reason`, `cash_session_count`). A design learns of a stop-out only at its next
+decision. The engine never shows the design anything after that moment. A design module names its engine with
+`ENGINE_NAME` (`fractional`, `trailing_stop`, `barrier`).
 
 An idea that needs new stateful logic gets a new engine (an infrastructure change, reviewed like any other) or runs
 in the slow strict daily mode.
@@ -119,7 +124,10 @@ replay, selection, baseline or report code.
   reading ahead cannot.
 - 4b, part 1: candidates, selection, baselines, trial logging, checkpoints, parallel runs, report, verdict, manifest,
   look-ahead, and the holdout evaluation through the runner (`run_holdout_dict`; replay fallback until 4c).
-- 4b, part 2: minute mode (row checks, row-local signal with the shuffle check, model scoring windows) and the barrier
-  and trailing-stop engines, each matching its existing simulator exactly on tests.
+- 4b, part 2a (this branch): the barrier and trailing-stop engines, each matching its existing simulator exactly on
+  tests. Numba session loops. Engine-state snapshot on the view. Daily mode drives both; the 4b-1 stream, checkpoint,
+  look-ahead and verdict machinery is unchanged.
+- 4b, part 2b: minute mode (row checks, row-local signal with the shuffle check, model scoring windows), calling the
+  same barrier engine with minute-level decisions.
 - 4c: the template rewritten on it; exp04 (daily) ported as a calibration against its saved v2 results, then exp02
   (trailing-stop engine); differences explained before anything else is ported.

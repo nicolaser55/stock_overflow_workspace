@@ -139,6 +139,29 @@ Every new version is labelled **re-run under the new rules, not new evidence**: 
 data. No holdout evaluation is run by the agent. The exp05 version is prepared so Nicolas can run an end-to-end
 evaluation himself. No further version may follow from these results.
 
+## Infrastructure 4b-2a (2026-10-21): barrier and trailing-stop engines
+
+On `agent/infra-04b2a-engines` from main. Not merged. Synthetic tests only (`tests/test_runner_engines.py`). No
+real-data run, no holdout window, no shared trial-log row.
+
+- **Implemented:** `TrailingStopEngine` matches `so.core.reentry_simulation.simulate_stop_reentry_dict` (minute
+  trailing stop, fills, re-entry at the fill bar, costs, max-cash-sessions, cooling-off, fresh-exit). `BarrierEngine`
+  matches `so.core.trade_execution.resolve_barrier_exit_dict` and
+  `so.core.backtest_simulation.simulate_decision_trading_dict` (entry at the fill bar, take-profit / stop-loss / time
+  exit, same-bar SL-wins, slippage and fees, one position). Per-session bar loops are numba (`get_trailing_stop_hit_tuple`,
+  `get_barrier_exit_tuple`). The view holds a read-only engine-state copy as of the decision moment. `ENGINE_NAME` on
+  the design module selects the engine. 4b-1 streams, checkpoints, look-ahead and verdict are unchanged.
+- **Observed (synthetic):** exact match of trades, exit reasons, equity and metrics on random decision streams
+  covering delay, k-array, exit signal, cooling-off, fresh-exit, no-stop, same-bar take-profit/stop-loss, and a short
+  (half-day) session. A design sees a stop-out only from the next decision on. Look-ahead passed for a trailing-stop
+  design and a barrier design. Checkpoint and resume matched a clean run for both. Speed on 4 synthetic years, one
+  candidate, printed by the full suite log `logs/test_all_4b2a.out`: trailing old 0.460 s vs engine 0.086 s; barrier
+  old 0.033 s vs engine 0.063 s.
+- **Packages:** `numba==0.61.2` and `llvmlite==0.44.0` added to `requirements/venv_main_requirements.txt` and installed
+  in `venv-main` (numpy 2.1.3, Python 3.12). Compatible with the pinned numpy; no other package was upgraded or
+  removed.
+- **Status:** CONTINUE to 4b-2b (minute mode). This is infrastructure, not an experiment result.
+
 ## Port queue, 2026-10-13 (development finished; calibrations and exp01 did not)
 
 The queue in `logs/port_queue_status.csv` ran from 2026-10-13T01:01:15 to 2026-10-13T06:17:33. `logs/port_queue.err` and `logs/port_queue.out` are empty. Trial-log counts below are from `read_trial_log_pdf()` on 2026-10-13. Headline returns of the six finished development notebooks are in those notebooks and are not copied here.

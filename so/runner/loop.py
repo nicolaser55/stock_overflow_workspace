@@ -21,7 +21,9 @@ Daily Streaming Loop (infrastructure step 4a, stream pause in 4b-1a)
 
 Walks one decision moment at a time (end of the 15:58 bar; fill at the 15:59 open). Before each decide() it copies
 new bars into empty-started buffers up to that bar, advances each declared source in clock order, and hands the
-design a view that slices those buffers. The last session has no design call; the engine sells at the last close.
+design a view that slices those buffers. Before each decide() it processes bars of the session through the decision bar so a stop-out is on the view
+as of that moment, then fills at 15:59, then processes the rest of the session. The last session has no design
+call; remaining bars are processed and the engine sells at the last close.
 
 The engine sees bar prices from the runner's full arrays (trusted shared code). The design never does. The runner
 does not load files and does not call so.core.holdout; the caller hands it bar arrays and a DataContext already
@@ -31,8 +33,7 @@ A candidate stream (4b-1a) uses DailyLoop: run_through_date stops at a period en
 restores the design and the engine, and buffers are warmed by copying bars without calling decide(). Direct loader
 calls are blocked for the duration of each run_through_date. The design file is AST-checked before the first call.
 
-Minute mode (MODE_MINUTE_STR) is 4b-2: row-local signals, a shuffle check, barrier and trailing-stop engines. This
-module only runs daily mode.
+Minute mode (MODE_MINUTE_STR) is 4b-2b. Daily mode drives the fractional, barrier and trailing-stop engines.
 """
 
 # DAILY MODE IS 4A; MINUTE MODE IS 4B
@@ -72,6 +73,53 @@ def get_empty_daily_result_dict():
     # NOTHING WAS TRADED
     return {"trade_pdf": pd.DataFrame(), "daily_equity_pdf": pd.DataFrame(), "metric_dict": {},
             "target_weight_arr": np.array([], dtype=float), "decision_session_list": [], "decision_dict_list": []}
+
+
+# FUNCTION: A BAR-RANGE EVENT FOR process_bars
+def get_bar_range_event_dict(ohlcv_array_dict_in, start_idx_in, end_idx_in, session_date_in):
+    """
+    Inclusive range. None when the range is empty.
+
+    Args:
+        ohlcv_array_dict_in (dict): Full bar arrays
+        start_idx_in, end_idx_in (int): First and last bar
+        session_date_in: Session date of this range
+
+    Returns:
+        dict | None: bar_idx_arr, timestamp_index, open/high/low/close arrays, session_date
+    """
+    # EMPTY RANGE
+    start_idx, end_idx = int(start_idx_in), int(end_idx_in)
+    if end_idx < start_idx:
+        return None
+    return {"bar_idx_arr": np.arange(start_idx, end_idx + 1, dtype=np.int64),
+            "timestamp_index": ohlcv_array_dict_in["timestamp_index"][start_idx:end_idx + 1],
+            "open_arr": ohlcv_array_dict_in["open_arr"][start_idx:end_idx + 1],
+            "high_arr": ohlcv_array_dict_in["high_arr"][start_idx:end_idx + 1],
+            "low_arr": ohlcv_array_dict_in["low_arr"][start_idx:end_idx + 1],
+            "close_arr": ohlcv_array_dict_in["close_arr"][start_idx:end_idx + 1],
+            "session_date": session_date_in}
+
+
+# FUNCTION: THE FILL EVENT THE ENGINE SEES AT 15:59
+def get_fill_event_dict(ohlcv_array_dict_in, fill_idx_in, decision_idx_in, session_idx_in, session_date_in, end_idx_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Full bar arrays
+        fill_idx_in, decision_idx_in, session_idx_in, end_idx_in (int): Indexes
+        session_date_in: Session date
+
+    Returns:
+        dict: bar_idx, timestamp, raw_price, close, decision_ts, session_idx, session_date, session_end_idx
+    """
+    # THE FILL IS THE OPEN; THE DECISION TIMESTAMP IS THE DECISION BAR
+    fill_idx, decision_idx = int(fill_idx_in), int(decision_idx_in)
+    timestamp_index = ohlcv_array_dict_in["timestamp_index"]
+    return {"bar_idx": fill_idx, "timestamp": timestamp_index[fill_idx],
+            "raw_price": float(ohlcv_array_dict_in["open_arr"][fill_idx]),
+            "close": float(ohlcv_array_dict_in["close_arr"][fill_idx]),
+            "decision_ts": timestamp_index[decision_idx], "session_idx": int(session_idx_in),
+            "session_date": session_date_in, "session_end_idx": int(end_idx_in)}
 
 
 # FUNCTION: A DAILY LOOP THAT CAN STOP AT A PERIOD END AND RESUME
@@ -124,7 +172,10 @@ class DailyLoop:
         self.fill_idx_arr = idx_dict["fill_idx_arr"]
         self.end_idx_arr = ohlcv_array_dict_in["session_end_idx_arr"]
         self.open_arr = ohlcv_array_dict_in["open_arr"]
+        self.high_arr = ohlcv_array_dict_in["high_arr"]
+        self.low_arr = ohlcv_array_dict_in["low_arr"]
         self.close_arr = ohlcv_array_dict_in["close_arr"]
+        self.start_idx_arr = ohlcv_array_dict_in["session_start_idx_arr"]
         self.timestamp_index = ohlcv_array_dict_in["timestamp_index"]
         data_context = data_context_in
         if data_context is None:
@@ -133,6 +184,7 @@ class DailyLoop:
         self.feed_dict = get_source_feed_dict(design_in, ohlcv_array_dict_in, data_context)
         self.engine = engine_in if engine_in is not None else FractionalWeightEngine(dead_band_in, initial_capital_in,
                                                                                     entry_slippage_in, market_exit_slippage_in)
+        self.engine.set_session_bounds(self.end_idx_arr, len(self.close_arr))
 
     # FUNCTION: COPY BARS AND ADVANCE FEEDS FOR SESSIONS ALREADY IN THE ENGINE
     def warmup_buffers(self, session_count_int_in):
@@ -198,7 +250,11 @@ class DailyLoop:
             return
         first_entry_idx = get_session_first_entry_idx(self.ohlcv_array_dict, int(self.window_session_idx_arr[0]))
         self.engine.open_window({"bar_idx": int(first_entry_idx), "timestamp": self.timestamp_index[first_entry_idx],
-                                 "raw_price": float(self.open_arr[first_entry_idx])}, float(self.initial_weight_float))
+                                 "raw_price": float(self.open_arr[first_entry_idx]),
+                                 "close": float(self.close_arr[first_entry_idx]),
+                                 "session_idx": int(self.window_session_idx_arr[0]),
+                                 "session_date": self.ohlcv_array_dict["session_date_list"][int(self.window_session_idx_arr[0])]},
+                                float(self.initial_weight_float))
         self.window_opened_bool = True
 
     # FUNCTION: ONE SESSION (DECIDE, FILL, OR THE END SALE)
@@ -218,28 +274,42 @@ class DailyLoop:
         decision_idx = int(self.decision_idx_arr[session_idx])
         fill_idx = int(self.fill_idx_arr[session_idx])
         end_idx = int(self.end_idx_arr[session_idx])
+        start_idx = int(self.start_idx_arr[session_idx])
         is_last_session = session_pos == len(self.window_session_idx_arr) - 1
         session_date = self.ohlcv_array_dict["session_date_list"][session_idx]
+        # STOPS THROUGH THE DECISION BAR ARE VISIBLE ON THE VIEW
+        morning_event_dict = get_bar_range_event_dict(self.ohlcv_array_dict, start_idx, decision_idx, session_date)
+        if morning_event_dict is not None:
+            self.engine.process_bars(morning_event_dict)
         if not is_last_session:
             fill_bar_buffer_through_decision(self.bar_buffer_dict, self.ohlcv_array_dict, session_idx, decision_idx)
             decision_ts = get_minute_bar_available_ts(self.timestamp_index[decision_idx])
             for feed in self.feed_dict.values():
                 feed.advance_to_ts(decision_ts)
-            view = get_decision_view(self.bar_buffer_dict, session_idx, decision_idx, self.feed_dict)
+            view = get_decision_view(self.bar_buffer_dict, session_idx, decision_idx, self.feed_dict,
+                                     self.engine.get_state_dict())
             decision_dict = get_design_decision_dict(self.design, view)
             for feed in self.feed_dict.values():
                 feed.mark_call_boundary()
             self.target_weight_list.append(float(decision_dict["target_weight"]))
             self.decision_session_list.append(session_date)
             self.decision_dict_list.append(dict(decision_dict))
-            self.engine.apply_decision({"bar_idx": fill_idx, "timestamp": self.timestamp_index[fill_idx],
-                                        "raw_price": float(self.open_arr[fill_idx])}, decision_dict, float(self.close_arr[decision_idx]))
+            self.engine.set_stop_params(decision_dict.get("trail_multiple"), decision_dict.get("volatility"))
+            self.engine.apply_decision(get_fill_event_dict(self.ohlcv_array_dict, fill_idx, decision_idx, session_idx,
+                                                           session_date, end_idx),
+                                       decision_dict, float(self.close_arr[decision_idx]))
         else:
             self.target_weight_list.append(np.nan)
             self.decision_session_list.append(session_date)
             self.decision_dict_list.append(get_decision_dict(None))
+        afternoon_event_dict = get_bar_range_event_dict(self.ohlcv_array_dict, decision_idx + 1, end_idx, session_date)
+        if afternoon_event_dict is not None:
+            self.engine.process_bars(afternoon_event_dict)
+        if is_last_session:
             self.engine.close_window({"bar_idx": end_idx, "timestamp": self.timestamp_index[end_idx],
-                                      "raw_price": float(self.close_arr[end_idx])})
+                                      "raw_price": float(self.close_arr[end_idx]),
+                                      "close": float(self.close_arr[end_idx]), "session_idx": session_idx,
+                                      "session_date": session_date})
         self.engine.close_session({"session_date": session_date, "close": float(self.close_arr[end_idx])})
 
     # FUNCTION: WALK FROM THE NEXT SESSION THROUGH A DATE
@@ -358,26 +428,43 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
     end_idx_arr = ohlcv_array_dict_in["session_end_idx_arr"]
     open_arr, close_arr, timestamp_index = ohlcv_array_dict_in["open_arr"], ohlcv_array_dict_in["close_arr"], ohlcv_array_dict_in["timestamp_index"]
     engine = engine_in if engine_in is not None else FractionalWeightEngine(dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
+    engine.set_session_bounds(end_idx_arr, len(close_arr))
     first_entry_idx = get_session_first_entry_idx(ohlcv_array_dict_in, int(window_session_idx_arr[0]))
+    first_session_idx = int(window_session_idx_arr[0])
     engine.open_window({"bar_idx": int(first_entry_idx), "timestamp": timestamp_index[first_entry_idx],
-                        "raw_price": float(open_arr[first_entry_idx])}, float(initial_weight_in))
+                        "raw_price": float(open_arr[first_entry_idx]),
+                        "close": float(close_arr[first_entry_idx]), "session_idx": first_session_idx,
+                        "session_date": ohlcv_array_dict_in["session_date_list"][first_session_idx]},
+                       float(initial_weight_in))
     target_weight_list, decision_session_list, decision_dict_list = [], [], []
     for session_pos, session_idx in enumerate(window_session_idx_arr):
         session_idx = int(session_idx)
         decision_idx, fill_idx, end_idx = int(decision_idx_arr[session_idx]), int(fill_idx_arr[session_idx]), int(end_idx_arr[session_idx])
+        start_idx = int(ohlcv_array_dict_in["session_start_idx_arr"][session_idx])
         is_last_session = session_pos == len(window_session_idx_arr) - 1
         session_date = ohlcv_array_dict_in["session_date_list"][session_idx]
         decision_dict = get_decision_dict(decision_dict_list_in[session_pos])
         decision_dict_list.append(dict(decision_dict))
         decision_session_list.append(session_date)
+        # RECORDED k AND VOLATILITY APPLY TO THIS WHOLE SESSION, INCLUDING THE MORNING
+        engine.set_stop_params(decision_dict.get("trail_multiple"), decision_dict.get("volatility"))
+        morning_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, start_idx, decision_idx, session_date)
+        if morning_event_dict is not None:
+            engine.process_bars(morning_event_dict)
         if not is_last_session:
             target_weight_list.append(float(decision_dict["target_weight"]))
-            engine.apply_decision({"bar_idx": fill_idx, "timestamp": timestamp_index[fill_idx],
-                                   "raw_price": float(open_arr[fill_idx])}, decision_dict, float(close_arr[decision_idx]))
+            engine.apply_decision(get_fill_event_dict(ohlcv_array_dict_in, fill_idx, decision_idx, session_idx,
+                                                      session_date, end_idx),
+                                  decision_dict, float(close_arr[decision_idx]))
         else:
             target_weight_list.append(np.nan)
+        afternoon_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, decision_idx + 1, end_idx, session_date)
+        if afternoon_event_dict is not None:
+            engine.process_bars(afternoon_event_dict)
+        if is_last_session:
             engine.close_window({"bar_idx": end_idx, "timestamp": timestamp_index[end_idx],
-                                 "raw_price": float(close_arr[end_idx])})
+                                 "raw_price": float(close_arr[end_idx]), "close": float(close_arr[end_idx]),
+                                 "session_idx": session_idx, "session_date": session_date})
         engine.close_session({"session_date": session_date, "close": float(close_arr[end_idx])})
     result_dict = engine.get_result_dict()
     result_dict["target_weight_arr"] = np.asarray(target_weight_list, dtype=float)
