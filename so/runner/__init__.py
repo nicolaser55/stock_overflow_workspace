@@ -1,20 +1,24 @@
 """
-Point-in-time runner (infrastructure steps 4a, 4b-1 and 4b-2a).
+Point-in-time runner (infrastructure steps 4a, 4b-1, 4b-2a and 4b-2b).
 
 At each decision moment the design is shown only what could have been seen then. The runner walks time forward,
 fills NaN/NaT buffers up to that moment, and calls the design with a DecisionView that slices those buffers. The
 position engine turns the decision into trades. Daily mode is 4a (15:58 decision, 15:59 fill). 4b-1 adds candidate
 streams, period scores, pooled prior-only selection, trial logging, checkpoints, parallel runs, baselines, the
 shared verdict, look-ahead and holdout through the same stream. 4b-2a adds the barrier and trailing-stop engines
-(numba session loops) and an engine-state snapshot on the view. Minute mode is 4b-2b.
+(numba session loops) and an engine-state snapshot on the view. 4b-2b is minute mode: rows from the registry, a
+row-local signal with a shuffle check, model scoring windows, and BarrierEngine fills at the next minute's open.
 """
 
 # RE-EXPORT THE PUBLIC 4A, 4B-1A, 4B-1B, 4B-1C AND 4B-1D SURFACE
 from so.runner.view import DecisionView, get_decision_view
 from so.runner.engine import (Engine, FractionalWeightEngine, TrailingStopEngine, BarrierEngine, get_decision_dict,
                               ENGINE_FRACTIONAL_STR, ENGINE_TRAILING_STOP_STR, ENGINE_BARRIER_STR)
-from so.runner.loop import MODE_DAILY_STR, MODE_MINUTE_STR, run_daily_dict, run_engine_decisions_dict, DailyLoop
-from so.runner.preflight import check_design_file, check_design_source
+from so.runner.loop import (MODE_DAILY_STR, MODE_MINUTE_STR, run_daily_dict, run_engine_decisions_dict, DailyLoop,
+                            get_design_mode_str, get_stream_loop)
+from so.runner.minute import (MinuteLoop, run_minute_dict, run_engine_minute_decisions_dict, get_minute_row_pdf,
+                              get_shuffled_signal_list)
+from so.runner.preflight import check_design_file, check_design_source, check_minute_signal
 from so.runner.periods import check_quarantine_refused, get_development_run_period_pdf
 from so.runner.selection import (get_runner_selection_pdf, get_governing_candidate_dict,
                                  run_prior_only_from_decisions_dict, get_buy_hold_period_return_dict)
@@ -34,6 +38,8 @@ __all__ = ["DecisionView", "get_decision_view", "Engine", "FractionalWeightEngin
            "BarrierEngine", "get_decision_dict", "ENGINE_FRACTIONAL_STR", "ENGINE_TRAILING_STOP_STR",
            "ENGINE_BARRIER_STR",
            "MODE_DAILY_STR", "MODE_MINUTE_STR", "run_daily_dict", "run_engine_decisions_dict", "DailyLoop",
+           "get_design_mode_str", "get_stream_loop", "MinuteLoop", "run_minute_dict",
+           "run_engine_minute_decisions_dict", "get_minute_row_pdf", "get_shuffled_signal_list", "check_minute_signal",
            "check_design_file", "check_design_source", "check_quarantine_refused", "get_development_run_period_pdf",
            "get_runner_selection_pdf", "get_governing_candidate_dict", "run_prior_only_from_decisions_dict",
            "get_buy_hold_period_return_dict", "run_development_dict", "run_holdout_dict", "get_trial_id_str",

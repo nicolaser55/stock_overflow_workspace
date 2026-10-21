@@ -11,7 +11,7 @@ from so.core.point_in_time import (set_direct_read_blocked_bool, get_source_spec
 # IMPORT THE EXISTING CUT, TRUNCATION AND BAR-PERTURBATION HELPERS
 from so.core.holdout import get_date, get_truncated_ohlcv_dict, get_perturbed_ohlcv_dict
 # IMPORT THE DAILY LOOP AND THE DECISION SHAPE
-from so.runner.loop import DailyLoop
+from so.runner.loop import get_stream_loop, get_design_mode_str, MODE_MINUTE_STR
 from so.runner.engine import get_decision_dict, DECISION_KEY_LIST, FLOAT_DECISION_KEY_LIST
 from so.runner.checkpoint import (read_decisions_list, get_file_exists_bool, read_pickle, set_runs_root_str)
 from so.runner.verdict import write_json_file, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR
@@ -211,22 +211,71 @@ def get_decision_equal_bool(full_decision_dict_in, check_decision_dict_in, toler
     return True
 
 
+# FUNCTION: SESSION DATE STORED ON A RECORDED DECISION, OR THE PARALLEL LIST
+def get_recorded_session_date(decision_dict_in, session_date_in=None):
+    """
+    Minute mode stores _session_date on the decision. Daily mode uses the parallel session list.
+
+    Args:
+        decision_dict_in (dict): Recorded decision
+        session_date_in: Fallback session
+
+    Returns:
+        datetime.date | None: Session
+    """
+    # MINUTE METADATA WINS
+    if isinstance(decision_dict_in, dict) and decision_dict_in.get("_session_date") is not None:
+        return get_date(decision_dict_in["_session_date"])
+    if session_date_in is None:
+        return None
+    return get_date(session_date_in)
+
+
 # FUNCTION: THE FIRST SESSION WHOSE DECISION DIFFERS, THROUGH THE CUT
 def get_first_decision_difference_dict(full_decision_list_in, full_session_list_in, check_decision_list_in,
                                        check_session_list_in, cut_date_in):
     """
-    Walks the full run in session order. None when every decision on or before the cut matches.
+    Walks the full run in order. Minute decisions are matched by _decision_ts within sessions on or before the cut.
+    Daily decisions are matched by session date. None when every decision on or before the cut matches.
 
     Args:
         full_decision_list_in, check_decision_list_in (list[dict]): Decisions
-        full_session_list_in, check_session_list_in (list): Session dates aligned with the decisions
+        full_session_list_in, check_session_list_in (list): Session dates aligned with the decisions (daily)
         cut_date_in (datetime.date): Last session compared (inclusive)
 
     Returns:
         dict | None: session_date, full_decision, check_decision
     """
-    # INDEX THE CHECK BY DATE
+    # MINUTE MODE HAS MANY DECISIONS PER SESSION; MATCH ON THE BAR TIMESTAMP
     cut_day = get_date(cut_date_in)
+    minute_bool = any(isinstance(decision_dict, dict) and decision_dict.get("_decision_ts") is not None
+                      for decision_dict in list(full_decision_list_in)[:1])
+    if minute_bool:
+        check_ts_dict = {}
+        for session_date, decision_dict in zip(check_session_list_in or [None] * len(check_decision_list_in),
+                                               check_decision_list_in):
+            session_day = get_recorded_session_date(decision_dict, session_date)
+            if session_day is None or session_day > cut_day:
+                continue
+            check_ts_dict[str(decision_dict.get("_decision_ts"))] = get_decision_dict(decision_dict)
+        for session_date, decision_dict in zip(full_session_list_in or [None] * len(full_decision_list_in),
+                                               full_decision_list_in):
+            session_day = get_recorded_session_date(decision_dict, session_date)
+            if session_day is None:
+                continue
+            if session_day > cut_day:
+                continue
+            full_dict = get_decision_dict(decision_dict)
+            ts_key_str = str(decision_dict.get("_decision_ts"))
+            if ts_key_str not in check_ts_dict:
+                return {"session_date": session_day, "full_decision": dict(full_dict), "check_decision": None,
+                        "decision_ts": ts_key_str}
+            check_dict_row = check_ts_dict[ts_key_str]
+            if not get_decision_equal_bool(full_dict, check_dict_row):
+                return {"session_date": session_day, "full_decision": dict(full_dict),
+                        "check_decision": dict(check_dict_row), "decision_ts": ts_key_str}
+        return None
+    # DAILY: INDEX THE CHECK BY DATE
     check_dict = {get_date(session_date): get_decision_dict(decision_dict)
                   for session_date, decision_dict in zip(check_session_list_in, check_decision_list_in)}
     for session_date, decision_dict in zip(full_session_list_in, full_decision_list_in):
@@ -264,10 +313,11 @@ def run_lookahead_stream_dict(design_module_in, candidate_in, ohlcv_array_dict_i
     design = design_module_in.get_candidate_design(candidate_in)
     engine = get_candidate_engine(design_module_in)
     dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
-    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
-    loop = DailyLoop(design, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine, initial_weight,
-                     dead_band, config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
-                     config.MARKET_EXIT_SLIPPAGE_PER_SHARE, design_file_path_str_in, check_source_bool_in=False)
+    default_weight = 0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0
+    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", default_weight))
+    loop = get_stream_loop(design, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine, initial_weight,
+                           dead_band, config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
+                           config.MARKET_EXIT_SLIPPAGE_PER_SHARE, design_file_path_str_in, False, design_module_in)
     set_direct_read_blocked_bool(True)
     try:
         loop.run_through_date(date2_in)
@@ -320,8 +370,11 @@ def run_lookahead_job_dict(job_dict_in):
     if full_decision_list is None:
         raise ValueError(f"candidate {candidate!r} has no recorded decisions for the look-ahead check.")
     full_session_list = job_dict_in["full_session_list"]
-    if len(full_session_list) != len(full_decision_list):
+    minute_bool = bool(full_decision_list) and isinstance(full_decision_list[0], dict) and full_decision_list[0].get("_session_date") is not None
+    if not minute_bool and len(full_session_list) != len(full_decision_list):
         raise ValueError("recorded decisions and sessions have different lengths.")
+    if minute_bool:
+        full_session_list = [decision_dict.get("_session_date") for decision_dict in full_decision_list]
     first_fail_dict = get_first_decision_difference_dict(full_decision_list, full_session_list,
                                                          result_dict["decision_dict_list"],
                                                          result_dict["decision_session_list"], cut_date)

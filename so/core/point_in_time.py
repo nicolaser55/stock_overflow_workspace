@@ -1018,7 +1018,8 @@ def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_lim
 # FUNCTION: THE SOURCES A DESIGN DECLARED
 def get_declared_source_name_list(design_module_in):
     """
-    DATA_SOURCE_LIST when the design defines it. A design without the attribute is treated as ["SPY_1MIN"].
+    DATA_SOURCE_LIST when the design defines it. Otherwise ROW_SOURCE_LIST plus LABEL_SOURCE_LIST (minute mode),
+    with SPY_1MIN prepended if missing. A design without any of those is treated as ["SPY_1MIN"].
 
     Args:
         design_module_in (module): Design
@@ -1026,11 +1027,27 @@ def get_declared_source_name_list(design_module_in):
     Returns:
         list[str]: Registry names
     """
-    # MISSING MEANS THE OLD SPY-ONLY CONTRACT
-    if not hasattr(design_module_in, "DATA_SOURCE_LIST"):
+    # AN EXPLICIT DATA_SOURCE_LIST IS KEPT, INCLUDING AN EMPTY ONE
+    if hasattr(design_module_in, "DATA_SOURCE_LIST"):
+        return [str(source_name_str) for source_name_str in design_module_in.DATA_SOURCE_LIST]
+    # MINUTE MODE MAY NAME ROW AND LABEL SOURCES INSTEAD
+    name_list = []
+    if hasattr(design_module_in, "ROW_SOURCE_LIST"):
+        name_list.extend(str(source_name_str) for source_name_str in design_module_in.ROW_SOURCE_LIST)
+    if hasattr(design_module_in, "LABEL_SOURCE_LIST"):
+        name_list.extend(str(source_name_str) for source_name_str in design_module_in.LABEL_SOURCE_LIST)
+    if not name_list:
         return ["SPY_1MIN"]
-    # AN EXPLICIT LIST IS KEPT, INCLUDING AN EMPTY ONE
-    return [str(source_name_str) for source_name_str in design_module_in.DATA_SOURCE_LIST]
+    if "SPY_1MIN" not in name_list:
+        name_list = ["SPY_1MIN"] + name_list
+    seen_set = set()
+    unique_list = []
+    for name_str in name_list:
+        if name_str in seen_set:
+            continue
+        seen_set.add(name_str)
+        unique_list.append(name_str)
+    return unique_list
 
 # FUNCTION: DROP ROWS DATED AFTER THE END
 def get_frame_through_end_date_pdf(frame_pdf_in, end_date_in):

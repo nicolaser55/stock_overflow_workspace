@@ -29,16 +29,71 @@ The engine sees bar prices from the runner's full arrays (trusted shared code). 
 does not load files and does not call so.core.holdout; the caller hands it bar arrays and a DataContext already
 loaded. A missing DATA_SOURCE_LIST is ["SPY_1MIN"]. A callable is accepted as decide.
 
-A candidate stream (4b-1a) uses DailyLoop: run_through_date stops at a period end without selling, a checkpoint
-restores the design and the engine, and buffers are warmed by copying bars without calling decide(). Direct loader
-calls are blocked for the duration of each run_through_date. The design file is AST-checked before the first call.
+A candidate stream (4b-1a) uses DailyLoop or MinuteLoop: run_through_date stops at a period end without selling, a
+checkpoint restores the design and the engine, and (daily) buffers are warmed by copying bars without calling
+decide(). Direct loader calls are blocked for the duration of each run_through_date. The design file is AST-checked
+before the first call.
 
-Minute mode (MODE_MINUTE_STR) is 4b-2b. Daily mode drives the fractional, barrier and trailing-stop engines.
+Minute mode (MODE_MINUTE_STR) is 4b-2b: rows, a row-local signal with a shuffle check, model scoring windows, and
+BarrierEngine fills at the next minute's open. Daily mode drives the fractional, barrier and trailing-stop engines.
 """
 
-# DAILY MODE IS 4A; MINUTE MODE IS 4B
+# DAILY MODE IS 4A; MINUTE MODE IS 4B-2B
 MODE_DAILY_STR = "daily"
 MODE_MINUTE_STR = "minute"
+
+
+# FUNCTION: THE MODE A DESIGN MODULE DECLARED
+def get_design_mode_str(design_in):
+    """
+    MODE on the module or object. Missing is daily.
+
+    Args:
+        design_in (module | object): Design
+
+    Returns:
+        str: daily or minute
+    """
+    # AN UNKNOWN STRING IS A DESIGN ERROR
+    mode_str = str(getattr(design_in, "MODE", MODE_DAILY_STR) or MODE_DAILY_STR)
+    if mode_str not in (MODE_DAILY_STR, MODE_MINUTE_STR):
+        raise ValueError(f"unknown MODE {mode_str!r}")
+    return mode_str
+
+
+# FUNCTION: DAILY OR MINUTE LOOP FOR THIS DESIGN
+def get_stream_loop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, engine_in=None,
+                    initial_weight_in=1.0, dead_band_in=0.0, initial_capital_in=config.INITIAL_CAPITAL,
+                    entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
+                    market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                    design_file_path_str_in=None, check_source_bool_in=True, design_module_in=None):
+    """
+    MinuteLoop when MODE is minute, otherwise DailyLoop.
+
+    Args:
+        design_in (object | callable): Candidate
+        ohlcv_array_dict_in (dict): Bar arrays
+        date1_in, date2_in: Window bounds
+        data_context_in (DataContext | None): Loaded sources
+        engine_in (Engine | None): Position engine
+        initial_weight_in, dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine
+        design_file_path_str_in (str | None): Design file
+        check_source_bool_in (bool): False when the caller already ran the preflight
+        design_module_in (module | None): Module that holds MODE and (minute) signal
+
+    Returns:
+        DailyLoop | MinuteLoop: Stream loop
+    """
+    # THE MODULE NAMES THE MODE
+    mode_source = design_module_in if design_module_in is not None else design_in
+    if get_design_mode_str(mode_source) == MODE_MINUTE_STR:
+        from so.runner.minute import MinuteLoop
+        return MinuteLoop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine_in,
+                          initial_weight_in, dead_band_in, initial_capital_in, entry_slippage_in,
+                          market_exit_slippage_in, design_file_path_str_in, check_source_bool_in, design_module_in)
+    return DailyLoop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine_in, initial_weight_in,
+                     dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in,
+                     design_file_path_str_in, check_source_bool_in)
 
 
 # FUNCTION: CALL design.decide, OR THE OBJECT ITSELF IF IT IS CALLABLE

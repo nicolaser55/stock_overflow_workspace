@@ -162,6 +162,33 @@ real-data run, no holdout window, no shared trial-log row.
   removed.
 - **Status:** CONTINUE to 4b-2b (minute mode). This is infrastructure, not an experiment result.
 
+## Infrastructure 4b-2b (2026-10-22): minute mode
+
+On `agent/infra-04b2b-minute` from main. Not merged. Synthetic tests only (`tests/test_runner_minute.py`). No
+real-data run, no holdout window, no shared trial-log row. The trial log's size and mtime were unchanged after the
+full suite (`logs/test_all_4b2b.out`).
+
+- **Implemented:** `MODE = "minute"` inside the existing streams, checkpoints, look-ahead check and verdict.
+  Rows come from `ROW_SOURCE_LIST` / `FEATURE_COL_LIST` (optional 15-minute sample) through the registry; every
+  `available_ts` is checked against the end of that minute; one late row stops the run. Models refit on the
+  `so.core.rolling_retrain` calendar; `fit(train_rows)` sees only rows with `label_known_ts` strictly before the
+  refit moment (unfinished dropped); each model scores `[refit, next)`. `signal(rows, model)` is a module-level
+  function (preflight refuses a method or a closure). The runner shuffles a whole refit block twice and requires
+  identical outputs, or the run stops naming the design. An output at the end of minute t fills at the open of
+  minute t+1 through `BarrierEngine` (one position). Look-ahead cuts at session ends and compares by `_decision_ts`.
+- **Observed (synthetic):** a late `available_ts` stops the run; shift / rolling / cumsum and a stateful counter
+  fail the shuffle check; a method or a closure is refused at preflight; a model never scores before its refit or
+  after the next; training drops unfinished and future labels; minute-mode equity matches a hand-run of
+  `simulate_decision_trading_dict` on a small synthetic case with a fixed model; look-ahead passes for a clean
+  minute design; a checkpoint after period 0 resumes and matches a clean run.
+- **Speed** (printed by `tests/test_runner_minute.py` in `logs/test_all_4b2b.out`): 4-year synthetic minute run,
+  small LightGBM (`n_estimators=8`, `num_leaves=4`), 12 candidates, weekly refits, `n_jobs=8`: **411.7 s**. Linear
+  projection 2005-2025 (21y / 4y): **2161.3 s (36.0 min)**. A dedicated run of the same test printed 412.0 s /
+  2162.8 s. The synthetic rows are SPY close only, sampled every 15 minutes; real exp01 rows (TSIND/TSSEG/TSCTX)
+  are denser, so 36 minutes is a lower bound on a 2005-2025 wall time, not a claim about the old replay.
+- **Status:** CONTINUE to 4c (template rewritten on the runner; exp04 daily calibration, then exp02). This is
+  infrastructure, not an experiment result.
+
 ## Port queue, 2026-10-13 (development finished; calibrations and exp01 did not)
 
 The queue in `logs/port_queue_status.csv` ran from 2026-10-13T01:01:15 to 2026-10-13T06:17:33. `logs/port_queue.err` and `logs/port_queue.out` are empty. Trial-log counts below are from `read_trial_log_pdf()` on 2026-10-13. Headline returns of the six finished development notebooks are in those notebooks and are not copied here.

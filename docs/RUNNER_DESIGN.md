@@ -1,4 +1,4 @@
-# Point-in-time runner: design (2026-10-20, updated 2026-10-21)
+# Point-in-time runner: design (2026-10-20, updated 2026-10-22)
 
 *Written by the assistant for infrastructure step 4 (audit S7 raised to a blocker by Nicolas on 2026-10-19; also S1,
 S2, S3, S6, S9, B6). Agreed by Nicolas on 2026-10-21, with the minute mode, the single holdout path and the extra
@@ -23,7 +23,7 @@ Engines, each ported from the existing simulator and required to reproduce it ex
 | Engine | Ported from | First user | Status |
 |---|---|---|---|
 | Fractional weight (costs, dead band, integer shares) | `so.core.fractional_exposure` | exp04-exp07 | 4a |
-| Barrier trades (take-profit, stop-loss, time exit) | `so.core.trade_execution`, `so.core.backtest_simulation` | exp01 | 4b-2a (`BarrierEngine`; daily mode now, minute mode 4b-2b) |
+| Barrier trades (take-profit, stop-loss, time exit) | `so.core.trade_execution`, `so.core.backtest_simulation` | exp01 | 4b-2a daily, 4b-2b minute (`BarrierEngine`) |
 | Trailing stop and re-entry | `so.core.reentry_simulation` | exp02 | 4b-2a (`TrailingStopEngine`; daily mode with a minute-checked stop) |
 
 The view carries a read-only copy of the engine state as of the decision moment (`in_position`, `share_count`,
@@ -57,17 +57,23 @@ minute is too slow. It keeps the rule structural:
 - **Rows.** Each minute row is built only from data available at the end of that minute (the existing per-session
   caches, stamped with `available_ts`). Before the design sees them, the runner checks every row's `available_ts`
   against its decision moment; one failing row stops the run.
-- **Row-local signal.** The design writes one function: rows (plus a model fitted earlier) in, one value per row out,
-  where each output may depend only on its own row. The runner enforces this: it shuffles the rows before calling and
-  puts the outputs back in order, and it calls twice with different shuffles and requires identical outputs. A function
-  that looks at neighbouring rows (shift, rolling, cumulative sums) gives different outputs and the run stops. Rows are
-  passed one session at a time to keep memory small.
-- **Models.** Fitted on the pre-registered schedule through the label door (`label_known_ts` before the refit moment).
-  The runner applies each model only to rows after its refit moment and before the next refit; the design does not
-  choose which rows a model scores.
-- **Fill.** A signal at the end of minute t fills at the open of minute t + 1.
-- **Engines** turn the signals into trades. Their loops are compiled (numba, added to the locked package list) so a
-  full minute-level run takes minutes, not hours.
+- **Row-local signal.** The design writes one module-level function: rows (plus a model fitted earlier) in, one value
+  per row out, where each output may depend only on its own row. The runner enforces this: it passes all rows of one
+  refit block together, shuffled, puts the outputs back in order, and calls twice with different shuffles. Identical
+  outputs are required or the run stops and names the design. A function that looks at neighbouring rows (shift,
+  rolling, cumulative sums) or that keeps state across calls fails. The preflight refuses a method or a closure.
+  (4b-2b shuffles a whole refit block, not one session at a time: a session-sized shuffle would miss a signal that
+  only looks across sessions inside the same fitted model.)
+- **Models.** Fitted on the pre-registered `so.core.rolling_retrain` schedule through the label door
+  (`label_known_ts` strictly before the refit moment; unfinished labels dropped). The runner applies each model only
+  to rows at or after its refit moment and before the next refit; the design does not choose which rows a model
+  scores.
+- **Fill.** A signal at the end of minute t fills at the open of minute t + 1 (same session). The last minute of a
+  session has no next-bar fill.
+- **Engines** turn the signals into trades. Their loops are compiled (numba, added to the locked package list). A 4-year
+  synthetic minute run with a small LightGBM, 12 candidates, weekly refits and `n_jobs=8` took 412 s; linearly that is
+  about 36 minutes for 2005-2025. Real exp01 rows are denser (TSIND/TSSEG/TSCTX, not only SPY close), so the real
+  projection is a lower bound on wall time, not a claim about the old replay.
 
 Intraday stops driven by daily decisions (exp02) use daily mode with the trailing-stop engine.
 
@@ -124,10 +130,11 @@ replay, selection, baseline or report code.
   reading ahead cannot.
 - 4b, part 1: candidates, selection, baselines, trial logging, checkpoints, parallel runs, report, verdict, manifest,
   look-ahead, and the holdout evaluation through the runner (`run_holdout_dict`; replay fallback until 4c).
-- 4b, part 2a (this branch): the barrier and trailing-stop engines, each matching its existing simulator exactly on
+- 4b, part 2a (done 2026-10-21): the barrier and trailing-stop engines, each matching its existing simulator exactly on
   tests. Numba session loops. Engine-state snapshot on the view. Daily mode drives both; the 4b-1 stream, checkpoint,
   look-ahead and verdict machinery is unchanged.
-- 4b, part 2b: minute mode (row checks, row-local signal with the shuffle check, model scoring windows), calling the
-  same barrier engine with minute-level decisions.
+- 4b, part 2b (this branch, 2026-10-22): minute mode (row checks, row-local signal with the shuffle check, model
+  scoring windows), calling the same barrier engine with minute-level decisions. Same streams, checkpoints,
+  look-ahead (cuts at session ends) and verdict.
 - 4c: the template rewritten on it; exp04 (daily) ported as a calibration against its saved v2 results, then exp02
   (trailing-stop engine); differences explained before anything else is ported.
