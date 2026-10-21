@@ -88,8 +88,13 @@ If `venv-main` already exists, the same command reuses it. To add only the edita
 
 - Code is edited in Cursor on **nicosls**, committed and pushed, then pulled on **nicodesktop**. From 2026-10-06 the
   research is also continued by a Cursor agent working directly on **nicodesktop** (`AGENTS.md`, `.cursor/rules/`).
-- Notebooks run on the Jupyter server of **nicodesktop** (kernel `venv-main`); data lives there, in
-  the folder in SO_DATA_PATH (`so.paths.LOCAL_PATH_STR`).
+- Notebooks you open from Cursor run on the Jupyter server of **nicodesktop** (kernel `venv-main`):
+  `https://nicodesktop:8888`, started by `C:\Scripts\start_jupyter.bat` (scheduled task `JupyterLabStart`).
+  Token off, password on (hash in `%USERPROFILE%\.jupyter\jupyter_server_config.json`), HTTPS with Nicolas's
+  mkcert certificate (plain http has no listener), firewall open to Tailscale addresses only. It runs as
+  Nicolas's account, so it can read the quarantine: agent runs never use this server; they execute scripts
+  and notebooks locally (`scripts/execute_notebook.py`). Data lives in the folder in SO_DATA_PATH
+  (`so.paths.LOCAL_PATH_STR`).
 - **Restart the kernel before running a notebook** after any `.py` change ("Run All" keeps old imports in memory).
 - **Commit executed notebooks with their outputs** after every run: the saved outputs are evidence for the thesis.
 - **Data never goes into git** (`.gitignore`), except `records/`.
