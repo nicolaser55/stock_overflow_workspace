@@ -19,12 +19,30 @@ DECISIONS_FILE_STR = "decisions.pkl"
 SCORES_FILE_STR = "scores.pkl"
 DONE_FILE_STR = "done.marker"
 IDENTITY_FILE_STR = "identity.pkl"
+# OPTIONAL OVERRIDE (A HOLDOUT RUN WRITES UNDER SO_HOLDOUT_PATH; SPAWNED WORKERS READ IT FROM THE JOB DICT)
+_RUNS_ROOT_STR = None
+
+
+# FUNCTION: SET THE RUNS ROOT FOR THIS PROCESS
+def set_runs_root_str(root_str_in):
+    """
+    None restores the development experiment-zone default.
+
+    Args:
+        root_str_in (str | None): Folder that holds one subfolder per run id
+
+    Returns:
+        None
+    """
+    # SPAWNED WORKERS SET THIS FROM THE JOB DICT BEFORE THEY READ A CHECKPOINT
+    global _RUNS_ROOT_STR
+    _RUNS_ROOT_STR = None if root_str_in is None else str(root_str_in)
 
 
 # FUNCTION: THE RUNS ROOT UNDER THE EXPERIMENT ZONE
 def get_runs_root_str():
     """
-    store04_experiments/runs/ of the development data root.
+    store04_experiments/runs/ of the development data root, unless set_runs_root_str pointed it at a holdout folder.
 
     Args:
         None
@@ -32,6 +50,9 @@ def get_runs_root_str():
     Returns:
         str: Folder path
     """
+    # A HOLDOUT RUN SETS THE OVERRIDE SO CHECKPOINTS NEVER LAND IN THE DEVELOPMENT VIEW
+    if _RUNS_ROOT_STR:
+        return _RUNS_ROOT_STR
     # THE ZONE FOLLOWS AN ASSIGNMENT WHEN A TEST HAS REPLACED IT
     return os.path.join(paths.LOCAL_EXPERIMENTZONE_PATH_STR, "runs")
 

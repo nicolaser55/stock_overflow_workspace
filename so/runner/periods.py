@@ -10,8 +10,8 @@ Development Periods (infrastructure step 4b-1a)
 
 The development runner forms candidate periods from the design's PERIOD_RULE with the existing schedule code
 (get_development_fold_pdf, then get_replay_period_pdf). It refuses the quarantine root (so.paths.check_quarantine_refused):
-holdout evaluation through the runner is a later 4b part. Bars must end strictly before the active holdout start. No
-window registered is a hard refuse.
+holdout evaluation is run_holdout_dict. Bars must end strictly before the active holdout start. No window registered
+is a hard refuse.
 """
 
 

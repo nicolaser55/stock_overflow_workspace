@@ -13,7 +13,7 @@ from so.core.holdout import get_date, get_truncated_ohlcv_dict, get_perturbed_oh
 # IMPORT THE DAILY LOOP AND THE DECISION SHAPE
 from so.runner.loop import DailyLoop
 from so.runner.engine import get_decision_dict, DECISION_KEY_LIST
-from so.runner.checkpoint import read_decisions_list, get_file_exists_bool, read_pickle
+from so.runner.checkpoint import (read_decisions_list, get_file_exists_bool, read_pickle, set_runs_root_str)
 from so.runner.verdict import write_json_file, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR
 
 """
@@ -291,6 +291,8 @@ def run_lookahead_job_dict(job_dict_in):
     # LOAD THE DESIGN FILE FIRST SO get_candidate_design IS THE SAME CLASS
     from so.runner.run import get_file_design_module, get_candidate_token_str
     from so.runner.preflight import check_design_file
+    if job_dict_in.get("runs_root_str"):
+        set_runs_root_str(job_dict_in["runs_root_str"])
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
     candidate = job_dict_in["candidate"]
@@ -397,7 +399,7 @@ def get_lookahead_fail_payload_dict(first_fail_dict_in, cut_date_in, kind_str_in
 # FUNCTION: THE FULL LOOK-AHEAD CHECK AFTER THE CANDIDATE STREAMS
 def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_in, date1_in, date2_in,
                              candidate_list_in, window_session_date_list_in, n_jobs_int_in, design_file_path_str_in,
-                             ohlcv_path_str_in, context_path_str_in, run_folder_str_in):
+                             ohlcv_path_str_in, context_path_str_in, run_folder_str_in, runs_root_str_in=None):
     """
     Draws the cuts, runs truncation and perturbation jobs in parallel, writes lookahead.json, and returns the
     summary the verdict reads.
@@ -411,6 +413,7 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
         window_session_date_list_in (list): Sessions of the span
         n_jobs_int_in (int): Process count
         design_file_path_str_in, ohlcv_path_str_in, context_path_str_in, run_folder_str_in (str): Paths
+        runs_root_str_in (str | None): Checkpoint root (None = development experiment zone)
 
     Returns:
         dict: pass_bool, status_str, cut_date_list, seed_int, candidate_dict, first_fail_dict, elapsed_seconds,
@@ -433,6 +436,7 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
                     "ohlcv_path_str": ohlcv_path_str_in, "context_path_str": context_path_str_in,
                     "date1": str(get_date(date1_in)), "date2": str(get_date(date2_in)),
                     "full_session_list": list(session_str_list),
+                    "runs_root_str": runs_root_str_in,
                 })
     result_list = run_lookahead_job_list(job_dict_list, n_jobs_int_in)
     result_key_dict = {(row["candidate"], str(get_date(row["cut_date"])), row["kind_str"]): row for row in result_list}

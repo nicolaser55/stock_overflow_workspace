@@ -6,14 +6,21 @@ import subprocess
 import sys
 from datetime import datetime
 from urllib.parse import quote
+import json
+import numpy as np
 import pandas as pd
 # IMPORT THE SHARED CONFIGURATION (COSTS, CAPITAL)
 from so import config, paths
 # IMPORT THE TRIAL LOG
 from so.core.trial_log import log_trial_dict
-from so.core.point_in_time import set_direct_read_blocked_bool
+from so.core.point_in_time import (set_direct_read_blocked_bool, get_declared_source_name_list, get_source_spec_dict)
 from so.core.reentry_simulation import get_window_session_idx_arr
-from so.core.holdout import check_development_view
+from so.core.holdout import (check_development_view, check_evaluation_precondition_dict, get_holdout_period_pdf,
+                             get_date, get_unread_report_dict, append_holdout_evaluation_dict, set_runner_active_bool,
+                             UNREAD_SANITY_CHECK_STR)
+from so.core.baseline_report import get_baseline_json_str
+from so.core.continuous_replay import get_log_excess_bootstrap_dict
+from so.core.evaluation import get_mde_float
 # IMPORT THE 4A LOOP, PERIODS, SELECTION AND CHECKPOINTS
 from so.runner.engine import FractionalWeightEngine
 from so.runner.loop import DailyLoop
@@ -25,26 +32,34 @@ from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_per
 from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle, read_pickle, get_file_exists_bool,
                                   write_checkpoint_dict, read_checkpoint_dict, write_decisions_list, read_decisions_list,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
-                                  write_run_identity_dict, read_run_identity_dict)
+                                  write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
-                               write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, LOOK_AHEAD_PENDING_STR,
-                               REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR)
+                               write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, get_json_value,
+                               LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_FAIL_STR, REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR,
+                               MANIFEST_FILE_STR)
 from so.runner.lookahead import run_lookahead_check_dict, LOOKAHEAD_FILE_STR
 
 """
-Development Run (infrastructure steps 4b-1a, 4b-1b and 4b-1c)
+Development And Holdout Runs (infrastructure steps 4b-1a, 4b-1b, 4b-1c and 4b-1d)
 
 Candidates, periods, pooled prior-only selection, trial logging, checkpoints and parallel streams on top of the 4a
 daily loop. 4b-1b adds baselines over the prior-only span, the shared verdict, report.json / report.md, and
 manifest.json written last. 4b-1c fills the look-ahead part of the verdict: truncation and perturbation at sampled
-cuts, run in the same spawn pool, written to lookahead.json. Those re-runs never write a trial-log row. Development
-view only: the quarantine root is refused (holdout evaluation is a later 4b part).
+cuts, run in the same spawn pool, written to lookahead.json. Those re-runs never write a trial-log row.
+
+Development (run_development_dict) uses the development view: the quarantine root is refused. Holdout
+(run_holdout_dict) is the same stream, selection, baseline, verdict and look-ahead, with the quarantine root and the
+evaluation token. Periods are the development periods extended through the window (get_holdout_period_pdf). The run
+starts at the development start so selection history and the carried position flow into the window; only window
+sessions are reported. No candidate-period trial row is written for the development part. The ledger row and the
+stage-"test" trial row are appended before report.json, report.md, the manifest, the daily paths or any printed
+result. Progress during the stream does not print window returns.
 
 The design module declares CANDIDATE_LIST and get_candidate_design(candidate), which returns a fresh design object
 per candidate. Each candidate is its own stream over the span (first period start through last period end). At the
-end of each period the stream is scored (period return and buy-and-hold for the same period), one trial row is
-appended, then the design and the engine are pickled. A crash resumes from that pickle.
+end of each period the stream is scored (period return and buy-and-hold for the same period). A development run
+appends one trial row, then pickles the design and the engine. A crash resumes from that pickle.
 
 Candidates run in separate processes, up to 8, with the spawn start method. There is no shared mutable state. A
 single-process run is the same code path as n_jobs=1.
@@ -52,9 +67,10 @@ single-process run is the same code path as n_jobs=1.
 Trial ids are stable: run id + candidate + period. A resumed run never writes the same trial twice. Each row carries
 the git commit and a hash of the design folder.
 
-A run refuses uncommitted changes in the code it uses (so/, the design folder, and every experiments/ folder the
-preflight already walks), a missing or stale VIEW.json, and the quarantine root. Each checkpoint stores the commit
-and the code hash of those same folders. A resume with a different commit or hash raises: start a new run id.
+A development run refuses uncommitted changes in the code it uses (so/, the design folder, and every experiments/
+folder the preflight already walks), a missing or stale VIEW.json, and the quarantine root. A holdout run reuses
+so.core.holdout's token, git, once-only, forward-only and 10-evaluation rules. Each checkpoint stores the commit and
+the code hash of those same folders. A resume with a different commit or hash raises: start a new run id.
 """
 
 # CANDIDATES RUN IN AT MOST THIS MANY PROCESSES
@@ -395,9 +411,12 @@ def run_candidate_job_dict(job_dict_in):
         dict: candidate, score_row_list, decision_count
     """
     # LOAD THE DESIGN FILE FIRST SO A PICKLED CLASS CAN BE FOUND
+    if job_dict_in.get("runs_root_str"):
+        set_runs_root_str(job_dict_in["runs_root_str"])
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
     candidate = job_dict_in["candidate"]
+    log_trial_bool = bool(job_dict_in.get("log_trial_bool", True))
     candidate_token_str = get_candidate_token_str(candidate)
     run_id_str = job_dict_in["run_id_str"]
     ohlcv_array_dict = read_pickle(job_dict_in["ohlcv_path_str"])
@@ -450,10 +469,11 @@ def run_candidate_job_dict(job_dict_in):
                                                       buy_hold_return_dict[period_id])
             score_dict["candidate"] = candidate
             score_dict["fold_id"] = period_id
-            # THE TRIAL ROW IS WRITTEN BEFORE ANY SUMMARY AND BEFORE THE CHECKPOINT
-            log_candidate_period_trial_dict(design_module, run_id_str, candidate, period_row_dict, score_dict,
-                                            job_dict_in["commit_str"], job_dict_in["design_folder_hash_str"],
-                                            job_dict_in["trial_log_path_str"])
+            # A DEVELOPMENT RUN WRITES THE TRIAL ROW BEFORE ANY SUMMARY AND BEFORE THE CHECKPOINT
+            if log_trial_bool:
+                log_candidate_period_trial_dict(design_module, run_id_str, candidate, period_row_dict, score_dict,
+                                                job_dict_in["commit_str"], job_dict_in["design_folder_hash_str"],
+                                                job_dict_in["trial_log_path_str"])
             score_row_list.append(score_dict)
             completed_period_id_set.add(period_id)
             write_checkpoint_dict(run_id_str, candidate_token_str, {
@@ -496,6 +516,237 @@ def run_candidate_job_list(job_dict_list_in, n_jobs_int_in):
         return pool.map(run_candidate_job_dict, job_dict_list_in)
 
 
+# FUNCTION: STREAM EVERY CANDIDATE, SELECT, AND BUILD THE PRIOR-ONLY PATH
+def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in=None,
+                               run_id_str_in=None, n_jobs_int_in=None, trial_log_path_str_in=None, commit_str_in=None,
+                               crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
+                               log_trial_bool_in=True, runs_root_str_in=None):
+    """
+    Shared stream used by a development run and a holdout run. Scores each candidate-period from the continuous
+    stream, does pooled prior-only selection, and builds the prior-only path from the recorded decisions. A
+    development run logs each candidate-period; a holdout run does not.
+
+    Args:
+        design_module_in (module): Design (CANDIDATE_LIST, get_candidate_design, SELECTION_RULE)
+        ohlcv_array_dict_in (dict): Bars covering the periods
+        period_pdf_in (pd.DataFrame): Periods already formed
+        data_context_in (DataContext | None): Loaded sources
+        run_id_str_in (str | None): Resume key (None = experiment name plus timestamp)
+        n_jobs_int_in (int | None): Process count (None = min(8, candidate count); 1 is in-process)
+        trial_log_path_str_in (str | None): Trial log CSV (None = the shared log)
+        commit_str_in (str | None): Injected commit (None = git HEAD)
+        crash_after_period_id_in (int | None): Test hook: raise after that period's checkpoint
+        code_hash_str_in (str | None): Injected code hash (None = hash of the code this run uses)
+        check_clean_tree_bool_in (bool): Refuse uncommitted changes in the code this run uses
+        log_trial_bool_in (bool): Write a candidate-period trial row (False on a holdout run)
+        runs_root_str_in (str | None): Checkpoint root (None = development experiment zone)
+
+    Returns:
+        dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list,
+              candidate_decision_dict, paths used by the look-ahead check
+    """
+    # THE SAME GUARDS THE DEVELOPMENT RUN ALREADY HAD, MINUS THE VIEW AND THE QUARANTINE
+    if not hasattr(design_module_in, "CANDIDATE_LIST"):
+        raise ValueError("design module is missing CANDIDATE_LIST.")
+    if not hasattr(design_module_in, "get_candidate_design"):
+        raise ValueError("design module is missing get_candidate_design.")
+    candidate_list = list(design_module_in.CANDIDATE_LIST)
+    if len(candidate_list) == 0:
+        raise ValueError("CANDIDATE_LIST is empty.")
+    design_file_path_str = get_module_file_path_str(design_module_in)
+    design_folder_str = os.path.dirname(design_file_path_str)
+    if check_clean_tree_bool_in:
+        check_clean_tree(design_folder_str, design_file_path_str_in=design_file_path_str)
+    check_design_file(design_file_path_str)
+    design_folder_hash_str = get_design_folder_hash_str(design_folder_str)
+    commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
+    code_hash_str = (str(code_hash_str_in) if code_hash_str_in is not None
+                     else get_code_hash_str(design_folder_str, design_file_path_str_in=design_file_path_str))
+    period_pdf = period_pdf_in.copy()
+    if period_pdf.empty:
+        raise ValueError("no periods to run.")
+    date1 = get_period_date(period_pdf.sort_values("period_id")["period_start"].iloc[0])
+    date2 = get_period_date(period_pdf.sort_values("period_id")["period_end"].iloc[-1])
+    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1, date2)
+    window_session_date_list = [ohlcv_array_dict_in["session_date_list"][int(session_idx)] for session_idx in window_session_idx_arr]
+    buy_hold_return_dict = get_buy_hold_period_return_dict(ohlcv_array_dict_in, period_pdf, date1, date2)
+    experiment_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME", "runner"))
+    run_id_str = str(run_id_str_in) if run_id_str_in else f"{experiment_name_str}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    if runs_root_str_in is not None:
+        set_runs_root_str(runs_root_str_in)
+    try:
+        run_folder_str = make_folder(get_run_folder_str(run_id_str))
+        stored_identity_dict = read_run_identity_dict(run_id_str)
+        if stored_identity_dict is not None:
+            check_resume_identity(stored_identity_dict, commit_str, code_hash_str)
+        else:
+            write_run_identity_dict(run_id_str, {"commit_str": commit_str, "code_hash_str": code_hash_str})
+        ohlcv_path_str = os.path.join(run_folder_str, OHLCV_FILE_STR)
+        period_path_str = os.path.join(run_folder_str, PERIOD_FILE_STR)
+        buy_hold_path_str = os.path.join(run_folder_str, BUY_HOLD_FILE_STR)
+        context_path_str = os.path.join(run_folder_str, CONTEXT_FILE_STR)
+        write_pickle(ohlcv_path_str, ohlcv_array_dict_in)
+        write_pickle(period_path_str, period_pdf)
+        write_pickle(buy_hold_path_str, buy_hold_return_dict)
+        if data_context_in is not None:
+            write_pickle(context_path_str, data_context_in)
+        trial_log_path_str = trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
+        n_jobs_int = int(n_jobs_int_in) if n_jobs_int_in is not None else min(MAX_CANDIDATE_PROCESS_COUNT, len(candidate_list))
+        job_dict_list = []
+        for candidate in candidate_list:
+            job_dict_list.append({
+                "candidate": candidate, "run_id_str": run_id_str, "design_file_path_str": design_file_path_str,
+                "ohlcv_path_str": ohlcv_path_str, "period_path_str": period_path_str, "buy_hold_path_str": buy_hold_path_str,
+                "context_path_str": context_path_str, "date1": date1, "date2": date2,
+                "commit_str": commit_str, "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
+                "trial_log_path_str": trial_log_path_str, "crash_after_period_id": crash_after_period_id_in,
+                "log_trial_bool": bool(log_trial_bool_in), "runs_root_str": runs_root_str_in,
+            })
+        run_candidate_job_list(job_dict_list, n_jobs_int)
+        score_row_list = []
+        candidate_decision_dict = {}
+        trial_id_list = []
+        for candidate in candidate_list:
+            candidate_token_str = get_candidate_token_str(candidate)
+            score_row_list.extend(read_score_row_list(run_id_str, candidate_token_str))
+            decision_list = read_decisions_list(run_id_str, candidate_token_str)
+            if decision_list is None:
+                raise ValueError(f"candidate {candidate!r} has no recorded decisions.")
+            candidate_decision_dict[candidate] = decision_list
+            if log_trial_bool_in:
+                for score_dict in read_score_row_list(run_id_str, candidate_token_str):
+                    trial_id_list.append(get_trial_id_str(run_id_str, candidate, score_dict["period_id"]))
+        score_pdf = pd.DataFrame(score_row_list)
+        selection_pdf = get_runner_selection_pdf(score_pdf, design_module_in)
+        governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
+        dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
+        initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
+        prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
+                                                             candidate_decision_dict, governing_dict, period_pdf, dead_band,
+                                                             initial_weight)
+        return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
+                "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
+                "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,
+                "candidate_decision_dict": candidate_decision_dict, "commit_str": commit_str,
+                "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
+                "run_folder_str": run_folder_str, "design_file_path_str": design_file_path_str,
+                "ohlcv_path_str": ohlcv_path_str, "context_path_str": context_path_str,
+                "candidate_list": list(candidate_list), "n_jobs_int": n_jobs_int,
+                "experiment_name_str": experiment_name_str, "runs_root_str": runs_root_str_in}
+    finally:
+        # RESTORE THE DEVELOPMENT RUNS ROOT EVEN WHEN A WORKER RAISES
+        if runs_root_str_in is not None:
+            set_runs_root_str(None)
+
+
+# FUNCTION: BASELINES, LOOK-AHEAD, VERDICT, REPORT AND MANIFEST
+def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_in, prior_only_dict_in, date1_in,
+                             date2_in, baseline_seed_count_int_in=None, look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR,
+                             run_lookahead_bool_in=True, extra_report_dict_in=None, extra_manifest_dict_in=None,
+                             write_files_bool_in=True):
+    """
+    The shared tail of a development run and a holdout run. Look-ahead re-runs the full stream (stream_dict_in
+    dates). Baselines and the verdict use prior_only_dict_in over date1_in..date2_in (the reported span).
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars
+        stream_dict_in (dict): Output of run_candidate_streams_dict
+        prior_only_dict_in (dict): Path the verdict sees (full span, or the rebased window slice)
+        date1_in, date2_in: Reported span
+        baseline_seed_count_int_in (int | None): Random-timing draws
+        look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
+        run_lookahead_bool_in (bool): Run the automatic look-ahead check
+        extra_report_dict_in, extra_manifest_dict_in (dict | None): Fields folded into the report and the manifest
+        write_files_bool_in (bool): Write report.json, report.md and the manifest. Holdout leaves this False
+            until the ledger row and the stage-test trial are appended.
+
+    Returns:
+        dict: baseline_dict, verdict_dict, report_dict, manifest_dict, lookahead_dict
+    """
+    # LOOK-AHEAD WALKS THE FULL STREAM; BASELINES AND THE VERDICT SEE THE REPORTED PATH
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
+                                             seed_count_int_in=baseline_seed_count_int_in)
+    lookahead_dict = None
+    look_ahead_status_str = look_ahead_status_str_in
+    if run_lookahead_bool_in:
+        lookahead_dict = run_lookahead_check_dict(
+            design_module_in, ohlcv_array_dict_in, stream_dict_in["run_id_str"], stream_dict_in["date1"],
+            stream_dict_in["date2"], stream_dict_in["candidate_list"], stream_dict_in["window_session_date_list"],
+            stream_dict_in["n_jobs_int"], stream_dict_in["design_file_path_str"], stream_dict_in["ohlcv_path_str"],
+            stream_dict_in["context_path_str"], stream_dict_in["run_folder_str"],
+            runs_root_str_in=stream_dict_in.get("runs_root_str"))
+        look_ahead_status_str = lookahead_dict["status_str"]
+    strategy_return_pdf = get_equity_daily_return_pdf(prior_only_dict_in["daily_equity_pdf"])
+    buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
+    verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
+                                           look_ahead_status_str_in=look_ahead_status_str)
+    if lookahead_dict is not None:
+        verdict_dict["look_ahead_dict"]["cut_date_list"] = list(lookahead_dict["cut_date_list"])
+        verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
+        verdict_dict["look_ahead_dict"]["elapsed_seconds"] = lookahead_dict.get("elapsed_seconds")
+    extra_report_dict = dict(extra_report_dict_in or {})
+    view_stamp_dict = extra_report_dict.pop("view_stamp_dict", get_view_stamp_dict())
+    report_dict = get_report_payload_dict(verdict_dict, {
+        "run_id_str": stream_dict_in["run_id_str"], "experiment_name_str": stream_dict_in["experiment_name_str"],
+        "protocol_version_str": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
+        "commit_str": stream_dict_in["commit_str"], "code_hash_str": stream_dict_in["code_hash_str"],
+        "view_stamp_dict": view_stamp_dict, "candidate_list": list(stream_dict_in["candidate_list"]),
+        "trial_id_list": list(stream_dict_in["trial_id_list"]), "date1": str(date1_in), "date2": str(date2_in),
+        **extra_report_dict,
+    })
+    output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR]
+    if lookahead_dict is not None:
+        output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, LOOKAHEAD_FILE_STR, MANIFEST_FILE_STR]
+    manifest_dict = {"status": "finished", "run_id": stream_dict_in["run_id_str"],
+                     "commit": stream_dict_in["commit_str"], "code_hash": stream_dict_in["code_hash_str"],
+                     "view_stamp": view_stamp_dict,
+                     "design": {"experiment_name": stream_dict_in["experiment_name_str"],
+                                "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
+                                "file": stream_dict_in["design_file_path_str"]},
+                     "candidate_list": list(stream_dict_in["candidate_list"]),
+                     "trial_id_list": list(stream_dict_in["trial_id_list"]),
+                     "output_files": list(output_file_list),
+                     "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
+                                 "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
+                                 "look_ahead": look_ahead_status_str}}
+    if extra_manifest_dict_in:
+        manifest_dict.update(dict(extra_manifest_dict_in))
+    finish_dict = {"baseline_dict": baseline_dict, "verdict_dict": verdict_dict, "report_dict": report_dict,
+                   "manifest_dict": manifest_dict, "lookahead_dict": lookahead_dict}
+    if write_files_bool_in:
+        write_runner_result_files_dict(stream_dict_in, finish_dict)
+    return finish_dict
+
+
+# FUNCTION: WRITE THE RUNNER RESULT FILES (REPORT, THEN MANIFEST LAST)
+def write_runner_result_files_dict(stream_dict_in, finish_dict_in, reported_path_dict_in=None):
+    """
+    Daily paths when reported_path_dict_in is passed, then report.json and report.md, then the manifest. A holdout
+    run calls this only after the ledger row and the stage-test trial are appended. Development writes through this
+    with no daily paths.
+
+    Args:
+        stream_dict_in (dict): Output of run_candidate_streams_dict
+        finish_dict_in (dict): Output of write_runner_finish_dict
+        reported_path_dict_in (dict | None): Rebased window path; None skips the daily CSVs
+
+    Returns:
+        None
+    """
+    # DAILY PATHS FIRST WHEN THIS IS A COUNTED HOLDOUT RESULT
+    if reported_path_dict_in is not None:
+        output_path_str = stream_dict_in["run_folder_str"]
+        os.makedirs(output_path_str, exist_ok=True)
+        reported_path_dict_in["daily_equity_pdf"].to_csv(os.path.join(output_path_str, "strategy_daily_equity.csv"),
+                                                        index=False)
+        finish_dict_in["baseline_dict"]["buy_hold_daily_equity_pdf"].to_csv(
+            os.path.join(output_path_str, "buy_hold_daily_equity.csv"), index=False)
+    # REPORT BEFORE THE MANIFEST; A CRASH HERE STILL LEAVES THE LEDGER ROW
+    write_run_report_dict(stream_dict_in["run_folder_str"], finish_dict_in["report_dict"])
+    write_run_manifest_dict(stream_dict_in["run_folder_str"], finish_dict_in["manifest_dict"])
+
+
 # FUNCTION: A DEVELOPMENT RUN OF EVERY CANDIDATE
 def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=None, run_id_str_in=None,
                          n_jobs_int_in=None, period_pdf_in=None, trial_log_path_str_in=None, commit_str_in=None,
@@ -532,130 +783,271 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
     """
     # THE DEVELOPMENT VIEW NEVER OPENS THE QUARANTINE
     check_quarantine_refused()
-    if not hasattr(design_module_in, "CANDIDATE_LIST"):
-        raise ValueError("design module is missing CANDIDATE_LIST.")
-    if not hasattr(design_module_in, "get_candidate_design"):
-        raise ValueError("design module is missing get_candidate_design.")
-    candidate_list = list(design_module_in.CANDIDATE_LIST)
-    if len(candidate_list) == 0:
-        raise ValueError("CANDIDATE_LIST is empty.")
-    design_file_path_str = get_module_file_path_str(design_module_in)
-    design_folder_str = os.path.dirname(design_file_path_str)
-    if check_clean_tree_bool_in:
-        check_clean_tree(design_folder_str, design_file_path_str_in=design_file_path_str)
     if check_view_bool_in:
         check_development_view()
-    check_design_file(design_file_path_str)
-    design_folder_hash_str = get_design_folder_hash_str(design_folder_str)
-    commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
-    code_hash_str = (str(code_hash_str_in) if code_hash_str_in is not None
-                     else get_code_hash_str(design_folder_str, design_file_path_str_in=design_file_path_str))
     period_pdf = period_pdf_in
     if period_pdf is None:
         period_pdf, _fold_pdf = get_development_run_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"])
-    else:
-        period_pdf = period_pdf.copy()
-    if period_pdf.empty:
-        raise ValueError("no periods to run.")
-    date1 = get_period_date(period_pdf.sort_values("period_id")["period_start"].iloc[0])
-    date2 = get_period_date(period_pdf.sort_values("period_id")["period_end"].iloc[-1])
-    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1, date2)
-    window_session_date_list = [ohlcv_array_dict_in["session_date_list"][int(session_idx)] for session_idx in window_session_idx_arr]
-    buy_hold_return_dict = get_buy_hold_period_return_dict(ohlcv_array_dict_in, period_pdf, date1, date2)
-    experiment_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME", "runner"))
-    run_id_str = str(run_id_str_in) if run_id_str_in else f"{experiment_name_str}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-    run_folder_str = make_folder(get_run_folder_str(run_id_str))
-    stored_identity_dict = read_run_identity_dict(run_id_str)
-    if stored_identity_dict is not None:
-        check_resume_identity(stored_identity_dict, commit_str, code_hash_str)
-    else:
-        write_run_identity_dict(run_id_str, {"commit_str": commit_str, "code_hash_str": code_hash_str})
-    ohlcv_path_str = os.path.join(run_folder_str, OHLCV_FILE_STR)
-    period_path_str = os.path.join(run_folder_str, PERIOD_FILE_STR)
-    buy_hold_path_str = os.path.join(run_folder_str, BUY_HOLD_FILE_STR)
-    context_path_str = os.path.join(run_folder_str, CONTEXT_FILE_STR)
-    write_pickle(ohlcv_path_str, ohlcv_array_dict_in)
-    write_pickle(period_path_str, period_pdf)
-    write_pickle(buy_hold_path_str, buy_hold_return_dict)
-    if data_context_in is not None:
-        write_pickle(context_path_str, data_context_in)
+    stream_dict = run_candidate_streams_dict(
+        design_module_in, ohlcv_array_dict_in, period_pdf, data_context_in=data_context_in, run_id_str_in=run_id_str_in,
+        n_jobs_int_in=n_jobs_int_in, trial_log_path_str_in=trial_log_path_str_in, commit_str_in=commit_str_in,
+        crash_after_period_id_in=crash_after_period_id_in, code_hash_str_in=code_hash_str_in,
+        check_clean_tree_bool_in=check_clean_tree_bool_in, log_trial_bool_in=True)
+    finish_dict = write_runner_finish_dict(
+        design_module_in, ohlcv_array_dict_in, stream_dict, stream_dict["prior_only_dict"], stream_dict["date1"],
+        stream_dict["date2"], baseline_seed_count_int_in=baseline_seed_count_int_in,
+        look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in)
+    return {**stream_dict, **finish_dict}
+
+
+# FUNCTION: SLICE THE CONTINUOUS PATH TO THE REPORTED HOLDOUT SESSIONS
+def get_reported_path_dict(prior_only_dict_in, start_date_in, end_date_in, initial_capital_in=config.INITIAL_CAPITAL):
+    """
+    Keeps equity and target weights on [start_date_in, end_date_in]. Equity is rebased so the equity entering that
+    span equals the initial capital. The carried position is the first window weight.
+
+    Args:
+        prior_only_dict_in (dict): Full-span engine result
+        start_date_in, end_date_in: Inclusive reported bounds
+        initial_capital_in (float): Starting capital of the reported span
+
+    Returns:
+        dict: Sliced path with rebased equity and metric_dict
+    """
+    # CUT THE EQUITY, THEN REBASE TO THE CAPITAL THAT ENTERED THE SPAN
+    start_date, end_date = get_date(start_date_in), get_date(end_date_in)
+    equity_pdf = prior_only_dict_in["daily_equity_pdf"].copy()
+    equity_pdf["date"] = equity_pdf["date"].map(get_date)
+    prior_pdf = equity_pdf[equity_pdf["date"] < start_date]
+    holdout_pdf = equity_pdf[(equity_pdf["date"] >= start_date) & (equity_pdf["date"] <= end_date)].copy()
+    if holdout_pdf.empty:
+        raise ValueError("the prior-only path has no sessions in the reported holdout span.")
+    base_float = float(prior_pdf["equity"].iloc[-1]) if len(prior_pdf) else float(initial_capital_in)
+    holdout_pdf["equity"] = holdout_pdf["equity"] * (float(initial_capital_in) / base_float)
+    session_list = [get_date(session_date) for session_date in list(prior_only_dict_in.get("decision_session_list") or [])]
+    target_arr = np.asarray(prior_only_dict_in.get("target_weight_arr"), dtype=float)
+    keep_idx_list = [idx for idx, session_date in enumerate(session_list) if start_date <= session_date <= end_date]
+    reported_session_list = [session_list[idx] for idx in keep_idx_list]
+    reported_target_arr = target_arr[keep_idx_list] if len(target_arr) else np.array([], dtype=float)
+    weight_arr = holdout_pdf["weight"].to_numpy(dtype=float) if "weight" in holdout_pdf.columns else np.array([], dtype=float)
+    counted_weight_arr = weight_arr[:-1] if len(weight_arr) > 1 else weight_arr
+    mean_weight = float(counted_weight_arr.mean()) if len(counted_weight_arr) else 0.0
+    total_return = float(holdout_pdf["equity"].iloc[-1]) / float(initial_capital_in) - 1.0
+    metric_dict = dict(prior_only_dict_in.get("metric_dict") or {})
+    metric_dict["mean_weight"] = mean_weight
+    metric_dict["total_return"] = total_return
+    reported_dict = dict(prior_only_dict_in)
+    reported_dict["daily_equity_pdf"] = holdout_pdf.reset_index(drop=True)
+    reported_dict["target_weight_arr"] = reported_target_arr
+    reported_dict["decision_session_list"] = reported_session_list
+    reported_dict["metric_dict"] = metric_dict
+    reported_dict["carried_weight"] = float(holdout_pdf["weight"].iloc[0]) if "weight" in holdout_pdf.columns else np.nan
+    return reported_dict
+
+
+# FUNCTION: LEDGER FIELDS FROM THE RUNNER VERDICT AND THE UNREAD TAIL
+def get_holdout_ledger_fields_dict(verdict_dict_in, baseline_dict_in, reported_path_dict_in, unread_dict_in,
+                                   ohlcv_array_dict_in, start_date_in, end_date_in, governing_dict_in, period_pdf_in):
+    """
+    Maps the shared verdict onto the existing holdout ledger columns. Missing optional fields stay absent and the
+    append leaves them empty.
+
+    Args:
+        verdict_dict_in (dict): Output of get_runner_verdict_dict
+        baseline_dict_in (dict): Output of get_runner_baseline_dict
+        reported_path_dict_in (dict): Rebased window path
+        unread_dict_in (dict): Output of get_unread_report_dict
+        ohlcv_array_dict_in (dict): Bars (unused besides existing)
+        start_date_in, end_date_in: Reported span
+        governing_dict_in (dict): period_id -> candidate
+        period_pdf_in (pd.DataFrame): Full-span periods
+
+    Returns:
+        dict: Ledger columns that this run can fill
+    """
+    # THE VERDICT ALREADY RAN THE SUCCESS CRITERIA ON THE REPORTED SPAN
+    _ = ohlcv_array_dict_in
+    return_dict = verdict_dict_in["return_dict"]
+    success_dict = verdict_dict_in["success_dict"]
+    holdout_pdf = reported_path_dict_in["daily_equity_pdf"]
+    strategy_return_pdf = get_equity_daily_return_pdf(holdout_pdf)
+    buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict_in["buy_hold_daily_equity_pdf"])
+    log_excess_dict = get_log_excess_bootstrap_dict(strategy_return_pdf, buy_hold_return_pdf, block_month_count_in=6)
+    merged_pdf = strategy_return_pdf.merge(buy_hold_return_pdf, on="date", suffixes=("_strategy", "_buy_hold"))
+    merged_pdf["month"] = pd.to_datetime(merged_pdf["date"]).dt.to_period("M")
+    month_pdf = merged_pdf.groupby("month").agg(
+        strategy_log=("daily_return_strategy", lambda series: float(np.log1p(series).sum())),
+        buy_hold_log=("daily_return_buy_hold", lambda series: float(np.log1p(series).sum())))
+    month_excess_arr = (month_pdf["strategy_log"] - month_pdf["buy_hold_log"]).to_numpy(dtype=float)
+    start_date, end_date = get_date(start_date_in), get_date(end_date_in)
+    holdout_period_pdf = period_pdf_in[period_pdf_in["period_end"].map(get_date) >= start_date]
+    candidate_dict = {int(period_row.period_id): governing_dict_in.get(int(period_row.period_id))
+                      for period_row in holdout_period_pdf.itertuples(index=False)}
+    baseline_return_dict = {"buy_hold": float(baseline_dict_in["buy_hold_total_return"]),
+                            "constant_exposure": float(baseline_dict_in["constant_exposure_total_return"])}
+    return {
+        "total_return": float(return_dict["strategy_total_return"]),
+        "buy_hold_total_return": float(return_dict["buy_hold_total_return"]),
+        "annualized_log_excess": log_excess_dict["annualized_log_excess"],
+        "log_excess_ci_low": log_excess_dict["ci_low"], "log_excess_ci_high": log_excess_dict["ci_high"],
+        "in_market_pct": float(holdout_pdf["in_position"].mean()) if "in_position" in holdout_pdf.columns else np.nan,
+        "sharpe_ratio": float(return_dict["strategy_sharpe_ratio"]),
+        "max_drawdown": float(return_dict["strategy_max_drawdown"]),
+        "mde": get_mde_float(float(np.std(month_excess_arr, ddof=1)) if len(month_excess_arr) > 1 else np.nan,
+                             len(month_excess_arr)),
+        "primary_pass": bool(success_dict["primary_success"]),
+        "secondary_pass": bool(success_dict["secondary_success"]),
+        "comparable_pass": bool(success_dict["comparable_return"]),
+        "baselines_beaten": {"constant_exposure": bool(verdict_dict_in["baseline_dict"]["constant_pass_bool"]),
+                             "random_timing": bool(verdict_dict_in["baseline_dict"]["random_pass_bool"])},
+        "baseline_returns": get_baseline_json_str(baseline_return_dict),
+        "carried_weight": reported_path_dict_in.get("carried_weight", np.nan),
+        "holdout_candidates": json.dumps({str(key): value for key, value in candidate_dict.items()}),
+        "unread_start": unread_dict_in.get("unread_start", np.nan),
+        "unread_session_count": unread_dict_in.get("unread_session_count", np.nan),
+        "unread_total_return": unread_dict_in.get("unread_total_return", np.nan),
+        "unread_buy_hold_total_return": unread_dict_in.get("unread_buy_hold_total_return", np.nan),
+    }
+
+
+# FUNCTION: A HOLDOUT EVALUATION OF A RUNNER DESIGN
+def run_holdout_dict(design_module_in, design_id_str_in, ohlcv_array_dict_in, token_file_path_str_in,
+                     data_context_in=None, git_precondition_dict_in=None, design_folder_str_in=".",
+                     ledger_path_str_in=None, trial_log_path_str_in=None, period_pdf_in=None, run_id_str_in=None,
+                     n_jobs_int_in=None, commit_str_in=None, code_hash_str_in=None, check_clean_tree_bool_in=False,
+                     baseline_seed_count_int_in=None, look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR,
+                     run_lookahead_bool_in=True):
+    """
+    Nicolas only. Same stream, selection, baseline, verdict and look-ahead as run_development_dict, with the
+    quarantine root and the evaluation token. Periods are get_holdout_period_pdf unless period_pdf_in is passed
+    (tests). The run starts at the development start; only window sessions are reported. No candidate-period trial
+    row is written. Token, git, once-only, forward-only and the 10-evaluation budget are so.core.holdout's checks.
+    Everything is computed in memory; the ledger row and the stage-test trial are appended before report.json,
+    report.md, the manifest, the daily paths or any printed result. Progress during the stream does not print
+    window returns.
+
+    Args:
+        design_module_in (module): Design with get_candidate_design
+        design_id_str_in (str): Design id
+        ohlcv_array_dict_in (dict): Bars from the first session through the window end
+        token_file_path_str_in (str): Token file
+        data_context_in (DataContext | None): Loaded sources (the script loads them from the quarantine)
+        git_precondition_dict_in (dict | None): Injected git result
+        design_folder_str_in (str): Design folder for the git probe and the design-tree hash
+        ledger_path_str_in (str | None): Ledger CSV
+        trial_log_path_str_in (str | None): Trial log CSV
+        period_pdf_in (pd.DataFrame | None): Injected periods (None = get_holdout_period_pdf)
+        run_id_str_in (str | None): Resume key (None = design_id)
+        n_jobs_int_in, commit_str_in, code_hash_str_in: Passed through to the stream
+        check_clean_tree_bool_in (bool): Extra runner clean-tree check (the holdout git probe already requires a
+            clean tree; tests that inject that probe leave this False)
+        baseline_seed_count_int_in (int | None): Random-timing draws
+        look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
+        run_lookahead_bool_in (bool): Run the automatic look-ahead check
+
+    Returns:
+        dict: The stream result, the reported path, the verdict, the ledger row and the unread dict
+    """
+    # THE TOKEN AND THE OTHER HOLDOUT RULES ARE CHECKED BEFORE THE QUARANTINE ROOT IS READ
+    precondition_dict = check_evaluation_precondition_dict(
+        design_module_in, design_id_str_in, token_file_path_str_in, git_precondition_dict_in, design_folder_str_in,
+        ledger_path_str_in, session_date_list_in=ohlcv_array_dict_in["session_date_list"])
+    quarantine_root_str = paths.get_quarantine_root_str()
+    window_dict = precondition_dict["window_dict"]
+    reported_start = get_date(precondition_dict["reported_start"])
+    reported_end = get_date(precondition_dict["reported_end"])
+    declared_name_list = get_declared_source_name_list(design_module_in)
+    for source_name_str in declared_name_list:
+        get_source_spec_dict(source_name_str)
+    period_pdf = period_pdf_in
+    if period_pdf is None:
+        period_pdf = get_holdout_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"], window_dict)
+    results_path_str = os.environ.get("SO_HOLDOUT_PATH") or None
+    runs_root_str = os.path.join(results_path_str, str(window_dict["window_id"]))
+    run_id_str = str(run_id_str_in) if run_id_str_in else str(design_id_str_in)
     trial_log_path_str = trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
-    n_jobs_int = int(n_jobs_int_in) if n_jobs_int_in is not None else min(MAX_CANDIDATE_PROCESS_COUNT, len(candidate_list))
-    job_dict_list = []
-    for candidate in candidate_list:
-        job_dict_list.append({
-            "candidate": candidate, "run_id_str": run_id_str, "design_file_path_str": design_file_path_str,
-            "ohlcv_path_str": ohlcv_path_str, "period_path_str": period_path_str, "buy_hold_path_str": buy_hold_path_str,
-            "context_path_str": context_path_str, "date1": date1, "date2": date2,
-            "commit_str": commit_str, "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
-            "trial_log_path_str": trial_log_path_str, "crash_after_period_id": crash_after_period_id_in,
-        })
-    run_candidate_job_list(job_dict_list, n_jobs_int)
-    score_row_list = []
-    candidate_decision_dict = {}
-    trial_id_list = []
-    for candidate in candidate_list:
-        candidate_token_str = get_candidate_token_str(candidate)
-        score_row_list.extend(read_score_row_list(run_id_str, candidate_token_str))
-        decision_list = read_decisions_list(run_id_str, candidate_token_str)
-        if decision_list is None:
-            raise ValueError(f"candidate {candidate!r} has no recorded decisions.")
-        candidate_decision_dict[candidate] = decision_list
-        for score_dict in read_score_row_list(run_id_str, candidate_token_str):
-            trial_id_list.append(get_trial_id_str(run_id_str, candidate, score_dict["period_id"]))
-    score_pdf = pd.DataFrame(score_row_list)
-    selection_pdf = get_runner_selection_pdf(score_pdf, design_module_in)
-    governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
-    dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
-    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
-    prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
-                                                         candidate_decision_dict, governing_dict, period_pdf, dead_band,
-                                                         initial_weight)
-    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1, date2, prior_only_dict,
-                                             seed_count_int_in=baseline_seed_count_int_in)
-    lookahead_dict = None
-    look_ahead_status_str = look_ahead_status_str_in
-    if run_lookahead_bool_in:
-        lookahead_dict = run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str, date1, date2,
-                                                  candidate_list, window_session_date_list, n_jobs_int,
-                                                  design_file_path_str, ohlcv_path_str, context_path_str,
-                                                  run_folder_str)
-        look_ahead_status_str = lookahead_dict["status_str"]
-    strategy_return_pdf = get_equity_daily_return_pdf(prior_only_dict["daily_equity_pdf"])
-    buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
-    verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
-                                           look_ahead_status_str_in=look_ahead_status_str)
-    if lookahead_dict is not None:
-        verdict_dict["look_ahead_dict"]["cut_date_list"] = list(lookahead_dict["cut_date_list"])
-        verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
-        verdict_dict["look_ahead_dict"]["elapsed_seconds"] = lookahead_dict.get("elapsed_seconds")
+    set_runner_active_bool(True)
+    undeclared_error = None
+    stream_dict = None
+    try:
+        stream_dict = run_candidate_streams_dict(
+            design_module_in, ohlcv_array_dict_in, period_pdf, data_context_in=data_context_in, run_id_str_in=run_id_str,
+            n_jobs_int_in=n_jobs_int_in, trial_log_path_str_in=trial_log_path_str, commit_str_in=commit_str_in,
+            code_hash_str_in=code_hash_str_in, check_clean_tree_bool_in=check_clean_tree_bool_in,
+            log_trial_bool_in=False, runs_root_str_in=runs_root_str)
+    except ValueError as error:
+        if "undeclared source" not in str(error):
+            raise
+        undeclared_error = error
+    finally:
+        set_runner_active_bool(False)
+    access_name_list = []
+    if data_context_in is not None and hasattr(data_context_in, "get_access_name_list"):
+        access_name_list = list(data_context_in.get_access_name_list())
+    undeclared_name_list = [source_name_str for source_name_str in access_name_list if source_name_str not in declared_name_list]
+    row_dict = {"window_id": window_dict["window_id"], "design_id": design_id_str_in,
+                "experiment_name": str(getattr(design_module_in, "EXPERIMENT_NAME", "") or ""),
+                "design_hash": precondition_dict["design_hash_str"], "commit": precondition_dict["commit_str"],
+                "evaluated_ts": datetime.now().isoformat(timespec="seconds"),
+                "reported_start": reported_start, "reported_end": reported_end,
+                "sources_read": ",".join(access_name_list)}
+    if undeclared_error is not None or undeclared_name_list:
+        row_dict["status"] = "invalid_undeclared"
+        append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+        log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
+                       {}, True, fold_row_in={"test_start": reported_start, "test_end": reported_end},
+                       note_str_in="invalid_undeclared", file_path_str_in=trial_log_path_str, alert_in=False)
+        print(f"invalid_undeclared: {undeclared_error or undeclared_name_list}")
+        return {"ledger_row_dict": row_dict, "stream_dict": stream_dict, "precondition_dict": precondition_dict}
+    reported_path_dict = get_reported_path_dict(stream_dict["prior_only_dict"], reported_start, reported_end)
+    unread_dict = get_unread_report_dict(reported_path_dict["daily_equity_pdf"], ohlcv_array_dict_in, reported_end)
+    unread_count = unread_dict.get("unread_session_count")
+    unread_display_dict = dict(unread_dict)
+    unread_display_dict["label_str"] = UNREAD_SANITY_CHECK_STR
+    unread_display_dict["unread_session_count"] = (0 if unread_count is None or (isinstance(unread_count, float) and not np.isfinite(unread_count))
+                                                   else int(unread_count))
+    quarantine_stamp_dict = get_view_stamp_dict(quarantine_root_str)
     view_stamp_dict = get_view_stamp_dict()
-    report_dict = get_report_payload_dict(verdict_dict, {
-        "run_id_str": run_id_str, "experiment_name_str": experiment_name_str,
-        "protocol_version_str": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
-        "commit_str": commit_str, "code_hash_str": code_hash_str, "view_stamp_dict": view_stamp_dict,
-        "candidate_list": list(candidate_list), "trial_id_list": list(trial_id_list),
-        "date1": str(date1), "date2": str(date2),
-    })
-    write_run_report_dict(run_folder_str, report_dict)
-    output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR]
-    if lookahead_dict is not None:
-        output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, LOOKAHEAD_FILE_STR, MANIFEST_FILE_STR]
-    manifest_dict = {"status": "finished", "run_id": run_id_str, "commit": commit_str, "code_hash": code_hash_str,
-                     "view_stamp": view_stamp_dict,
-                     "design": {"experiment_name": experiment_name_str,
-                                "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
-                                "file": design_file_path_str},
-                     "candidate_list": list(candidate_list), "trial_id_list": list(trial_id_list),
-                     "output_files": list(output_file_list),
-                     "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
-                                 "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
-                                 "look_ahead": look_ahead_status_str}}
-    write_run_manifest_dict(run_folder_str, manifest_dict)
-    return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
-            "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
-            "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,
-            "candidate_decision_dict": candidate_decision_dict, "commit_str": commit_str,
-            "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
-            "run_folder_str": run_folder_str, "baseline_dict": baseline_dict, "verdict_dict": verdict_dict,
-            "report_dict": report_dict, "manifest_dict": manifest_dict, "lookahead_dict": lookahead_dict}
+    set_runs_root_str(runs_root_str)
+    try:
+        finish_dict = write_runner_finish_dict(
+            design_module_in, ohlcv_array_dict_in, stream_dict, reported_path_dict, reported_start, reported_end,
+            baseline_seed_count_int_in=baseline_seed_count_int_in, look_ahead_status_str_in=look_ahead_status_str_in,
+            run_lookahead_bool_in=run_lookahead_bool_in,
+            extra_report_dict_in={"view_stamp_dict": view_stamp_dict, "quarantine_stamp_dict": quarantine_stamp_dict,
+                                  "window_id": window_dict["window_id"], "unread_dict": unread_display_dict,
+                                  "report_session_date_list": [str(session_date) for session_date in reported_path_dict["decision_session_list"]]},
+            extra_manifest_dict_in={"window_id": window_dict["window_id"], "quarantine_stamp": quarantine_stamp_dict},
+            write_files_bool_in=False)
+    finally:
+        set_runs_root_str(None)
+    look_ahead_status_str = finish_dict["verdict_dict"]["look_ahead_dict"]["status_str"]
+    if look_ahead_status_str == LOOK_AHEAD_FAIL_STR:
+        row_dict["status"] = "invalid_lookahead"
+        append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+        log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
+                       {}, True, fold_row_in={"test_start": reported_start, "test_end": reported_end},
+                       note_str_in="invalid_lookahead", file_path_str_in=trial_log_path_str, alert_in=False)
+        finish_dict["manifest_dict"]["ledger_row"] = get_json_value(row_dict)
+        write_runner_result_files_dict(stream_dict, finish_dict)
+        print("invalid_lookahead")
+        return {**stream_dict, **finish_dict, "ledger_row_dict": row_dict, "reported_path_dict": reported_path_dict,
+                "unread_dict": unread_display_dict, "precondition_dict": precondition_dict,
+                "report_session_date_list": list(reported_path_dict["decision_session_list"])}
+    ledger_fields_dict = get_holdout_ledger_fields_dict(
+        finish_dict["verdict_dict"], finish_dict["baseline_dict"], reported_path_dict, unread_dict,
+        ohlcv_array_dict_in, reported_start, reported_end, stream_dict["governing_dict"], stream_dict["period_pdf"])
+    row_dict["status"] = "valid"
+    row_dict.update(ledger_fields_dict)
+    append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+    log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
+                   {key_str: row_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
+                   True, fold_row_in={"test_start": reported_start, "test_end": reported_end},
+                   note_str_in="holdout evaluation", file_path_str_in=trial_log_path_str, alert_in=False)
+    finish_dict["manifest_dict"]["ledger_row"] = get_json_value(row_dict)
+    finish_dict["manifest_dict"]["window_id"] = window_dict["window_id"]
+    finish_dict["manifest_dict"]["quarantine_stamp"] = quarantine_stamp_dict
+    write_runner_result_files_dict(stream_dict, finish_dict, reported_path_dict)
+    return {**stream_dict, **finish_dict, "ledger_row_dict": row_dict, "reported_path_dict": reported_path_dict,
+            "unread_dict": unread_display_dict, "precondition_dict": precondition_dict,
+            "report_session_date_list": list(reported_path_dict["decision_session_list"])}

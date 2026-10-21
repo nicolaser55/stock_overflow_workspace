@@ -938,8 +938,40 @@ def test_evaluation():
         assert later_row["status"] == "invalid_lookahead"
         assert "decision bar" in leak_stdout_file.getvalue()
         assert not os.path.isfile(os.path.join(path_dict["results_path_str"], later_row["window_id"], bar_kind_str, "strategy_daily_equity.csv"))
+    # A CRASH IN THE DAILY-PATH WRITER STILL LEAVES THE LEDGER ROW AND REFUSES A SECOND RUN
+    import so.core.holdout as holdout_mod
+    from so.core.trial_log import read_trial_log_pdf
+    crash_module = get_selection_design()
+    crash_module.EXPERIMENT_NAME = "exp_holdout_crash_paths"
+    crash_ledger_str = os.path.join(TEMP_ROOT_STR, "crash_path_evaluations.csv")
+    crash_log_str = os.path.join(TEMP_ROOT_STR, "crash_path_trial_log.csv")
+    original_writer = holdout_mod.write_holdout_daily_paths_dict
+    def raise_daily_writer(output_path_str_in, report_dict_in):
+        # THE LEDGER AND THE TRIAL MUST ALREADY BE ON DISK WHEN THIS RUNS
+        raise RuntimeError("daily path writer crash")
+    holdout_mod.write_holdout_daily_paths_dict = raise_daily_writer
+    crashed_bool = False
+    try:
+        run_holdout_evaluation(crash_module, "crash_paths", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=crash_ledger_str, trial_log_path_str_in=crash_log_str)
+    except RuntimeError as error:
+        crashed_bool = "daily path writer crash" in str(error)
+    finally:
+        holdout_mod.write_holdout_daily_paths_dict = original_writer
+    assert crashed_bool, "the daily path writer did not raise"
+    crash_ledger_pdf = read_holdout_evaluation_pdf(crash_ledger_str)
+    assert len(crash_ledger_pdf) == 1
+    crash_trial_pdf = read_trial_log_pdf(crash_log_str)
+    assert len(crash_trial_pdf) == 1 and str(crash_trial_pdf["stage"].iloc[0]) == "test"
+    try:
+        run_holdout_evaluation(crash_module, "crash_paths_again", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
+                               ledger_path_str_in=crash_ledger_str, trial_log_path_str_in=crash_log_str)
+        raise AssertionError("a second evaluation after a writer crash was accepted")
+    except ValueError as error:
+        assert "already evaluated" in str(error)
     passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
     passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']}; template {template_row['status']})")
+    passed("a crash in the daily-path writer still counts the evaluation; a second run is refused")
 
 # FUNCTION: TEST THAT THE LEDGER STORES THE DESIGN'S BASELINES
 def test_baseline_ledger():
@@ -1193,7 +1225,8 @@ def test_holdout_flag_scan():
     # FAIL WHEN THE ARGUMENT APPEARS ANYWHERE ELSE
     assert offender_list == []
     # THE QUARANTINE ROOT MAY BE NAMED ONLY IN THE PATHS MODULE, THE EVALUATION LOADER, THE EVALUATION SCRIPT AND TESTS
-    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "scripts/holdout_evaluate.py", "scripts/refresh_development_view.py"}
+    quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "so/runner/run.py", "scripts/holdout_evaluate.py",
+                              "scripts/refresh_development_view.py"}
     quarantine_offender_list = []
     for root_str, dir_list, file_list in os.walk(WORKSPACE_PATH_STR):
         dir_list[:] = [dir_name for dir_name in dir_list if dir_name not in {".git", "venv-main", "__pycache__", "logs"}]
@@ -1209,7 +1242,7 @@ def test_holdout_flag_scan():
                 if needle_str in text:
                     quarantine_offender_list.append(f"{rel_str}: {needle_str}")
     assert quarantine_offender_list == []
-    passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests; quarantine root only in paths, holdout, the evaluation script and tests")
+    passed("holdout guard off only in the pipeline, the named scripts, holdout.py and tests; quarantine root only in paths, holdout, the runner, the evaluation script and tests")
 
 # FUNCTION: TEST SLIDING THE ACTIVE WINDOW
 def test_slide_window():
