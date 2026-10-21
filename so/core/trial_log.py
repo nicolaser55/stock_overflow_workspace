@@ -28,6 +28,9 @@ share an id. One row is "{timestamp}_{pid}_{config_hash}". A row written in a ba
 "{timestamp}{row_index:05d}_{pid}_{config_hash}". Rows already in the log keep the earlier id (those two forms
 without the process id). They are not rewritten.
 
+A caller may pass a stable trial_id (the runner: run id + candidate + period). When that id is already in the file,
+the append is skipped so a resumed run never logs the same trial twice.
+
 Columns:
     trial_id                unique id (timestamp, process id and config hash; older rows have no process id)
     logged_ts               local time of the log entry
@@ -145,9 +148,10 @@ def get_setting_train_start(fold_dict_in, setting_dict_in):
 
 # FUNCTION: LOG A TRIAL
 def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_dict_in, test_window_touched_bool_in,
-                   fold_row_in=None, note_str_in="", file_path_str_in=None, alert_in=False):
+                   fold_row_in=None, note_str_in="", file_path_str_in=None, alert_in=False, trial_id_str_in=None):
     """
-    Appends one entry to the shared trial log.
+    Appends one entry to the shared trial log. A stable trial_id_str_in that is already in the file is not written
+    again (a resumed run).
 
     Args:
         experiment_config_in (module): The experiment's config module (name, protocol version and hash are read from it)
@@ -159,9 +163,10 @@ def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_d
         note_str_in (str): Free text
         file_path_str_in (str | None): Trial log CSV path (None = paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
         alert_in (bool): Display file messages
+        trial_id_str_in (str | None): Stable id (None = timestamp, process id and config hash)
 
     Returns:
-        dict: The logged row
+        dict: The logged row (appended_bool is True when a new row was written)
     """
     # DEFINE THE LOGGED TIMESTAMP, THE CONFIG HASH AND THE PROCESS ID (THE ID STAYS UNIQUE ACROSS PROCESSES)
     logged_ts = datetime.now()
@@ -169,9 +174,11 @@ def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_d
     pid_int = os.getpid()
     # CONVERT THE FOLD ROW TO A DICTIONARY
     fold_dict = dict(fold_row_in) if fold_row_in is not None else {}
+    # A STABLE ID WINS; OTHERWISE THE TIMESTAMP FORM
+    trial_id_str = str(trial_id_str_in) if trial_id_str_in else f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}_{pid_int}_{config_hash_str}"
     # DEFINE THE TRIAL ROW
     trial_dict = {
-        "trial_id": f"{logged_ts.strftime('%Y%m%d%H%M%S%f')}_{pid_int}_{config_hash_str}",
+        "trial_id": trial_id_str,
         "logged_ts": logged_ts.isoformat(timespec="seconds"),
         "experiment": experiment_config_in.EXPERIMENT_NAME,
         "protocol_version": experiment_config_in.PROTOCOL_VERSION,
@@ -189,11 +196,14 @@ def log_trial_dict(experiment_config_in, stage_str_in, setting_dict_in, metric_d
         "metric_json": json.dumps(to_json_safe(metric_dict_in), sort_keys=True),
         "note": note_str_in,
     }
-    # APPEND THE ROW (THE EXISTING ROWS ARE NOT READ OR REWRITTEN)
+    # APPEND THE ROW (A STABLE ID THAT IS ALREADY PRESENT IS SKIPPED)
     file_path_str = file_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
-    append_csv_record_pdf(pd.DataFrame([trial_dict], columns=TRIAL_LOG_COLUMN_LIST), file_path_str, TRIAL_LOG_COLUMN_LIST)
+    skip_col_str = "trial_id" if trial_id_str_in else None
+    appended_count = append_csv_record_pdf(pd.DataFrame([trial_dict], columns=TRIAL_LOG_COLUMN_LIST), file_path_str,
+                                           TRIAL_LOG_COLUMN_LIST, skip_existing_col_str_in=skip_col_str)
+    trial_dict["appended_bool"] = int(appended_count) > 0
     # DISPLAY INFORMATION
-    print(f"✅ Trial appended to '{file_path_str}'") if alert_in else None
+    print(f"✅ Trial appended to '{file_path_str}'") if alert_in and trial_dict["appended_bool"] else None
     # RETURN THE ROW
     return trial_dict
 

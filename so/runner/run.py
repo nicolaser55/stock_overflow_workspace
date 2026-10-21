@@ -1,0 +1,431 @@
+import hashlib
+import importlib.util
+import multiprocessing
+import os
+import subprocess
+import sys
+from datetime import datetime
+from urllib.parse import quote
+import pandas as pd
+# IMPORT THE SHARED CONFIGURATION (COSTS, CAPITAL)
+from so import config, paths
+# IMPORT THE TRIAL LOG
+from so.core.trial_log import log_trial_dict
+from so.core.point_in_time import set_direct_read_blocked_bool
+from so.core.reentry_simulation import get_window_session_idx_arr
+# IMPORT THE 4A LOOP, PERIODS, SELECTION AND CHECKPOINTS
+from so.runner.engine import FractionalWeightEngine
+from so.runner.loop import DailyLoop
+from so.runner.preflight import check_design_file
+from so.runner.periods import (check_quarantine_refused, get_development_run_period_pdf, get_period_date)
+from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_period_score_dict,
+                                 get_runner_selection_pdf, get_governing_candidate_dict,
+                                 run_prior_only_from_decisions_dict)
+from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle, read_pickle, get_file_exists_bool,
+                                  write_checkpoint_dict, read_checkpoint_dict, write_decisions_list, read_decisions_list,
+                                  write_score_row_list, read_score_row_list, write_done_marker, get_done_bool)
+
+"""
+Development Run (infrastructure step 4b-1a)
+
+Candidates, periods, pooled prior-only selection, trial logging, checkpoints and parallel streams on top of the 4a
+daily loop. Development view only: the quarantine root is refused (holdout evaluation is 4b-1c).
+
+The design module declares CANDIDATE_LIST and get_candidate_design(candidate), which returns a fresh design object
+per candidate. Each candidate is its own stream over the span (first period start through last period end). At the
+end of each period the stream is scored (period return and buy-and-hold for the same period), one trial row is
+appended, then the design and the engine are pickled. A crash resumes from that pickle.
+
+Candidates run in separate processes, up to 8, with the spawn start method. There is no shared mutable state. A
+single-process run is the same code path as n_jobs=1.
+
+Trial ids are stable: run id + candidate + period. A resumed run never writes the same trial twice. Each row carries
+the git commit and a hash of the design folder.
+"""
+
+# CANDIDATES RUN IN AT MOST THIS MANY PROCESSES
+MAX_CANDIDATE_PROCESS_COUNT = 8
+# SHARED PAYLOAD INSIDE THE RUN FOLDER
+OHLCV_FILE_STR = "ohlcv.pkl"
+PERIOD_FILE_STR = "period.pkl"
+BUY_HOLD_FILE_STR = "buy_hold.pkl"
+CONTEXT_FILE_STR = "data_context.pkl"
+
+
+# FUNCTION: A FILESYSTEM-SAFE CANDIDATE TOKEN
+def get_candidate_token_str(candidate_in):
+    """
+    Percent-encodes the candidate name so a path and a trial id stay unique.
+
+    Args:
+        candidate_in: Candidate (usually a str)
+
+    Returns:
+        str: Token
+    """
+    # QUOTE EVERY CHARACTER THAT IS NOT UNRESERVED
+    return quote(str(candidate_in), safe="")
+
+
+# FUNCTION: THE STABLE TRIAL ID
+def get_trial_id_str(run_id_str_in, candidate_in, period_id_in):
+    """
+    run id + candidate + period. A resumed run rebuilds the same string.
+
+    Args:
+        run_id_str_in (str): Run id
+        candidate_in: Candidate
+        period_id_in (int): Period id
+
+    Returns:
+        str: Trial id
+    """
+    # THREE FIELDS, PERCENT-ENCODED CANDIDATE
+    return f"{run_id_str_in}__{get_candidate_token_str(candidate_in)}__{int(period_id_in)}"
+
+
+# FUNCTION: SHA256 OF THE DESIGN FOLDER'S FILES
+def get_design_folder_hash_str(folder_path_str_in):
+    """
+    Sorted relative paths and file bytes, skipping __pycache__ and .pyc. The hash changes when a design file changes.
+
+    Args:
+        folder_path_str_in (str): Design folder
+
+    Returns:
+        str: Hex digest
+    """
+    # EVERY FILE UNDER THE FOLDER, IN PATH ORDER
+    hasher = hashlib.sha256()
+    folder_str = os.path.abspath(folder_path_str_in)
+    path_list = []
+    for dir_str, dir_name_list, file_name_list in os.walk(folder_str):
+        dir_name_list[:] = sorted(name_str for name_str in dir_name_list if name_str != "__pycache__")
+        for file_name_str in sorted(file_name_list):
+            if file_name_str.endswith(".pyc"):
+                continue
+            path_list.append(os.path.join(dir_str, file_name_str))
+    for file_path_str in path_list:
+        rel_str = os.path.relpath(file_path_str, folder_str).replace("\\", "/")
+        hasher.update(rel_str.encode("utf-8"))
+        hasher.update(b"\0")
+        with open(file_path_str, "rb") as file_obj:
+            hasher.update(file_obj.read())
+    return hasher.hexdigest()
+
+
+# FUNCTION: GIT HEAD OF THE WORKSPACE
+def get_git_head_str():
+    """
+    git rev-parse HEAD. "unknown" when git is missing.
+
+    Args:
+        None
+
+    Returns:
+        str: Commit hash, or "unknown"
+    """
+    # THE WORKSPACE ROOT, NOT THE DATA FOLDER
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=paths.WORKSPACE_PATH_STR, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+# FUNCTION: LOAD A DESIGN FILE INTO A NAMED MODULE
+def get_file_design_module(file_path_str_in):
+    """
+    Executes the file into sys.modules under a stable name so a pickled design class can be found on resume.
+
+    Args:
+        file_path_str_in (str): Path of design.py
+
+    Returns:
+        module: The loaded module
+    """
+    # THE NAME IS A HASH OF THE PATH SO TWO DESIGNS DO NOT COLLIDE
+    abs_path_str = os.path.abspath(file_path_str_in)
+    module_name_str = "so_runner_design_" + hashlib.md5(abs_path_str.encode("utf-8")).hexdigest()
+    if module_name_str in sys.modules:
+        return sys.modules[module_name_str]
+    spec = importlib.util.spec_from_file_location(module_name_str, abs_path_str)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name_str] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# FUNCTION: THE DESIGN FILE OF A MODULE
+def get_module_file_path_str(design_module_in):
+    """
+    Args:
+        design_module_in (module): Design
+
+    Returns:
+        str: Path
+    """
+    # A MODULE WITH NO FILE CANNOT BE SPAWNED
+    file_path_str = getattr(design_module_in, "__file__", None)
+    if not file_path_str or not os.path.isfile(file_path_str):
+        raise ValueError("the design module has no file; the runner loads a design.py.")
+    return os.path.abspath(file_path_str)
+
+
+# FUNCTION: A DEFAULT ENGINE FOR ONE CANDIDATE
+def get_candidate_engine(design_module_in):
+    """
+    FractionalWeightEngine with the design's DEAD_BAND (default 0) and the shared costs.
+
+    Args:
+        design_module_in (module): Design
+
+    Returns:
+        FractionalWeightEngine: Fresh engine
+    """
+    # OPTIONAL CONSTANTS, SHARED COSTS
+    dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
+    return FractionalWeightEngine(dead_band, config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
+                                  config.MARKET_EXIT_SLIPPAGE_PER_SHARE)
+
+
+# FUNCTION: APPEND ONE CANDIDATE-PERIOD TRIAL
+def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_in, period_row_in, score_dict_in,
+                                    commit_str_in, design_folder_hash_str_in, trial_log_path_str_in):
+    """
+    One row, as soon as the period is scored, before any summary. A stable id that is already present is skipped.
+
+    Args:
+        design_module_in (module): Design (EXPERIMENT_NAME, PROTOCOL_VERSION)
+        run_id_str_in (str): Run id
+        candidate_in: Candidate
+        period_row_in (pd.Series | dict): Period
+        score_dict_in (dict): total_return, buy_hold_total_return, excess_return
+        commit_str_in (str): Git commit
+        design_folder_hash_str_in (str): Hash of the design folder
+        trial_log_path_str_in (str): Trial log CSV
+
+    Returns:
+        dict: The trial row
+    """
+    # THE ID IS STABLE ACROSS A RESUME
+    period_id = int(period_row_in["period_id"] if not isinstance(period_row_in, dict) else period_row_in["period_id"])
+    trial_id_str = get_trial_id_str(run_id_str_in, candidate_in, period_id)
+    setting_dict = {"run_id": run_id_str_in, "candidate": candidate_in, "commit": commit_str_in,
+                    "design_folder_hash": design_folder_hash_str_in}
+    metric_dict = {"total_return": float(score_dict_in["total_return"]),
+                   "buy_hold_total_return": float(score_dict_in["buy_hold_total_return"]),
+                   "excess_return": float(score_dict_in["excess_return"])}
+    fold_row = {"fold_id": period_id,
+                "valid_start": get_period_date(period_row_in["period_start"] if not isinstance(period_row_in, dict) else period_row_in["period_start"]),
+                "valid_end": get_period_date(period_row_in["period_end"] if not isinstance(period_row_in, dict) else period_row_in["period_end"])}
+    return log_trial_dict(design_module_in, "validation", setting_dict, metric_dict, False, fold_row_in=fold_row,
+                          file_path_str_in=trial_log_path_str_in, trial_id_str_in=trial_id_str)
+
+
+# FUNCTION: ONE CANDIDATE STREAM (THE SPAWN TARGET)
+def run_candidate_job_dict(job_dict_in):
+    """
+    Loads the shared payload from the run folder, streams one candidate, logs each period as it is scored, and
+    checkpoints. No shared mutable state with other candidates.
+
+    Args:
+        job_dict_in (dict): Paths and scalars (no live objects)
+
+    Returns:
+        dict: candidate, score_row_list, decision_count
+    """
+    # LOAD THE DESIGN FILE FIRST SO A PICKLED CLASS CAN BE FOUND
+    design_module = get_file_design_module(job_dict_in["design_file_path_str"])
+    check_design_file(job_dict_in["design_file_path_str"])
+    candidate = job_dict_in["candidate"]
+    candidate_token_str = get_candidate_token_str(candidate)
+    run_id_str = job_dict_in["run_id_str"]
+    ohlcv_array_dict = read_pickle(job_dict_in["ohlcv_path_str"])
+    period_pdf = read_pickle(job_dict_in["period_path_str"])
+    buy_hold_return_dict = read_pickle(job_dict_in["buy_hold_path_str"])
+    data_context = read_pickle(job_dict_in["context_path_str"]) if get_file_exists_bool(job_dict_in["context_path_str"]) else None
+    date1, date2 = job_dict_in["date1"], job_dict_in["date2"]
+    dead_band = float(getattr(design_module, "DEAD_BAND", 0.0))
+    initial_weight = float(getattr(design_module, "INITIAL_WEIGHT", 1.0))
+    crash_after_period_id = job_dict_in.get("crash_after_period_id")
+    # A FINISHED STREAM RETURNS THE SAVED SCORES
+    if get_done_bool(run_id_str, candidate_token_str):
+        return {"candidate": candidate, "score_row_list": read_score_row_list(run_id_str, candidate_token_str),
+                "decision_count": len(read_decisions_list(run_id_str, candidate_token_str) or [])}
+    checkpoint_dict = read_checkpoint_dict(run_id_str, candidate_token_str)
+    if checkpoint_dict is None:
+        design = design_module.get_candidate_design(candidate)
+        engine = get_candidate_engine(design_module)
+        loop = DailyLoop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
+                         config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                         job_dict_in["design_file_path_str"], check_source_bool_in=False)
+        score_row_list = []
+        completed_period_id_set = set()
+    else:
+        design = checkpoint_dict["design"]
+        engine = checkpoint_dict["engine"]
+        loop = DailyLoop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
+                         config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                         job_dict_in["design_file_path_str"], check_source_bool_in=False)
+        loop.restore_progress(checkpoint_dict["next_session_pos"], checkpoint_dict["target_weight_list"],
+                              checkpoint_dict["decision_session_list"], checkpoint_dict["decision_dict_list"])
+        score_row_list = list(checkpoint_dict.get("score_row_list") or read_score_row_list(run_id_str, candidate_token_str))
+        completed_period_id_set = {int(row["period_id"]) for row in score_row_list}
+    # BLOCK DIRECT LOADER CALLS FOR THE WHOLE STREAM
+    set_direct_read_blocked_bool(True)
+    try:
+        period_column_str_list = list(period_pdf.columns)
+        for period_row in period_pdf.sort_values("period_id").itertuples(index=False):
+            period_row_dict = {column_str: getattr(period_row, column_str) for column_str in period_column_str_list}
+            period_id = int(period_row_dict["period_id"])
+            if period_id in completed_period_id_set:
+                continue
+            loop.run_through_date(period_row_dict["period_end"])
+            result_dict = loop.get_result_dict()
+            score_dict = get_stream_period_score_dict(result_dict["daily_equity_pdf"], period_row_dict,
+                                                      buy_hold_return_dict[period_id])
+            score_dict["candidate"] = candidate
+            score_dict["fold_id"] = period_id
+            # THE TRIAL ROW IS WRITTEN BEFORE ANY SUMMARY AND BEFORE THE CHECKPOINT
+            log_candidate_period_trial_dict(design_module, run_id_str, candidate, period_row_dict, score_dict,
+                                            job_dict_in["commit_str"], job_dict_in["design_folder_hash_str"],
+                                            job_dict_in["trial_log_path_str"])
+            score_row_list.append(score_dict)
+            completed_period_id_set.add(period_id)
+            write_checkpoint_dict(run_id_str, candidate_token_str, {
+                "design": loop.design, "engine": loop.engine, "next_session_pos": loop.next_session_pos_int,
+                "target_weight_list": list(loop.target_weight_list),
+                "decision_session_list": list(loop.decision_session_list),
+                "decision_dict_list": list(loop.decision_dict_list), "period_id": period_id,
+                "score_row_list": list(score_row_list),
+            })
+            write_decisions_list(run_id_str, candidate_token_str, loop.decision_dict_list)
+            write_score_row_list(run_id_str, candidate_token_str, score_row_list)
+            if crash_after_period_id is not None and int(period_id) == int(crash_after_period_id):
+                raise RuntimeError(f"runner crash after period {period_id} checkpoint")
+    finally:
+        set_direct_read_blocked_bool(False)
+    write_done_marker(run_id_str, candidate_token_str)
+    return {"candidate": candidate, "score_row_list": score_row_list, "decision_count": len(loop.decision_dict_list)}
+
+
+# FUNCTION: RUN CANDIDATE JOBS, SPAWNED OR IN-PROCESS
+def run_candidate_job_list(job_dict_list_in, n_jobs_int_in):
+    """
+    n_jobs 1 runs in this process. More than 1 uses spawn, up to MAX_CANDIDATE_PROCESS_COUNT.
+
+    Args:
+        job_dict_list_in (list[dict]): One job per candidate
+        n_jobs_int_in (int): Requested process count
+
+    Returns:
+        list[dict]: Worker returns, in candidate-list order
+    """
+    # ONE PROCESS PER CANDIDATE, CAPPED
+    job_count = len(job_dict_list_in)
+    n_jobs_int = max(1, min(int(n_jobs_int_in), MAX_CANDIDATE_PROCESS_COUNT, job_count))
+    if n_jobs_int <= 1:
+        return [run_candidate_job_dict(job_dict) for job_dict in job_dict_list_in]
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(processes=n_jobs_int) as pool:
+        return pool.map(run_candidate_job_dict, job_dict_list_in)
+
+
+# FUNCTION: A DEVELOPMENT RUN OF EVERY CANDIDATE
+def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=None, run_id_str_in=None,
+                         n_jobs_int_in=None, period_pdf_in=None, trial_log_path_str_in=None, commit_str_in=None,
+                         crash_after_period_id_in=None):
+    """
+    Development view. Refuses the quarantine root. Forms periods from PERIOD_RULE unless period_pdf_in is passed
+    (tests). Streams each candidate, logs each candidate-period as it is scored, then builds the prior-only path
+    from the recorded decisions.
+
+    Args:
+        design_module_in (module): Design (CANDIDATE_LIST, get_candidate_design, PERIOD_RULE, SELECTION_RULE)
+        ohlcv_array_dict_in (dict): Bars through the development end
+        data_context_in (DataContext | None): Loaded sources
+        run_id_str_in (str | None): Resume key (None = experiment name plus timestamp)
+        n_jobs_int_in (int | None): Process count (None = min(8, candidate count); 1 is in-process)
+        period_pdf_in (pd.DataFrame | None): Injected periods (None = PERIOD_RULE)
+        trial_log_path_str_in (str | None): Trial log CSV (None = the shared log)
+        commit_str_in (str | None): Injected commit (None = git HEAD)
+        crash_after_period_id_in (int | None): Test hook: raise after that period's checkpoint
+
+    Returns:
+        dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list
+    """
+    # THE DEVELOPMENT VIEW NEVER OPENS THE QUARANTINE
+    check_quarantine_refused()
+    if not hasattr(design_module_in, "CANDIDATE_LIST"):
+        raise ValueError("design module is missing CANDIDATE_LIST.")
+    if not hasattr(design_module_in, "get_candidate_design"):
+        raise ValueError("design module is missing get_candidate_design.")
+    candidate_list = list(design_module_in.CANDIDATE_LIST)
+    if len(candidate_list) == 0:
+        raise ValueError("CANDIDATE_LIST is empty.")
+    design_file_path_str = get_module_file_path_str(design_module_in)
+    check_design_file(design_file_path_str)
+    design_folder_str = os.path.dirname(design_file_path_str)
+    design_folder_hash_str = get_design_folder_hash_str(design_folder_str)
+    commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
+    period_pdf = period_pdf_in
+    if period_pdf is None:
+        period_pdf, _fold_pdf = get_development_run_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"])
+    else:
+        period_pdf = period_pdf.copy()
+    if period_pdf.empty:
+        raise ValueError("no periods to run.")
+    date1 = get_period_date(period_pdf.sort_values("period_id")["period_start"].iloc[0])
+    date2 = get_period_date(period_pdf.sort_values("period_id")["period_end"].iloc[-1])
+    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1, date2)
+    window_session_date_list = [ohlcv_array_dict_in["session_date_list"][int(session_idx)] for session_idx in window_session_idx_arr]
+    buy_hold_return_dict = get_buy_hold_period_return_dict(ohlcv_array_dict_in, period_pdf, date1, date2)
+    experiment_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME", "runner"))
+    run_id_str = str(run_id_str_in) if run_id_str_in else f"{experiment_name_str}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+    run_folder_str = make_folder(get_run_folder_str(run_id_str))
+    ohlcv_path_str = os.path.join(run_folder_str, OHLCV_FILE_STR)
+    period_path_str = os.path.join(run_folder_str, PERIOD_FILE_STR)
+    buy_hold_path_str = os.path.join(run_folder_str, BUY_HOLD_FILE_STR)
+    context_path_str = os.path.join(run_folder_str, CONTEXT_FILE_STR)
+    write_pickle(ohlcv_path_str, ohlcv_array_dict_in)
+    write_pickle(period_path_str, period_pdf)
+    write_pickle(buy_hold_path_str, buy_hold_return_dict)
+    if data_context_in is not None:
+        write_pickle(context_path_str, data_context_in)
+    trial_log_path_str = trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
+    n_jobs_int = int(n_jobs_int_in) if n_jobs_int_in is not None else min(MAX_CANDIDATE_PROCESS_COUNT, len(candidate_list))
+    job_dict_list = []
+    for candidate in candidate_list:
+        job_dict_list.append({
+            "candidate": candidate, "run_id_str": run_id_str, "design_file_path_str": design_file_path_str,
+            "ohlcv_path_str": ohlcv_path_str, "period_path_str": period_path_str, "buy_hold_path_str": buy_hold_path_str,
+            "context_path_str": context_path_str, "date1": date1, "date2": date2,
+            "commit_str": commit_str, "design_folder_hash_str": design_folder_hash_str,
+            "trial_log_path_str": trial_log_path_str, "crash_after_period_id": crash_after_period_id_in,
+        })
+    run_candidate_job_list(job_dict_list, n_jobs_int)
+    score_row_list = []
+    candidate_decision_dict = {}
+    trial_id_list = []
+    for candidate in candidate_list:
+        candidate_token_str = get_candidate_token_str(candidate)
+        score_row_list.extend(read_score_row_list(run_id_str, candidate_token_str))
+        decision_list = read_decisions_list(run_id_str, candidate_token_str)
+        if decision_list is None:
+            raise ValueError(f"candidate {candidate!r} has no recorded decisions.")
+        candidate_decision_dict[candidate] = decision_list
+        for score_dict in read_score_row_list(run_id_str, candidate_token_str):
+            trial_id_list.append(get_trial_id_str(run_id_str, candidate, score_dict["period_id"]))
+    score_pdf = pd.DataFrame(score_row_list)
+    selection_pdf = get_runner_selection_pdf(score_pdf, design_module_in)
+    governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
+    dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
+    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
+    prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
+                                                         candidate_decision_dict, governing_dict, period_pdf, dead_band,
+                                                         initial_weight)
+    return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
+            "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
+            "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,
+            "candidate_decision_dict": candidate_decision_dict, "commit_str": commit_str,
+            "design_folder_hash_str": design_folder_hash_str, "run_folder_str": run_folder_str}
