@@ -465,6 +465,70 @@ def test_missing_token_and_dirty_tree_are_refused():
     passed("missing token and a dirty tree are refused")
 
 
+# FUNCTION: A CRASH IN THE REPORT WRITER STILL COUNTS THE EVALUATION
+def test_report_writer_crash_still_counts():
+    """
+    write_run_report_dict raises after the ledger row and the stage-test trial are appended. A second evaluation
+    of the same design is refused.
+
+    Returns:
+        None
+    """
+    # THE WINDOW SITS AFTER THE DEVELOPMENT DATA, SAME WORLD AS THE MATCHING CHECK
+    world_dict = get_matching_world_dict()
+    write_active_window_pdf(world_dict["window_start"], world_dict["window_end"], "w_crash_report")
+    env_dict = get_holdout_env_dict()
+    set_holdout_env(env_dict)
+    import so.runner.run as run_mod
+    original_writer = run_mod.write_run_report_dict
+    def raise_report_writer(run_folder_str_in, report_dict_in):
+        # THE LEDGER AND THE TRIAL MUST ALREADY BE ON DISK WHEN THIS RUNS
+        raise RuntimeError("report writer crash")
+    ledger_path_str = os.path.join(TEMP_ROOT_STR, "crash_report_ledger.csv")
+    trial_log_path_str = os.path.join(TEMP_ROOT_STR, "crash_report_trial_log.csv")
+    git_dict = get_git_dict(design_tree_str_in="crash-report-tree")
+    run_mod.write_run_report_dict = raise_report_writer
+    crashed_bool = False
+    try:
+        try:
+            run_holdout_dict(
+                cand_design, "crash_report", world_dict["ohlcv_array_dict"], env_dict["token_path_str"],
+                git_precondition_dict_in=git_dict, design_folder_str_in=os.path.dirname(cand_design.__file__),
+                ledger_path_str_in=ledger_path_str, trial_log_path_str_in=trial_log_path_str,
+                period_pdf_in=world_dict["holdout_pdf"], run_id_str_in="crash_report", n_jobs_int_in=1,
+                commit_str_in="testcommit", code_hash_str_in="crashhash", baseline_seed_count_int_in=2,
+                run_lookahead_bool_in=False)
+        except RuntimeError as error:
+            crashed_bool = "report writer crash" in str(error)
+        assert crashed_bool, "the report writer did not raise"
+        ledger_pdf = read_holdout_evaluation_pdf(ledger_path_str)
+        assert len(ledger_pdf) == 1
+        assert str(ledger_pdf["design_id"].iloc[0]) == "crash_report"
+        assert str(ledger_pdf["status"].iloc[0]) == "valid"
+        trial_pdf = read_trial_log_pdf(trial_log_path_str)
+        assert len(trial_pdf) == 1
+        assert str(trial_pdf["stage"].iloc[0]) == "test"
+        assert "holdout evaluation" in str(trial_pdf["note"].iloc[0])
+        run_mod.write_run_report_dict = original_writer
+        second_raised_bool = False
+        try:
+            run_holdout_dict(
+                cand_design, "crash_report_again", world_dict["ohlcv_array_dict"], env_dict["token_path_str"],
+                git_precondition_dict_in=git_dict, design_folder_str_in=os.path.dirname(cand_design.__file__),
+                ledger_path_str_in=ledger_path_str, trial_log_path_str_in=trial_log_path_str,
+                period_pdf_in=world_dict["holdout_pdf"], run_id_str_in="crash_report_again", n_jobs_int_in=1,
+                commit_str_in="testcommit", code_hash_str_in="crashhash", baseline_seed_count_int_in=2,
+                run_lookahead_bool_in=False)
+        except ValueError as error:
+            second_raised_bool = "already evaluated" in str(error)
+        assert second_raised_bool, "a second evaluation after a report-writer crash was accepted"
+        assert len(read_holdout_evaluation_pdf(ledger_path_str)) == 1
+    finally:
+        run_mod.write_run_report_dict = original_writer
+        clear_holdout_env()
+    passed("a crash in the report writer still counts the evaluation; a second run is refused")
+
+
 # FUNCTION: THE EVALUATION SCRIPT CHOOSES THE RUNNER PATH FOR A PORTED DESIGN
 def test_evaluate_script_path_choice():
     """
@@ -497,6 +561,7 @@ if __name__ == "__main__":
         test_second_evaluation_and_forward_slide()
         test_evaluation_budget_is_enforced()
         test_missing_token_and_dirty_tree_are_refused()
+        test_report_writer_crash_still_counts()
         test_evaluate_script_path_choice()
         print("\nAll runner holdout tests passed ✅")
     finally:

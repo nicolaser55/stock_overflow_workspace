@@ -1562,6 +1562,25 @@ def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
     row_pdf = pd.DataFrame([row_dict_in], columns=EVALUATION_COLUMN_LIST)
     append_csv_record_pdf(row_pdf, file_path_str, EVALUATION_COLUMN_LIST)
 
+# FUNCTION: WRITE THE HOLDOUT DAILY PATHS UNDER SO_HOLDOUT_PATH
+def write_holdout_daily_paths_dict(output_path_str_in, report_dict_in):
+    """
+    Strategy and buy-and-hold daily equity, and the refit log when present. Call only after the ledger row.
+
+    Args:
+        output_path_str_in (str): SO_HOLDOUT_PATH/<window_id>/<design_id>/
+        report_dict_in (dict): Output of get_holdout_report_dict
+
+    Returns:
+        None
+    """
+    # THE FOLDER IS CREATED HERE; A CRASH AFTER THE LEDGER STILL COUNTS THE EVALUATION
+    os.makedirs(output_path_str_in, exist_ok=True)
+    report_dict_in["daily_equity_pdf"].to_csv(os.path.join(output_path_str_in, "strategy_daily_equity.csv"), index=False)
+    report_dict_in["buy_hold_equity_pdf"].to_csv(os.path.join(output_path_str_in, "buy_hold_daily_equity.csv"), index=False)
+    if report_dict_in.get("refit_log_pdf") is not None:
+        report_dict_in["refit_log_pdf"].to_csv(os.path.join(output_path_str_in, "refit_log.csv"), index=False)
+
 # FUNCTION: EVALUATE ONE FROZEN DESIGN ON THE ACTIVE WINDOW
 def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_in, token_file_path_str_in, git_precondition_dict_in=None,
                            design_folder_str_in=".", ledger_path_str_in=None, trial_log_path_str_in=None, source_frame_dict_in=None):
@@ -1572,11 +1591,13 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     (missing means ["SPY_1MIN"]) writes no daily paths and appends a ledger row with status "invalid_undeclared".
     A failed truncation test writes no daily paths and appends a ledger row with status "invalid_lookahead" (it
     counts against the window budget) plus one trial-log row (stage "test", test_window_touched True, note
-    "invalid_lookahead", no return metrics).     A valid run writes the holdout paths under
+    "invalid_lookahead", no return metrics). A valid run appends the ledger row and the stage-test trial first, then
+    writes the holdout paths under
     SO_HOLDOUT_PATH/<window_id>/<design_id>/, and, when the path carried a refit log, refit_log.csv beside them.
     The ledger row records the retraining frequency, the training-window candidates, the holdout refit count, the
     average share purged, turnover per year and the candidate-switch count. It appends one trial-log
-    row (stage "test", test_window_touched True).
+    row (stage "test", test_window_touched True). A printed result comes after those writes. Progress during the
+    replay does not print window returns.
 
     Args:
         design_module_in (module): Design
@@ -1642,34 +1663,25 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
     # A SOURCE IN THE ACCESS LOG THAT THE DESIGN DID NOT DECLARE IS NOT A VALID RESULT
     undeclared_name_list = [source_name_str for source_name_str in data_context.get_access_name_list() if source_name_str not in declared_name_list]
     if undeclared_error is not None or undeclared_name_list:
-        print(f"invalid_undeclared: {undeclared_error or undeclared_name_list}")
         row_dict["status"] = "invalid_undeclared"
         append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
         from so.core.trial_log import log_trial_dict
         log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
                        {}, True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                        note_str_in="invalid_undeclared", file_path_str_in=trial_log_path_str_in, alert_in=False)
+        print(f"invalid_undeclared: {undeclared_error or undeclared_name_list}")
         return row_dict
     # A LEAK COUNTS AGAINST THE BUDGET AND WRITES NO PATH
     if failure_str:
-        print(f"invalid_lookahead: {failure_str}")
         row_dict["status"] = "invalid_lookahead"
         append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
         from so.core.trial_log import log_trial_dict
         log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
                        {}, True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                        note_str_in="invalid_lookahead", file_path_str_in=trial_log_path_str_in, alert_in=False)
+        print(f"invalid_lookahead: {failure_str}")
         return row_dict
-    # WRITE THE HOLDOUT PATHS ONLY UNDER SO_HOLDOUT_PATH
-    results_path_str = os.environ["SO_HOLDOUT_PATH"]
-    output_path_str = os.path.join(results_path_str, window_dict["window_id"], design_id_str_in)
-    os.makedirs(output_path_str, exist_ok=True)
-    report_dict["daily_equity_pdf"].to_csv(os.path.join(output_path_str, "strategy_daily_equity.csv"), index=False)
-    report_dict["buy_hold_equity_pdf"].to_csv(os.path.join(output_path_str, "buy_hold_daily_equity.csv"), index=False)
-    # THE REFIT LOG OF THE HOLDOUT SEGMENT, NEXT TO THE DAILY PATHS, AND ONLY UNDER SO_HOLDOUT_PATH
-    if report_dict.get("refit_log_pdf") is not None:
-        report_dict["refit_log_pdf"].to_csv(os.path.join(output_path_str, "refit_log.csv"), index=False)
-    # APPEND THE VALID LEDGER ROW AND THE TRIAL-LOG ROW
+    # LEDGER AND TRIAL FIRST, THEN THE DAILY PATHS UNDER SO_HOLDOUT_PATH
     report_fields_dict = report_dict["report_dict"]
     row_dict["status"] = "valid"
     row_dict.update(report_fields_dict)
@@ -1679,4 +1691,7 @@ def run_holdout_evaluation(design_module_in, design_id_str_in, ohlcv_array_dict_
                    {key_str: report_fields_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
                    True, fold_row_in={"test_start": precondition_dict["reported_start"], "test_end": precondition_dict["reported_end"]},
                    note_str_in="holdout evaluation", file_path_str_in=trial_log_path_str_in, alert_in=False)
+    results_path_str = os.environ["SO_HOLDOUT_PATH"]
+    output_path_str = os.path.join(results_path_str, window_dict["window_id"], design_id_str_in)
+    write_holdout_daily_paths_dict(output_path_str, report_dict)
     return row_dict
