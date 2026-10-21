@@ -72,6 +72,27 @@ def get_data_root_str():
     # FORWARD SLASHES AND ONE TRAILING SLASH
     return data_path_str.replace("\\", "/").rstrip("/") + "/"
 
+# THE MESSAGE WHEN A DEVELOPMENT RUN SEES THE QUARANTINE ROOT
+QUARANTINE_REFUSED_MESSAGE_STR = ("development runner refuses the quarantine root (SO_QUARANTINE_PATH). "
+                                  "Holdout evaluation is 4b-1c.")
+
+
+# FUNCTION: REFUSE THE QUARANTINE ROOT IN DEVELOPMENT CODE
+def check_quarantine_refused():
+    """
+    The development runner does not read the complete data tree. Holdout evaluation is 4b-1c.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    # A SET VARIABLE IS ENOUGH; THE FOLDER IS NOT OPENED
+    if os.environ.get("SO_QUARANTINE_PATH", "").strip():
+        raise RuntimeError(QUARANTINE_REFUSED_MESSAGE_STR)
+
+
 # FUNCTION: GET THE QUARANTINE ROOT FROM SO_QUARANTINE_PATH
 def get_quarantine_root_str():
     """

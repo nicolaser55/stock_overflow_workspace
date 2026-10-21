@@ -643,6 +643,10 @@ def get_banned_snippet_list():
         ("so.core.raw_data", "from so.core.raw_data import get_complete_ohlcv_pdf\n" + header_str + "        return 1.0\n"),
         ("read_parquet", "import pandas as pd\n" + header_str + "        pd.read_parquet('x')\n        return 1.0\n"),
         ("load", "import numpy as np\n" + header_str + "        np.load('x')\n        return 1.0\n"),
+        ("loadtxt", "import numpy as np\n" + header_str + "        np.loadtxt('x')\n        return 1.0\n"),
+        ("genfromtxt", "import numpy as np\n" + header_str + "        np.genfromtxt('x')\n        return 1.0\n"),
+        ("pandas.io_import", "from pandas.io import parsers\n" + header_str + "        return 1.0\n"),
+        ("pandas.io_attr", "import pandas as pd\n" + header_str + "        x = pd.io\n        return 1.0\n"),
         ("getattr_base", header_str + "        getattr(view_in.get_bar_array_dict()['close_arr'], 'base')\n        return 1.0\n"),
     ]
 

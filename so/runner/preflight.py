@@ -11,12 +11,16 @@ helper sitting next to the design file. The runner itself may use these names; a
 """
 
 # ATTRIBUTE NAMES THAT REACH PAST THE VIEW
-BANNED_ATTR_SET = {"base", "__closure__", "__self__", "__globals__", "__dict__", "_getframe", "load", "fromfile"}
+BANNED_ATTR_SET = {"base", "__closure__", "__self__", "__globals__", "__dict__", "_getframe", "load", "fromfile",
+                   "loadtxt", "genfromtxt"}
 # BARE NAMES THAT LOAD ESCAPE HATCHES OR OPEN FILES
 BANNED_NAME_SET = {"gc", "inspect", "ctypes", "open", "eval", "exec", "__import__", "vars"}
 # MODULES A DESIGN MUST NOT IMPORT
 BANNED_MODULE_SET = {"so.runner", "so.core.point_in_time", "so.core.holdout", "os", "pathlib", "glob", "shutil", "io",
-                     "pickle", "joblib", "importlib", "so.paths", "so.core.local_file_management", "so.core.raw_data"}
+                     "pickle", "joblib", "importlib", "so.paths", "so.core.local_file_management", "so.core.raw_data",
+                     "pandas.io", "pd.io"}
+# NAMES THAT ARE PANDAS WHEN FOLLOWED BY .io
+PANDAS_IO_NAME_SET = {"pd", "pandas"}
 # GETATTR / SETATTR NAMES THAT ARE THE SAME ESCAPE HATCHES
 BANNED_GETATTR_SET = BANNED_ATTR_SET | BANNED_NAME_SET
 # WORKSPACE ROOT AND THE EXPERIMENTS PACKAGE
@@ -27,7 +31,7 @@ EXPERIMENTS_PATH_STR = os.path.join(WORKSPACE_PATH_STR, "experiments")
 # FUNCTION: WHETHER AN ATTRIBUTE NAME IS BANNED
 def get_banned_attr_bool(attr_str_in):
     """
-    True for .base, .load, .fromfile, and any attribute starting with read_.
+    True for .base, .load, .fromfile, .loadtxt, .genfromtxt, and any attribute starting with read_.
 
     Args:
         attr_str_in (str): Attribute name
@@ -35,8 +39,25 @@ def get_banned_attr_bool(attr_str_in):
     Returns:
         bool: True if banned
     """
-    # pd.read_csv AND np.load ARE DATA ACCESS
+    # pd.read_csv, np.load AND np.loadtxt ARE DATA ACCESS
     return attr_str_in in BANNED_ATTR_SET or attr_str_in.startswith("read_")
+
+
+# FUNCTION: WHETHER AN ATTRIBUTE NODE IS pd.io OR pandas.io
+def get_pandas_io_attr_bool(node_in):
+    """
+    True for pd.io and pandas.io (any submodule reached as an attribute).
+
+    Args:
+        node_in (ast.AST): One node
+
+    Returns:
+        bool: True if this is pandas I/O
+    """
+    # pd.io.csv AND pandas.io.parsers BOTH START AT .io ON pd OR pandas
+    if not isinstance(node_in, ast.Attribute) or node_in.attr != "io":
+        return False
+    return isinstance(node_in.value, ast.Name) and node_in.value.id in PANDAS_IO_NAME_SET
 
 
 # FUNCTION: WHETHER AN IMPORT NAME IS A BANNED MODULE
@@ -265,9 +286,11 @@ def check_design_tree_node(node_in, file_path_str_in):
     Returns:
         None
     """
-    # ATTRIBUTES: .base, .read_*, np.load
+    # ATTRIBUTES: .base, .read_*, np.load, np.loadtxt, pd.io
     if isinstance(node_in, ast.Attribute) and get_banned_attr_bool(node_in.attr):
         raise ValueError(f"design file uses banned name .{node_in.attr}: {file_path_str_in}")
+    if get_pandas_io_attr_bool(node_in):
+        raise ValueError(f"design file uses banned name pandas.io: {file_path_str_in}")
     # BARE NAMES: open, eval, gc, ...
     if isinstance(node_in, ast.Name) and isinstance(node_in.ctx, ast.Load) and node_in.id in BANNED_NAME_SET:
         raise ValueError(f"design file uses banned name {node_in.id}: {file_path_str_in}")

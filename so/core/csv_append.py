@@ -1,3 +1,4 @@
+import csv
 import io
 import os
 import time
@@ -13,6 +14,8 @@ rows. It never reads the rows already stored and never rewrites them.
 
 An exclusive lock on "<file>.lock" is held for the check and the write (msvcrt on Windows, fcntl elsewhere). The lock
 is waited for up to 60 seconds. After that the append raises CsvAppendLockTimeoutError and writes nothing.
+When skip_existing_col_str_in is set, the existing values of that column are read under the lock so a duplicate id is
+not appended; the rows already stored are still not rewritten.
 
 While the lock is held:
     - a missing or empty file is started with the header (the column names joined by commas, then a newline);
@@ -238,6 +241,31 @@ def check_csv_append_target(file_path_str_in, column_str_list_in):
                          f"Expected '{expected_header_str}'. Found '{header_str}'. The file was not changed.")
     return False, line_ending_bytes
 
+# FUNCTION: THE EXISTING VALUES OF ONE COLUMN
+def get_csv_column_value_set(file_path_str_in, column_str_in):
+    """
+    Reads one column of an existing CSV. Used only to skip duplicate ids. The file is not rewritten.
+
+    Args:
+        file_path_str_in (str): CSV path
+        column_str_in (str): Column to collect
+
+    Returns:
+        set[str]: Existing values as strings
+    """
+    # A MISSING OR EMPTY FILE HAS NO VALUES
+    if (not os.path.isfile(file_path_str_in)) or os.path.getsize(file_path_str_in) == 0:
+        return set()
+    value_set = set()
+    with open(file_path_str_in, "r", encoding="utf-8", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if reader.fieldnames is None or column_str_in not in reader.fieldnames:
+            return set()
+        for row_dict in reader:
+            value_set.add(str(row_dict.get(column_str_in, "")))
+    return value_set
+
+
 # FUNCTION: WRITE THE NEW BYTES, THEN FLUSH AND FSYNC
 def write_csv_payload_bytes(file_path_str_in, payload_bytes_in):
     """
@@ -263,19 +291,23 @@ def write_csv_payload_bytes(file_path_str_in, payload_bytes_in):
         os.fsync(csv_file.fileno())
 
 # FUNCTION: APPEND CSV ROWS UNDER THE EXCLUSIVE LOCK
-def append_csv_record_pdf(pdf_in, file_path_str_in, column_str_list_in, timeout_seconds_in=CSV_APPEND_LOCK_TIMEOUT_SECONDS):
+def append_csv_record_pdf(pdf_in, file_path_str_in, column_str_list_in, timeout_seconds_in=CSV_APPEND_LOCK_TIMEOUT_SECONDS,
+                         skip_existing_col_str_in=None):
     """
     Appends the rows of a DataFrame in column_str_list_in order. An empty frame writes nothing and does not create
     the file. The lock, the header check and the newline check are hold_csv_append_lock and check_csv_append_target.
+    When skip_existing_col_str_in is set, rows whose value in that column is already in the file are dropped before
+    the write; the existing rows are not rewritten.
 
     Args:
         pdf_in (pd.DataFrame): Rows to append (extra columns are not written)
         file_path_str_in (str): CSV path
         column_str_list_in (list[str]): Expected columns, in write order
         timeout_seconds_in (float): Seconds to wait for "<file>.lock"
+        skip_existing_col_str_in (str | None): Column of stable ids to skip if already present
 
     Returns:
-        None
+        int: Number of rows actually appended
     """
     # THE INPUT IS A TABLE, AND THE HEADER NAMES ARE SAFE TO JOIN
     if not isinstance(pdf_in, pd.DataFrame):
@@ -287,13 +319,23 @@ def append_csv_record_pdf(pdf_in, file_path_str_in, column_str_list_in, timeout_
         raise ValueError(f"CSV append is missing columns {missing_str_list}. The file was not changed.")
     # NOTHING TO APPEND
     if len(pdf_in) == 0:
-        return None
+        return 0
+    # A SKIP COLUMN MUST BE ONE OF THE WRITTEN COLUMNS
+    if skip_existing_col_str_in is not None and skip_existing_col_str_in not in column_str_list_in:
+        raise ValueError(f"CSV append skip column '{skip_existing_col_str_in}' is not in the column list. The file was not changed.")
     # A NEW FILE'S HEADER USES LF; AN EXISTING FILE KEEPS THE ENDING OF ITS HEADER LINE
     header_bytes = (",".join(column_str_list_in) + "\n").encode("utf-8")
     # CHECK AND WRITE WHILE NO OTHER APPENDER HOLDS THE LOCK
     with hold_csv_append_lock(file_path_str_in, timeout_seconds_in=timeout_seconds_in):
         write_header_bool, line_ending_bytes = check_csv_append_target(file_path_str_in, column_str_list_in)
-        row_bytes = get_csv_row_bytes(pdf_in, column_str_list_in, line_ending_bytes)
+        write_pdf = pdf_in
+        if skip_existing_col_str_in is not None and not write_header_bool:
+            existing_set = get_csv_column_value_set(file_path_str_in, skip_existing_col_str_in)
+            keep_arr = ~write_pdf[skip_existing_col_str_in].astype(str).isin(existing_set)
+            write_pdf = write_pdf.loc[keep_arr]
+        if len(write_pdf) == 0:
+            return 0
+        row_bytes = get_csv_row_bytes(write_pdf, column_str_list_in, line_ending_bytes)
         payload_bytes = header_bytes + row_bytes if write_header_bool else row_bytes
         write_csv_payload_bytes(file_path_str_in, payload_bytes)
-    return None
+        return int(len(write_pdf))
