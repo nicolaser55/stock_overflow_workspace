@@ -14,8 +14,9 @@ bar before decide(). The view slices those buffers. One pass of copying in total
 tail after the moment is still NaN / NaT.
 
 Declared sources are the same idea: a feed filled in available_ts order (labels in label_known_ts order) up to the
-moment. The view does not hold a DataContext or any full frame. get / get_labels / get_new return copies of the
-visible rows. get_new is the rows that became available since this design's previous call.
+moment, each row copied once into empty-started column buffers. The view does not hold a DataContext or any full
+frame. get / get_labels / get_new copy a prefix only when the design asks. get_new is the rows that became available
+since this design's previous call.
 
 Default decision moment: end of the 15:58 bar (15:59:00); fill at the 15:59 open. Half days use the second-to-last
 bar, the same index as so.features.daily_features.get_session_decision_idx_dict. The fill bar is not in the view.
@@ -142,11 +143,37 @@ def fill_bar_buffer_through_decision(buffer_dict_in, ohlcv_array_dict_in, sessio
     for filled_session_idx in range(first_new_session_idx, session_idx + 1):
         buffer_dict_in["session_start_idx_arr"][filled_session_idx] = float(ohlcv_array_dict_in["session_start_idx_arr"][filled_session_idx])
         buffer_dict_in["session_date_arr"][filled_session_idx] = ohlcv_array_dict_in["session_date_list"][filled_session_idx]
-    for prior_session_idx in range(0, session_idx):
+    # A COMPLETED SESSION GETS ITS TRUE END ONCE; THE LIVE SESSION ENDS AT THE DECISION BAR
+    if session_idx > 0:
+        prior_session_idx = session_idx - 1
         buffer_dict_in["session_end_idx_arr"][prior_session_idx] = float(ohlcv_array_dict_in["session_end_idx_arr"][prior_session_idx])
     buffer_dict_in["session_end_idx_arr"][session_idx] = float(decision_idx_in)
     buffer_dict_in["copied_through_session_idx"] = session_idx
     set_bar_buffer_writeable(buffer_dict_in, False)
+
+
+# FUNCTION: SLICED BAR ARRAYS THAT BUILD HEAVY KEYS ONLY ON ACCESS
+class BarSliceDict(dict):
+    """Sliced bar arrays. timestamp_index and date_session_idx_dict are built if the design asks."""
+
+    # FUNCTION: BUILD A LAZY KEY
+    def __missing__(self, key_str_in):
+        """
+        Args:
+            key_str_in (str): timestamp_index or date_session_idx_dict
+
+        Returns:
+            object: The built value
+        """
+        # A WEIGHT-1 DESIGN NEVER ASKS, SO THE INDEX IS NOT REBUILT EACH SESSION
+        if key_str_in == "timestamp_index":
+            value = pd.DatetimeIndex(self["timestamp_arr"], tz=NY_TZ_STR)
+        elif key_str_in == "date_session_idx_dict":
+            value = {session_date: idx for idx, session_date in enumerate(self["session_date_list"])}
+        else:
+            raise KeyError(key_str_in)
+        dict.__setitem__(self, key_str_in, value)
+        return value
 
 
 # FUNCTION: SLICED SPY ARRAYS FROM THE BUFFER
@@ -163,14 +190,13 @@ def get_sliced_bar_array_dict(buffer_dict_in, last_bar_idx_in, session_idx_in):
     Returns:
         dict: Sliced bar arrays
     """
-    # SLICES; .base IS THE NaN/NaT BUFFER
+    # SLICES; .base IS THE NaN/NaT BUFFER. timestamp_index IS LAZY.
     last_bar_idx = int(last_bar_idx_in)
     session_idx = int(session_idx_in)
     timestamp_slice_arr = get_readonly_slice_arr(buffer_dict_in["timestamp_arr"], last_bar_idx)
-    session_date_list = [buffer_dict_in["session_date_arr"][idx] for idx in range(session_idx + 1)]
-    return {
+    session_date_list = list(get_readonly_slice_arr(buffer_dict_in["session_date_arr"], session_idx))
+    return BarSliceDict({
         "timestamp_arr": timestamp_slice_arr,
-        "timestamp_index": pd.DatetimeIndex(timestamp_slice_arr, tz=NY_TZ_STR),
         "open_arr": get_readonly_slice_arr(buffer_dict_in["open_arr"], last_bar_idx),
         "high_arr": get_readonly_slice_arr(buffer_dict_in["high_arr"], last_bar_idx),
         "low_arr": get_readonly_slice_arr(buffer_dict_in["low_arr"], last_bar_idx),
@@ -179,17 +205,90 @@ def get_sliced_bar_array_dict(buffer_dict_in, last_bar_idx_in, session_idx_in):
         "session_date_list": session_date_list,
         "session_start_idx_arr": get_readonly_slice_arr(buffer_dict_in["session_start_idx_arr"], session_idx),
         "session_end_idx_arr": get_readonly_slice_arr(buffer_dict_in["session_end_idx_arr"], session_idx),
-        "date_session_idx_dict": {session_date: idx for idx, session_date in enumerate(session_date_list)},
-    }
+    })
+
+
+# FUNCTION: AN EMPTY COLUMN BUFFER THE SAME LENGTH AS THE SOURCE
+def get_empty_source_column_arr(series_in, length_in):
+    """
+    NaN / NaT / None array for one source column. Numeric columns are float so the tail can be empty.
+
+    Args:
+        series_in (pd.Series): Column being buffered
+        length_in (int): Row count
+
+    Returns:
+        np.ndarray: Empty buffer
+    """
+    # NOTHING TO ALLOCATE
+    if length_in <= 0:
+        return np.array([])
+    if pd.api.types.is_datetime64_any_dtype(series_in.dtype):
+        empty_arr = np.empty(length_in, dtype="datetime64[ns]")
+        empty_arr[:] = np.datetime64("NaT")
+        return empty_arr
+    if pd.api.types.is_numeric_dtype(series_in.dtype) and not pd.api.types.is_bool_dtype(series_in.dtype):
+        return np.full(length_in, np.nan, dtype=np.float64)
+    empty_arr = np.empty(length_in, dtype=object)
+    empty_arr[:] = None
+    return empty_arr
+
+
+# FUNCTION: COPY ONE COLUMN SLICE INTO THE BUFFER
+def fill_source_column_slice(buffer_arr_in, start_idx_in, end_idx_in, series_in):
+    """
+    Copies series_in.iloc[start:end] into the buffer once.
+
+    Args:
+        buffer_arr_in (np.ndarray): Column buffer
+        start_idx_in, end_idx_in (int): Half-open range
+        series_in (pd.Series): Full ordered column
+
+    Returns:
+        None
+    """
+    # THE SLICE HAS NOT BEEN COPIED BEFORE
+    values = series_in.iloc[start_idx_in:end_idx_in]
+    if buffer_arr_in.dtype == object:
+        buffer_arr_in[start_idx_in:end_idx_in] = values.to_numpy(copy=True)
+        return
+    if np.issubdtype(buffer_arr_in.dtype, np.datetime64):
+        converted_series = pd.to_datetime(values)
+        if getattr(converted_series.dt, "tz", None) is not None:
+            converted_series = converted_series.dt.tz_convert(NY_TZ_STR).dt.tz_localize(None)
+        buffer_arr_in[start_idx_in:end_idx_in] = np.asarray(converted_series, dtype="datetime64[ns]")
+        return
+    buffer_arr_in[start_idx_in:end_idx_in] = values.to_numpy(dtype=np.float64)
+
+
+# FUNCTION: A DATAFRAME FROM A BUFFER PREFIX (A COPY)
+def get_buffer_prefix_pdf(buffer_dict_in, column_str_list_in, start_idx_in, end_idx_in):
+    """
+    Rows [start, end) of the source buffers. Independent of the buffer.
+
+    Args:
+        buffer_dict_in (dict): Column buffers
+        column_str_list_in (list[str]): Column order
+        start_idx_in, end_idx_in (int): Half-open range
+
+    Returns:
+        pd.DataFrame: Copied rows
+    """
+    # EMPTY KEEPS THE COLUMN NAMES
+    if end_idx_in <= start_idx_in:
+        return pd.DataFrame(columns=list(column_str_list_in))
+    return pd.DataFrame({col_str: np.array(buffer_dict_in[col_str][start_idx_in:end_idx_in])
+                         for col_str in column_str_list_in})
 
 
 # FUNCTION: A DECLARED SOURCE FILLED IN CLOCK ORDER
 class SourceFeed:
     """
-    Runner-only. The full stamped frame stays here. The view receives copies of the visible prefix, never this object.
+    Runner-only. The full stamped frame stays here. Each row is copied once into empty-started column buffers. The
+    view slices those buffers and never receives this object or the full frame.
     """
 
-    # FUNCTION: SORT THE STAMPED FRAME AND START WITH NO VISIBLE ROWS
+    # FUNCTION: SORT THE STAMPED FRAME AND ALLOCATE EMPTY COLUMN BUFFERS
     def __init__(self, source_name_str_in, role_str_in, stamped_pdf_in):
         """
         Args:
@@ -205,20 +304,26 @@ class SourceFeed:
         if stamped_pdf_in is None or len(stamped_pdf_in) == 0:
             self.full_pdf = pd.DataFrame()
             self.clock_ns_arr = np.array([], dtype=np.int64)
+            self.column_str_list = []
+            self.column_buffer_dict = {}
         else:
             ordered_pdf = stamped_pdf_in.copy()
             ordered_pdf[self.clock_col_str] = [get_ny_timestamp(ts) for ts in ordered_pdf[self.clock_col_str]]
             ordered_pdf = ordered_pdf.sort_values(self.clock_col_str, kind="mergesort").reset_index(drop=True)
             self.full_pdf = ordered_pdf
             self.clock_ns_arr = np.array([ts.value for ts in ordered_pdf[self.clock_col_str]], dtype=np.int64)
+            self.column_str_list = list(ordered_pdf.columns)
+            row_count = len(ordered_pdf)
+            self.column_buffer_dict = {col_str: get_empty_source_column_arr(ordered_pdf[col_str], row_count)
+                                       for col_str in self.column_str_list}
         self.next_idx_int = 0
-        self.visible_pdf = self.full_pdf.iloc[0:0].copy()
         self.prev_visible_count_int = 0
 
-    # FUNCTION: COPY NEWLY KNOWABLE ROWS INTO THE VISIBLE PREFIX
+    # FUNCTION: COPY NEWLY KNOWABLE ROWS INTO THE BUFFERS
     def advance_to_ts(self, moment_ts_in):
         """
-        Appends rows whose clock is at or before the moment (strictly before for a label).
+        Copies rows whose clock is at or before the moment (strictly before for a label). Already-copied rows are
+        skipped.
 
         Args:
             moment_ts_in (pd.Timestamp): Decision moment
@@ -226,15 +331,18 @@ class SourceFeed:
         Returns:
             None
         """
-        # SEARCH SORTED CLOCKS; ALREADY-COPIED ROWS ARE SKIPPED
+        # SEARCH SORTED CLOCKS; COPY ONLY THE NEW SLICE
         if len(self.clock_ns_arr) == 0 or self.next_idx_int >= len(self.clock_ns_arr):
             return
         moment_ns = int(get_ny_timestamp(moment_ts_in).value)
         side_str = "left" if self.strict_before_bool else "right"
         end_idx = int(np.searchsorted(self.clock_ns_arr, moment_ns, side=side_str))
         if end_idx > self.next_idx_int:
-            extra_pdf = self.full_pdf.iloc[self.next_idx_int:end_idx]
-            self.visible_pdf = pd.concat([self.visible_pdf, extra_pdf], ignore_index=True)
+            start_idx = self.next_idx_int
+            for col_str in self.column_str_list:
+                self.column_buffer_dict[col_str].flags.writeable = True
+                fill_source_column_slice(self.column_buffer_dict[col_str], start_idx, end_idx, self.full_pdf[col_str])
+                self.column_buffer_dict[col_str].flags.writeable = False
             self.next_idx_int = end_idx
 
     # FUNCTION: MARK THE BOUNDARY FOR get_new AFTER decide()
@@ -249,7 +357,7 @@ class SourceFeed:
             None
         """
         # THE DESIGN'S PREVIOUS CALL IS THIS ONE ONCE decide RETURNS
-        self.prev_visible_count_int = len(self.visible_pdf)
+        self.prev_visible_count_int = int(self.next_idx_int)
 
 
 # FUNCTION: STAMPED FEEDS FOR EVERY DECLARED SOURCE
@@ -289,12 +397,13 @@ def get_source_feed_dict(design_in, ohlcv_array_dict_in, data_context_in):
 # FUNCTION: THE POINT-IN-TIME VIEW AT ONE DECISION
 class DecisionView:
     """
-    Bars, features and labels knowable at decision_ts. No DataContext, no full frame.
+    Bars, features and labels knowable at decision_ts. No DataContext, no full frame. Source rows live in the runner's
+    NaN-tailed buffers; get / get_labels / get_new copy a prefix only when the design asks.
     """
 
-    # FUNCTION: STORE THE SLICES AND THE VISIBLE COPIES
+    # FUNCTION: STORE THE SLICES AND THE SOURCE BUFFER PREFIX COUNTS
     def __init__(self, decision_ts_in, decision_bar_idx_in, session_idx_in, session_date_in, bar_array_dict_in,
-                 visible_pdf_dict_in, new_pdf_dict_in, role_dict_in):
+                 source_state_dict_in):
         """
         Args:
             decision_ts_in (datetime-like): End of the decision bar
@@ -302,19 +411,15 @@ class DecisionView:
             session_idx_in (int): Session of that bar
             session_date_in (datetime.date): Session date
             bar_array_dict_in (dict): Sliced bar arrays
-            visible_pdf_dict_in (dict): source -> copy of rows knowable now
-            new_pdf_dict_in (dict): source -> copy of rows new since the previous call
-            role_dict_in (dict): source -> feature or label
+            source_state_dict_in (dict): source -> buffers, columns, visible count, new-start, role
         """
-        # COPIES AND SLICES ONLY
+        # SLICES AND COUNTS; NO FRAME COPY UNTIL get / get_labels / get_new
         self.decision_ts = get_ny_timestamp(decision_ts_in)
         self.decision_bar_idx = int(decision_bar_idx_in)
         self.session_idx = int(session_idx_in)
         self.session_date = session_date_in
         self._bar_array_dict = bar_array_dict_in
-        self._visible_pdf_dict = visible_pdf_dict_in
-        self._new_pdf_dict = new_pdf_dict_in
-        self._role_dict = role_dict_in
+        self._source_state_dict = source_state_dict_in
 
     # FUNCTION: THE SLICED SPY ARRAYS
     def get_bar_array_dict(self):
@@ -348,25 +453,26 @@ class DecisionView:
             raise ValueError(f"{door_str_in} cutoff is later than the decision currently being made.")
         return query_ts
 
-    # FUNCTION: REFUSE AN UNDECLARED NAME
-    def _get_visible_pdf(self, source_name_str_in, role_str_in):
+    # FUNCTION: THE BUFFER STATE FOR A DECLARED SOURCE
+    def _get_source_state_dict(self, source_name_str_in, role_str_in):
         """
-        The snapshot for a declared source of the expected role.
+        The buffer prefix for a declared source of the expected role.
 
         Args:
             source_name_str_in (str): Source name
             role_str_in (str | None): Required role, or None for get_new
 
         Returns:
-            pd.DataFrame: Visible copy
+            dict: Buffer state
         """
         # UNDECLARED NAMES DO NOT EXIST ON THE VIEW
-        if source_name_str_in not in self._visible_pdf_dict:
+        if source_name_str_in not in self._source_state_dict:
             raise ValueError(f"undeclared source {source_name_str_in}")
-        if role_str_in is not None and self._role_dict[source_name_str_in] != role_str_in:
+        state_dict = self._source_state_dict[source_name_str_in]
+        if role_str_in is not None and state_dict["role_str"] != role_str_in:
             door_str = "get_labels" if role_str_in == "feature" else "get"
-            raise ValueError(f"{source_name_str_in} is a {self._role_dict[source_name_str_in]}. Read it through {door_str}.")
-        return self._visible_pdf_dict[source_name_str_in]
+            raise ValueError(f"{source_name_str_in} is a {state_dict['role_str']}. Read it through {door_str}.")
+        return state_dict
 
     # FUNCTION: FEATURE ROWS KNOWABLE AT as_of (DEFAULT: THE MOMENT)
     def get(self, source_name_str_in, as_of_ts_in=None, columns_in=None):
@@ -381,12 +487,13 @@ class DecisionView:
         Returns:
             pd.DataFrame: Visible feature rows
         """
-        # THE SNAPSHOT ALREADY STOPS AT THE MOMENT; AN EARLIER as_of FILTERS IT
+        # THE BUFFER ALREADY STOPS AT THE MOMENT; AN EARLIER as_of FILTERS THE COPY
         as_of_ts = self.decision_ts if as_of_ts_in is None else self._raise_if_after_decision(as_of_ts_in, "source")
-        visible_pdf = self._get_visible_pdf(source_name_str_in, "feature")
+        state_dict = self._get_source_state_dict(source_name_str_in, "feature")
+        visible_pdf = get_buffer_prefix_pdf(state_dict["buffer_dict"], state_dict["column_str_list"], 0,
+                                            state_dict["visible_count_int"])
         if len(visible_pdf) and as_of_ts < self.decision_ts:
-            clock_series = pd.to_datetime(visible_pdf["available_ts"], utc=True).dt.tz_convert(NY_TZ_STR)
-            visible_pdf = visible_pdf.loc[clock_series.map(get_ny_timestamp) <= as_of_ts]
+            visible_pdf = visible_pdf.loc[visible_pdf["available_ts"].map(get_ny_timestamp) <= as_of_ts]
         if columns_in is not None:
             visible_pdf = visible_pdf[list(columns_in)]
         return get_detached_pdf(visible_pdf)
@@ -404,12 +511,13 @@ class DecisionView:
         Returns:
             pd.DataFrame: Labels known before the cutoff
         """
-        # THE SNAPSHOT ALREADY USED STRICTLY-BEFORE THE MOMENT
+        # THE BUFFER ALREADY USED STRICTLY-BEFORE THE MOMENT
         cutoff_ts = self.decision_ts if known_before_ts_in is None else self._raise_if_after_decision(known_before_ts_in, "label")
-        visible_pdf = self._get_visible_pdf(source_name_str_in, "label")
+        state_dict = self._get_source_state_dict(source_name_str_in, "label")
+        visible_pdf = get_buffer_prefix_pdf(state_dict["buffer_dict"], state_dict["column_str_list"], 0,
+                                            state_dict["visible_count_int"])
         if len(visible_pdf) and cutoff_ts < self.decision_ts:
-            clock_series = pd.to_datetime(visible_pdf["label_known_ts"], utc=True).dt.tz_convert(NY_TZ_STR)
-            visible_pdf = visible_pdf.loc[clock_series.map(get_ny_timestamp) < cutoff_ts]
+            visible_pdf = visible_pdf.loc[visible_pdf["label_known_ts"].map(get_ny_timestamp) < cutoff_ts]
         if columns_in is not None:
             visible_pdf = visible_pdf[list(columns_in)]
         return get_detached_pdf(visible_pdf)
@@ -428,38 +536,42 @@ class DecisionView:
             pd.DataFrame: New rows
         """
         # UNDECLARED NAMES DO NOT EXIST
-        if source_name_str_in not in self._new_pdf_dict:
-            raise ValueError(f"undeclared source {source_name_str_in}")
-        new_pdf = self._new_pdf_dict[source_name_str_in]
+        state_dict = self._get_source_state_dict(source_name_str_in, None)
+        new_pdf = get_buffer_prefix_pdf(state_dict["buffer_dict"], state_dict["column_str_list"],
+                                        state_dict["new_start_int"], state_dict["visible_count_int"])
         if columns_in is not None:
             new_pdf = new_pdf[list(columns_in)]
         return get_detached_pdf(new_pdf)
 
 
-# FUNCTION: SNAPSHOTS THE VIEW MAY HOLD (COPIES, NOT THE FEED)
-def get_view_source_snapshot_tuple(feed_dict_in):
+# FUNCTION: BUFFER PREFIX COUNTS THE VIEW MAY HOLD (NOT THE FEED, NOT A FRAME COPY)
+def get_view_source_state_dict(feed_dict_in):
     """
-    Copies of the visible prefix and of the rows new since the previous call.
+    Per-source buffers and how far they are filled. The view does not receive the feed or the full frame.
 
     Args:
         feed_dict_in (dict): source name -> SourceFeed
 
     Returns:
-        tuple[dict, dict, dict]: visible copies, new copies, roles
+        dict: source -> buffer state
     """
-    # THE VIEW NEVER RECEIVES THE FEED OBJECT
-    visible_pdf_dict, new_pdf_dict, role_dict = {}, {}, {}
+    # THE VIEW SLICES THE SAME ARRAYS THE RUNNER IS FILLING
+    source_state_dict = {}
     for source_name_str, feed in feed_dict_in.items():
-        visible_pdf_dict[source_name_str] = get_detached_pdf(feed.visible_pdf)
-        new_pdf_dict[source_name_str] = get_detached_pdf(feed.visible_pdf.iloc[feed.prev_visible_count_int:])
-        role_dict[source_name_str] = feed.role_str
-    return visible_pdf_dict, new_pdf_dict, role_dict
+        source_state_dict[source_name_str] = {
+            "buffer_dict": feed.column_buffer_dict,
+            "column_str_list": list(feed.column_str_list),
+            "visible_count_int": int(feed.next_idx_int),
+            "new_start_int": int(feed.prev_visible_count_int),
+            "role_str": feed.role_str,
+        }
+    return source_state_dict
 
 
 # FUNCTION: BUILD THE VIEW AT ONE DECISION BAR FROM THE BUFFERS
 def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict_in):
     """
-    Slices the bar buffer through the decision bar and snapshots the source feeds.
+    Slices the bar buffer through the decision bar and points at the source-buffer prefixes.
 
     Args:
         buffer_dict_in (dict): Bar buffers
@@ -475,6 +587,6 @@ def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict
     session_idx = int(session_idx_in)
     decision_ts = get_minute_bar_available_ts(pd.Timestamp(buffer_dict_in["timestamp_arr"][decision_idx]))
     bar_array_dict = get_sliced_bar_array_dict(buffer_dict_in, decision_idx, session_idx)
-    visible_pdf_dict, new_pdf_dict, role_dict = get_view_source_snapshot_tuple(feed_dict_in)
+    source_state_dict = get_view_source_state_dict(feed_dict_in)
     return DecisionView(decision_ts, decision_idx, session_idx, buffer_dict_in["session_date_arr"][session_idx],
-                        bar_array_dict, visible_pdf_dict, new_pdf_dict, role_dict)
+                        bar_array_dict, source_state_dict)

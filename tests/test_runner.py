@@ -445,9 +445,20 @@ class ProbeDesign:
             self.first_tail_ok_bool = get_view_tail_ok_bool(view_in)
             late_value_set = {999999.0, 20.0, 30.0}
             reachable_value_list = get_reachable_frame_value_list(view_in)
-            self.first_late_reachable_bool = any(
+            late_in_frame_bool = any(
                 isinstance(value, (int, float, np.integer, np.floating)) and float(value) in late_value_set
                 for value in reachable_value_list)
+            late_in_array_bool = False
+            for array in get_reachable_array_list(view_in):
+                if array.ndim != 1:
+                    continue
+                if np.issubdtype(array.dtype, np.floating):
+                    late_in_array_bool = late_in_array_bool or any(np.any(array == late_float) for late_float in late_value_set)
+                elif array.dtype == object:
+                    late_in_array_bool = late_in_array_bool or any(
+                        isinstance(value, (int, float, np.integer, np.floating)) and float(value) in late_value_set
+                        for value in array)
+            self.first_late_reachable_bool = bool(late_in_frame_bool or late_in_array_bool)
             self.first_has_data_context_bool = hasattr(view_in, "_data_context")
             self.first_forbidden_type_list = [type_name_str for type_name_str in get_reachable_type_name_set(view_in)
                                               if type_name_str in {"DataContext", "SourceFeed"}]
