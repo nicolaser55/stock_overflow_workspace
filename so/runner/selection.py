@@ -197,7 +197,8 @@ def run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, 
                                        dead_band_in=0.0, initial_weight_in=1.0,
                                        initial_capital_in=config.INITIAL_CAPITAL,
                                        entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
-                                       market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
+                                       market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                                       engine_in=None):
     """
     One engine pass. Each session uses the governing candidate's recorded decision. The position is carried across
     switches. The last session sells at the close.
@@ -210,6 +211,7 @@ def run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, 
         governing_dict_in (dict): period_id -> candidate
         period_pdf_in (pd.DataFrame): Periods
         dead_band_in, initial_weight_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine
+        engine_in (Engine | None): None uses a fresh FractionalWeightEngine
 
     Returns:
         dict: Engine result plus governing_dict
@@ -227,7 +229,7 @@ def run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, 
             decision_dict_list.append(get_decision_dict(None))
             continue
         decision_dict_list.append(get_decision_dict(candidate_decision_dict_in[candidate][session_idx]))
-    engine = FractionalWeightEngine(dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
+    engine = engine_in if engine_in is not None else FractionalWeightEngine(dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
     result_dict = run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_dict_list, engine,
                                             initial_weight_in, dead_band_in, initial_capital_in, entry_slippage_in,
                                             market_exit_slippage_in)

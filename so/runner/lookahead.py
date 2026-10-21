@@ -12,7 +12,7 @@ from so.core.point_in_time import (set_direct_read_blocked_bool, get_source_spec
 from so.core.holdout import get_date, get_truncated_ohlcv_dict, get_perturbed_ohlcv_dict
 # IMPORT THE DAILY LOOP AND THE DECISION SHAPE
 from so.runner.loop import DailyLoop
-from so.runner.engine import get_decision_dict, DECISION_KEY_LIST
+from so.runner.engine import get_decision_dict, DECISION_KEY_LIST, FLOAT_DECISION_KEY_LIST
 from so.runner.checkpoint import (read_decisions_list, get_file_exists_bool, read_pickle, set_runs_root_str)
 from so.runner.verdict import write_json_file, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR
 
@@ -196,7 +196,7 @@ def get_decision_equal_bool(full_decision_dict_in, check_decision_dict_in, toler
     check_dict = get_decision_dict(check_decision_dict_in)
     for key_str in DECISION_KEY_LIST:
         full_value, check_value = full_dict.get(key_str), check_dict.get(key_str)
-        if key_str == "target_weight":
+        if key_str in FLOAT_DECISION_KEY_LIST:
             full_nan_bool = full_value is None or (isinstance(full_value, (float, np.floating)) and np.isnan(full_value))
             check_nan_bool = check_value is None or (isinstance(check_value, (float, np.floating)) and np.isnan(check_value))
             if full_nan_bool and check_nan_bool:

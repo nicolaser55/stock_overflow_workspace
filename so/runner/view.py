@@ -1,9 +1,12 @@
+import types
 import numpy as np
 import pandas as pd
 # IMPORT THE POINT-IN-TIME CLOCKS, REGISTRY AND STAMPING (THE VIEW DOES NOT HOLD A CONTEXT)
 from so.core.point_in_time import (NY_TZ_STR, get_ny_timestamp, get_minute_bar_available_ts, get_source_spec_dict,
                                    add_available_ts_pdf, get_feature_column_pdf, get_spy_frame_pdf,
                                    get_declared_source_name_list)
+# IMPORT THE EMPTY ENGINE SNAPSHOT
+from so.runner.engine import get_empty_engine_state_dict
 
 """
 Decision View (infrastructure step 4a)
@@ -403,7 +406,7 @@ class DecisionView:
 
     # FUNCTION: STORE THE SLICES AND THE SOURCE BUFFER PREFIX COUNTS
     def __init__(self, decision_ts_in, decision_bar_idx_in, session_idx_in, session_date_in, bar_array_dict_in,
-                 source_state_dict_in):
+                 source_state_dict_in, engine_state_dict_in=None):
         """
         Args:
             decision_ts_in (datetime-like): End of the decision bar
@@ -412,6 +415,7 @@ class DecisionView:
             session_date_in (datetime.date): Session date
             bar_array_dict_in (dict): Sliced bar arrays
             source_state_dict_in (dict): source -> buffers, columns, visible count, new-start, role
+            engine_state_dict_in (dict | None): Engine snapshot as of this moment (a copy; read-only)
         """
         # SLICES AND COUNTS; NO FRAME COPY UNTIL get / get_labels / get_new
         self.decision_ts = get_ny_timestamp(decision_ts_in)
@@ -420,6 +424,23 @@ class DecisionView:
         self.session_date = session_date_in
         self._bar_array_dict = bar_array_dict_in
         self._source_state_dict = source_state_dict_in
+        # A COPY SO A LATER ENGINE CHANGE CANNOT LEAK THROUGH THE VIEW
+        state_dict = dict(get_empty_engine_state_dict() if engine_state_dict_in is None else engine_state_dict_in)
+        self.engine_state = types.MappingProxyType(state_dict)
+
+    # FUNCTION: A FRESH COPY OF THE ENGINE SNAPSHOT
+    def get_engine_state_dict(self):
+        """
+        in_position, share_count, last_exit_session, last_exit_reason, cash_session_count as of this moment.
+
+        Args:
+            None
+
+        Returns:
+            dict: Independent copy
+        """
+        # THE PROXY IS READ-ONLY; THE COPY CANNOT WRITE BACK
+        return dict(self.engine_state)
 
     # FUNCTION: THE SLICED SPY ARRAYS
     def get_bar_array_dict(self):
@@ -569,7 +590,7 @@ def get_view_source_state_dict(feed_dict_in):
 
 
 # FUNCTION: BUILD THE VIEW AT ONE DECISION BAR FROM THE BUFFERS
-def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict_in):
+def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict_in, engine_state_dict_in=None):
     """
     Slices the bar buffer through the decision bar and points at the source-buffer prefixes.
 
@@ -578,6 +599,7 @@ def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict
         session_idx_in (int): Session of the decision
         decision_idx_in (int): Decision bar index
         feed_dict_in (dict): Source feeds already advanced to this moment
+        engine_state_dict_in (dict | None): Engine snapshot as of this moment
 
     Returns:
         DecisionView: View that stops at that moment
@@ -589,4 +611,4 @@ def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict
     bar_array_dict = get_sliced_bar_array_dict(buffer_dict_in, decision_idx, session_idx)
     source_state_dict = get_view_source_state_dict(feed_dict_in)
     return DecisionView(decision_ts, decision_idx, session_idx, buffer_dict_in["session_date_arr"][session_idx],
-                        bar_array_dict, source_state_dict)
+                        bar_array_dict, source_state_dict, engine_state_dict_in)

@@ -22,7 +22,8 @@ from so.core.baseline_report import get_baseline_json_str
 from so.core.continuous_replay import get_log_excess_bootstrap_dict
 from so.core.evaluation import get_mde_float
 # IMPORT THE 4A LOOP, PERIODS, SELECTION AND CHECKPOINTS
-from so.runner.engine import FractionalWeightEngine
+from so.runner.engine import (FractionalWeightEngine, TrailingStopEngine, BarrierEngine, ENGINE_FRACTIONAL_STR,
+                              ENGINE_TRAILING_STOP_STR, ENGINE_BARRIER_STR)
 from so.runner.loop import DailyLoop
 from so.runner.preflight import (check_design_file, get_design_follow_path_list, get_experiments_package_folder_str)
 from so.runner.periods import (check_quarantine_refused, get_development_run_period_pdf, get_period_date)
@@ -350,18 +351,35 @@ def get_module_file_path_str(design_module_in):
 # FUNCTION: A DEFAULT ENGINE FOR ONE CANDIDATE
 def get_candidate_engine(design_module_in):
     """
-    FractionalWeightEngine with the design's DEAD_BAND (default 0) and the shared costs.
+    ENGINE_NAME selects fractional (default), trailing_stop or barrier. Shared costs. Optional MAX_CASH_SESSIONS,
+    MAX_HOLD_TRADING_DAYS, RR_RATIO, DEAD_BAND.
 
     Args:
         design_module_in (module): Design
 
     Returns:
-        FractionalWeightEngine: Fresh engine
+        Engine: Fresh engine
     """
     # OPTIONAL CONSTANTS, SHARED COSTS
+    engine_name_str = str(getattr(design_module_in, "ENGINE_NAME", ENGINE_FRACTIONAL_STR))
+    initial_capital = config.INITIAL_CAPITAL
+    entry_slippage = config.ENTRY_SLIPPAGE_PER_SHARE
+    market_exit_slippage = config.MARKET_EXIT_SLIPPAGE_PER_SHARE
+    if engine_name_str == ENGINE_TRAILING_STOP_STR:
+        max_cash_sessions = getattr(design_module_in, "MAX_CASH_SESSIONS", None)
+        engine = TrailingStopEngine(max_cash_sessions, initial_capital, entry_slippage, market_exit_slippage)
+        engine.set_stop_params(getattr(design_module_in, "TRAIL_MULTIPLE", None), getattr(design_module_in, "VOLATILITY", None))
+        return engine
+    if engine_name_str == ENGINE_BARRIER_STR:
+        max_hold = int(getattr(design_module_in, "MAX_HOLD_TRADING_DAYS", config.MAX_HOLD_TRADING_DAYS))
+        rr_ratio = float(getattr(design_module_in, "RR_RATIO", config.RR_RATIO))
+        limit_exit_slippage = config.LIMIT_EXIT_SLIPPAGE_PER_SHARE
+        return BarrierEngine(max_hold, rr_ratio, initial_capital, entry_slippage, market_exit_slippage,
+                             limit_exit_slippage)
+    if engine_name_str not in (ENGINE_FRACTIONAL_STR, ""):
+        raise ValueError(f"unknown ENGINE_NAME {engine_name_str!r}")
     dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
-    return FractionalWeightEngine(dead_band, config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
-                                  config.MARKET_EXIT_SLIPPAGE_PER_SHARE)
+    return FractionalWeightEngine(dead_band, initial_capital, entry_slippage, market_exit_slippage)
 
 
 # FUNCTION: APPEND ONE CANDIDATE-PERIOD TRIAL
@@ -623,7 +641,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
         initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
         prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
                                                              candidate_decision_dict, governing_dict, period_pdf, dead_band,
-                                                             initial_weight)
+                                                             initial_weight, engine_in=get_candidate_engine(design_module_in))
         return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
                 "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
                 "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,
