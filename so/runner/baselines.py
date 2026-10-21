@@ -11,11 +11,14 @@ from so.runner.loop import run_engine_decisions_dict
 Runner Baselines (infrastructure step 4b-1b)
 
 Buy-and-hold, constant exposure at the prior-only path's average weight (rebalanced daily), and random timing with
-the path's number of switches between the same weights. All three use the fractional-weight engine and the shared
-costs. Random timing uses config.RANDOM_SEED .. RANDOM_SEED + RUNNER_RANDOM_TIMING_SEED_COUNT - 1 (100 fixed seeds).
+the path's time at each weight and the same number of switches. All three use the fractional-weight engine and the
+shared costs. Random timing uses config.RANDOM_SEED .. RANDOM_SEED + RUNNER_RANDOM_TIMING_SEED_COUNT - 1 (100 fixed
+seeds).
 
-A switch is a change in the filled target-weight sequence larger than NUMERIC_TOLERANCE. Random paths start at the
-path's first weight and, at each drawn switch date, move to a different weight from that sequence's unique set.
+A switch is a change in the filled target-weight sequence larger than NUMERIC_TOLERANCE. Random timing splits that
+sequence into runs (weight, length), keeps the run order of weights, and for each weight permutes the lengths among
+that weight's runs. The first run stays put when the path starts at the window's initial weight, so only the timing
+of later spells moves. Placing switches independently would not preserve exposure.
 """
 
 
@@ -76,6 +79,58 @@ def get_unique_weight_list(target_weight_arr_in):
     return unique_list
 
 
+# FUNCTION: RUNS OF THE FILLED TARGET-WEIGHT PATH
+def get_weight_run_list(target_weight_arr_in):
+    """
+    Consecutive sessions at the same weight (within NUMERIC_TOLERANCE) are one run.
+
+    Args:
+        target_weight_arr_in (array-like): One target per window session
+
+    Returns:
+        list[tuple[float, int]]: (weight, length) in path order
+    """
+    # EMPTY PATHS HAVE NO RUNS
+    filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
+    if len(filled_arr) == 0:
+        return []
+    run_list = []
+    current_weight = float(filled_arr[0])
+    length_int = 1
+    for weight in filled_arr[1:]:
+        if abs(float(weight) - current_weight) <= float(config.NUMERIC_TOLERANCE):
+            length_int += 1
+        else:
+            run_list.append((current_weight, length_int))
+            current_weight = float(weight)
+            length_int = 1
+    run_list.append((current_weight, length_int))
+    return run_list
+
+
+# FUNCTION: SESSION COUNTS AT EACH UNIQUE WEIGHT
+def get_weight_time_dict(target_weight_arr_in):
+    """
+    Args:
+        target_weight_arr_in (array-like): One target per window session
+
+    Returns:
+        dict: weight -> session count, keys in first-seen order
+    """
+    # THE SAME UNIQUE KEYS AS get_unique_weight_list
+    unique_list = get_unique_weight_list(target_weight_arr_in)
+    filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
+    time_dict = {weight: 0 for weight in unique_list}
+    for value in filled_arr:
+        if not np.isfinite(value):
+            continue
+        for weight in unique_list:
+            if abs(float(value) - weight) <= float(config.NUMERIC_TOLERANCE):
+                time_dict[weight] += 1
+                break
+    return time_dict
+
+
 # FUNCTION: THE FIXED RANDOM-TIMING SEEDS
 def get_random_timing_seed_list(count_int_in=None):
     """
@@ -94,39 +149,53 @@ def get_random_timing_seed_list(count_int_in=None):
     return [int(config.RANDOM_SEED) + idx for idx in range(count_int)]
 
 
-# FUNCTION: A RANDOM TARGET-WEIGHT PATH WITH THE SAME SWITCH COUNT
-def get_random_timing_weight_arr(target_weight_arr_in, seed_in):
+# FUNCTION: A RANDOM TARGET-WEIGHT PATH THAT SHUFFLES SPELL LENGTHS
+def get_random_timing_weight_arr(target_weight_arr_in, seed_in, initial_weight_in=None):
     """
-    Same unique weights, same number of switches, random switch dates. Starts at the path's first weight. One unique
-    weight, or zero switches, returns the filled path (no timing to randomize).
+    Same time at each weight and the same number of switches; only the timing of spells moves. Splits the filled
+    path into runs, keeps the run order of weights, and for each weight permutes the lengths among that weight's
+    runs. When the path starts at initial_weight_in (the window's opening weight; default = the path's first
+    weight), the first run keeps its length. One run, or one unique weight, returns the filled path.
 
     Args:
         target_weight_arr_in (array-like): Path targets
         seed_in (int): Generator seed
+        initial_weight_in (float | None): Window opening weight (None = the path's first weight)
 
     Returns:
         np.ndarray: One weight per session
     """
-    # FILL KEEP-NaN BEFORE COUNTING SWITCHES
+    # FILL KEEP-NaN, THEN SPLIT INTO SPELLS
     filled_arr = get_filled_target_weight_arr(target_weight_arr_in)
-    session_count = int(len(filled_arr))
-    unique_list = get_unique_weight_list(filled_arr)
-    switch_count = get_weight_switch_count_int(filled_arr)
-    if session_count == 0 or switch_count == 0 or len(unique_list) <= 1:
+    run_list = get_weight_run_list(filled_arr)
+    if len(run_list) <= 1:
         return filled_arr
+    first_weight = float(run_list[0][0])
+    open_weight = first_weight if initial_weight_in is None else float(initial_weight_in)
+    freeze_first_bool = abs(first_weight - open_weight) <= float(config.NUMERIC_TOLERANCE)
+    unique_list = get_unique_weight_list(filled_arr)
+    idx_list_by_weight = {weight: [] for weight in unique_list}
+    for run_idx, (run_weight, _length_int) in enumerate(run_list):
+        for weight in unique_list:
+            if abs(run_weight - weight) <= float(config.NUMERIC_TOLERANCE):
+                idx_list_by_weight[weight].append(run_idx)
+                break
     rng = np.random.default_rng(int(seed_in))
-    switch_count = min(switch_count, session_count - 1)
-    switch_pos_arr = np.sort(rng.choice(np.arange(1, session_count), size=switch_count, replace=False))
-    switch_set = set(int(pos) for pos in switch_pos_arr)
-    out_arr = np.empty(session_count, dtype=float)
-    current_weight = float(filled_arr[0])
-    out_arr[0] = current_weight
-    for idx in range(1, session_count):
-        if idx in switch_set:
-            other_list = [weight for weight in unique_list if abs(weight - current_weight) > float(config.NUMERIC_TOLERANCE)]
-            current_weight = float(other_list[int(rng.integers(0, len(other_list)))])
-        out_arr[idx] = current_weight
-    return out_arr
+    length_list = [int(length_int) for _weight, length_int in run_list]
+    for weight in unique_list:
+        shuffle_idx_list = list(idx_list_by_weight[weight])
+        if freeze_first_bool and shuffle_idx_list and shuffle_idx_list[0] == 0:
+            shuffle_idx_list = shuffle_idx_list[1:]
+        if len(shuffle_idx_list) <= 1:
+            continue
+        source_length_list = [length_list[run_idx] for run_idx in shuffle_idx_list]
+        perm_arr = rng.permutation(len(source_length_list))
+        for source_idx, run_idx in enumerate(shuffle_idx_list):
+            length_list[run_idx] = int(source_length_list[int(perm_arr[source_idx])])
+    out_list = []
+    for (run_weight, _old_length_int), length_int in zip(run_list, length_list):
+        out_list.extend([run_weight] * int(length_int))
+    return np.asarray(out_list, dtype=float)
 
 
 # FUNCTION: DECISION DICTS FOR A WEIGHT ARRAY
@@ -176,7 +245,8 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
     """
     Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean_weight
-    and rebalances daily (dead band 0). Random timing uses the path's target weights and switch count.
+    and rebalances daily (dead band 0). Random timing shuffles spell lengths (same time at each weight, same
+    switch count).
 
     Args:
         ohlcv_array_dict_in (dict): Bars

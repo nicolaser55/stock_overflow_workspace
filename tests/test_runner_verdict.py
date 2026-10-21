@@ -50,7 +50,8 @@ from so.runner import (run_development_dict, check_clean_tree, CLEAN_TREE_MESSAG
                        LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR, EMAIL_WORTHY_STR,
                        NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR)
 from so.runner.checkpoint import get_run_folder_str
-from so.runner.baselines import get_weight_switch_count_int, get_unique_weight_list
+from so.runner.baselines import (get_weight_switch_count_int, get_unique_weight_list, get_weight_run_list,
+                                 get_weight_time_dict)
 from so.runner.verdict import REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR
 from synthetic_data import get_synthetic_ohlcv_pdf
 import runner_candidate_design as cand_design
@@ -311,6 +312,106 @@ def test_baselines_reproducible_and_constant_one_equals_buy_hold():
     passed("baselines are reproducible with the fixed seeds and constant weight 1 equals buy-and-hold")
 
 
+# FUNCTION: A WEIGHT PATH FROM (WEIGHT, LENGTH) RUNS
+def get_run_weight_arr(run_list_in):
+    """
+    Args:
+        run_list_in (list[tuple]): (weight, length) in order
+
+    Returns:
+        np.ndarray: One weight per session
+    """
+    # CONCATENATE THE SPELLS
+    value_list = []
+    for weight, length_int in run_list_in:
+        value_list.extend([float(weight)] * int(length_int))
+    return np.asarray(value_list, dtype=float)
+
+
+# FUNCTION: SPELL SHUFFLE KEEPS EXPOSURE, SWITCH COUNT AND THE FIRST RUN
+def check_random_timing_preserves_exposure(path_arr_in, seed_list_in, initial_weight_in=1.0):
+    """
+    Every draw has the path's time at each weight, switch count, weight-run order and first-run length. Draws
+    differ from the path and from each other. The same seed reproduces.
+
+    Args:
+        path_arr_in (np.ndarray): Path targets
+        seed_list_in (list[int]): Seeds
+        initial_weight_in (float): Window opening weight
+
+    Returns:
+        list[np.ndarray]: The draws
+    """
+    # THE PATH'S EXPOSURE AND SPELL SEQUENCE
+    path_time_dict = get_weight_time_dict(path_arr_in)
+    path_switch_int = get_weight_switch_count_int(path_arr_in)
+    path_run_list = get_weight_run_list(path_arr_in)
+    path_weight_list = [weight for weight, _length_int in path_run_list]
+    first_length_int = int(path_run_list[0][1])
+    draw_list = [get_random_timing_weight_arr(path_arr_in, seed_int, initial_weight_in) for seed_int in seed_list_in]
+    for draw_arr in draw_list:
+        assert get_weight_time_dict(draw_arr) == path_time_dict
+        assert get_weight_switch_count_int(draw_arr) == path_switch_int
+        draw_run_list = get_weight_run_list(draw_arr)
+        assert [weight for weight, _length_int in draw_run_list] == path_weight_list
+        assert int(draw_run_list[0][1]) == first_length_int
+        assert len(draw_arr) == len(path_arr_in)
+    assert np.allclose(draw_list[0], get_random_timing_weight_arr(path_arr_in, seed_list_in[0], initial_weight_in),
+                       atol=0.0)
+    assert any(not np.array_equal(draw_arr, path_arr_in) for draw_arr in draw_list)
+    assert len({draw_arr.tobytes() for draw_arr in draw_list}) >= 2
+    return draw_list
+
+
+# FUNCTION: SPELL SHUFFLE ON TWO AND FOUR DISTINCT WEIGHTS
+def test_random_timing_shuffles_spells_two_and_four_weights():
+    """
+    Two weights and four weights. Every draw keeps time-at-weight and switch count. Draws differ from the path
+    and from each other. Fixed seeds reproduce.
+
+    Returns:
+        None
+    """
+    # TWO WEIGHTS, SEVERAL SPELLS OF EACH SO LENGTHS CAN MOVE
+    two_arr = get_run_weight_arr([(1.0, 8), (0.0, 3), (1.0, 5), (0.0, 2), (1.0, 7), (0.0, 4), (1.0, 6)])
+    seed_list = get_random_timing_seed_list(12)
+    check_random_timing_preserves_exposure(two_arr, seed_list, 1.0)
+    assert get_unique_weight_list(two_arr) == [1.0, 0.0]
+    # FOUR WEIGHTS, AT LEAST TWO SHUFFLEABLE RUNS OF EACH
+    four_arr = get_run_weight_arr([(1.0, 10), (0.75, 4), (0.25, 7), (0.0, 3), (1.0, 6), (0.75, 9), (0.25, 2),
+                                  (0.0, 5), (1.0, 8), (0.75, 3), (0.25, 6), (0.0, 4)])
+    check_random_timing_preserves_exposure(four_arr, seed_list, 1.0)
+    assert get_unique_weight_list(four_arr) == [1.0, 0.75, 0.25, 0.0]
+    passed("random timing shuffles spells for 2 and 4 weights, keeping time at each weight")
+
+
+# FUNCTION: A 94%-INVESTED PATH WITH 9 SHORT CASH SPELLS
+def test_random_timing_preserves_ninety_four_percent_invested():
+    """
+    150 sessions, 9 cash spells of length 1, 141 invested (94%). Every one of the 100 fixed-seed draws stays at
+    94% invested with 9 cash spells. Placing switches independently would not.
+
+    Returns:
+        None
+    """
+    # START INVESTED (INITIAL_WEIGHT 1); NINE ONE-SESSION CASH SPELLS
+    run_list = [(1.0, 50), (0.0, 1), (1.0, 20), (0.0, 1), (1.0, 15), (0.0, 1), (1.0, 10), (0.0, 1), (1.0, 8),
+                (0.0, 1), (1.0, 7), (0.0, 1), (1.0, 12), (0.0, 1), (1.0, 9), (0.0, 1), (1.0, 6), (0.0, 1), (1.0, 4)]
+    path_arr = get_run_weight_arr(run_list)
+    assert len(path_arr) == 150
+    path_time_dict = get_weight_time_dict(path_arr)
+    assert path_time_dict[1.0] == 141 and path_time_dict[0.0] == 9
+    assert path_time_dict[1.0] / len(path_arr) == 0.94
+    cash_spell_count = sum(1 for weight, _length_int in get_weight_run_list(path_arr) if weight == 0.0)
+    assert cash_spell_count == 9
+    seed_list = get_random_timing_seed_list(100)
+    draw_list = check_random_timing_preserves_exposure(path_arr, seed_list, 1.0)
+    invested_share_list = [get_weight_time_dict(draw_arr)[1.0] / len(draw_arr) for draw_arr in draw_list]
+    assert all(share == 0.94 for share in invested_share_list)
+    assert min(invested_share_list) == 0.94 and max(invested_share_list) == 0.94
+    passed("random timing keeps 94% invested on a path with 9 short cash spells")
+
+
 # FUNCTION: A CRASHED RUN LEAVES NO MANIFEST; A FINISHED RUN WRITES IT LAST
 def test_crashed_run_leaves_no_manifest():
     """
@@ -427,6 +528,8 @@ if __name__ == "__main__":
         test_baseline_verdict_parts()
         test_email_worthy_needs_every_part()
         test_baselines_reproducible_and_constant_one_equals_buy_hold()
+        test_random_timing_shuffles_spells_two_and_four_weights()
+        test_random_timing_preserves_ninety_four_percent_invested()
         test_crashed_run_leaves_no_manifest()
         test_dirty_sibling_experiment_folder_is_refused()
         print("\nAll runner verdict tests passed ✅")

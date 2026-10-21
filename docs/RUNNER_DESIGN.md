@@ -76,8 +76,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Run guards:** a run refuses uncommitted changes in the code it uses, a missing or stale `VIEW.json`, and the
   quarantine root; a resume refuses a checkpoint from a different commit or code hash. (Decided 2026-10-21.)
 - **Baselines:** buy-and-hold, constant exposure at the same average weight (daily rebalanced), and random timing
-  with the same number of switches. Random timing uses 100 fixed seeds; to count as ahead of it, a design must beat at
-  least 95% of the draws.
+  that shuffles spell lengths (same time at each weight, same number of switches; only the timing moves). Random
+  timing uses 100 fixed seeds; to count as ahead of it, a design must beat at least 95% of the draws. Placing
+  switches independently does not preserve exposure and is not the baseline.
 - **Trial log:** rows are written as each candidate-period is scored, before any summary is shown. Trial ids are
   stable (built from the run, candidate and period), so a resumed run never logs the same trial twice. Tested with
   several processes writing at once.
