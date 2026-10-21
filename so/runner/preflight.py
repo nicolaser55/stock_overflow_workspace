@@ -392,6 +392,7 @@ def check_design_file(file_path_str_in):
     for path_str in get_design_follow_path_list(file_path_str_in):
         source_str = open(path_str, "r", encoding="utf-8").read()
         tree = ast.parse(source_str, filename=path_str)
+        check_minute_signal_tree(tree, path_str)
         for node in ast.walk(tree):
             check_design_tree_node(node, path_str)
 
@@ -435,6 +436,63 @@ def get_tests_path_bool(file_path_str_in):
     norm_str = os.path.normcase(os.path.abspath(file_path_str_in))
     tests_str = os.path.normcase(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "tests")))
     return norm_str.startswith(tests_str + os.sep)
+
+
+# FUNCTION: REFUSE A signal THAT IS A METHOD, A CLOSURE OR A LAMBDA
+def check_minute_signal(design_module_in):
+    """
+    Minute mode requires a module-level function signal(rows, model). A bound method, a nested function that
+    closes over cells, or a lambda is refused.
+
+    Args:
+        design_module_in (module): Design module
+
+    Returns:
+        None
+    """
+    # THE NAME ON THE MODULE IS WHAT THE RUNNER CALLS
+    design_name_str = str(getattr(design_module_in, "EXPERIMENT_NAME",
+                                  getattr(design_module_in, "__name__", "minute_design")))
+    if not hasattr(design_module_in, "signal"):
+        raise ValueError(f"minute design {design_name_str} is missing signal")
+    signal_func = design_module_in.signal
+    if inspect.ismethod(signal_func):
+        raise ValueError(f"minute signal must be a module-level function, not a method: {design_name_str}")
+    if inspect.ismethoddescriptor(signal_func) or inspect.isbuiltin(signal_func):
+        raise ValueError(f"minute signal must be a module-level function, not a method: {design_name_str}")
+    if not inspect.isfunction(signal_func):
+        raise ValueError(f"minute signal must be a module-level function: {design_name_str}")
+    if signal_func.__name__ == "<lambda>":
+        raise ValueError(f"minute signal must be a module-level function, not a lambda: {design_name_str}")
+    if signal_func.__closure__ is not None:
+        raise ValueError(f"minute signal must not be a closure: {design_name_str}")
+    qual_str = str(getattr(signal_func, "__qualname__", signal_func.__name__))
+    if "." in qual_str:
+        raise ValueError(f"minute signal must be a module-level function, not a method: {design_name_str}")
+
+
+# FUNCTION: REFUSE A signal DEFINED AS A METHOD OR ASSIGNED AS A LAMBDA IN THE DESIGN FILE
+def check_minute_signal_tree(tree_in, file_path_str_in):
+    """
+    A FunctionDef named signal inside a class is a method. An assignment of a lambda to signal is not a function.
+
+    Args:
+        tree_in (ast.AST): Parsed module
+        file_path_str_in (str): File being checked
+
+    Returns:
+        None
+    """
+    # ONLY THE MODULE BODY (NOT HELPERS NESTED INSIDE signal)
+    for node in tree_in.body:
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "signal":
+                    raise ValueError(f"signal must be a module-level function, not a method: {file_path_str_in}")
+        if isinstance(node, ast.Assign):
+            name_bool = any(isinstance(target, ast.Name) and target.id == "signal" for target in node.targets)
+            if name_bool and isinstance(node.value, ast.Lambda):
+                raise ValueError(f"signal must be a module-level function, not a lambda: {file_path_str_in}")
 
 
 # FUNCTION: RUN THE PREFLIGHT WHEN THE FILE IS A DESIGN FILE

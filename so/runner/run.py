@@ -24,7 +24,7 @@ from so.core.evaluation import get_mde_float
 # IMPORT THE 4A LOOP, PERIODS, SELECTION AND CHECKPOINTS
 from so.runner.engine import (FractionalWeightEngine, TrailingStopEngine, BarrierEngine, ENGINE_FRACTIONAL_STR,
                               ENGINE_TRAILING_STOP_STR, ENGINE_BARRIER_STR)
-from so.runner.loop import DailyLoop
+from so.runner.loop import get_stream_loop, get_design_mode_str, MODE_MINUTE_STR
 from so.runner.preflight import (check_design_file, get_design_follow_path_list, get_experiments_package_folder_str)
 from so.runner.periods import (check_quarantine_refused, get_development_run_period_pdf, get_period_date)
 from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_period_score_dict,
@@ -361,7 +361,10 @@ def get_candidate_engine(design_module_in):
         Engine: Fresh engine
     """
     # OPTIONAL CONSTANTS, SHARED COSTS
-    engine_name_str = str(getattr(design_module_in, "ENGINE_NAME", ENGINE_FRACTIONAL_STR))
+    engine_name_str = str(getattr(design_module_in, "ENGINE_NAME", "") or "")
+    if engine_name_str == "":
+        engine_name_str = (ENGINE_BARRIER_STR if get_design_mode_str(design_module_in) == MODE_MINUTE_STR
+                           else ENGINE_FRACTIONAL_STR)
     initial_capital = config.INITIAL_CAPITAL
     entry_slippage = config.ENTRY_SLIPPAGE_PER_SHARE
     market_exit_slippage = config.MARKET_EXIT_SLIPPAGE_PER_SHARE
@@ -443,7 +446,8 @@ def run_candidate_job_dict(job_dict_in):
     data_context = read_pickle(job_dict_in["context_path_str"]) if get_file_exists_bool(job_dict_in["context_path_str"]) else None
     date1, date2 = job_dict_in["date1"], job_dict_in["date2"]
     dead_band = float(getattr(design_module, "DEAD_BAND", 0.0))
-    initial_weight = float(getattr(design_module, "INITIAL_WEIGHT", 1.0))
+    default_weight = 0.0 if get_design_mode_str(design_module) == MODE_MINUTE_STR else 1.0
+    initial_weight = float(getattr(design_module, "INITIAL_WEIGHT", default_weight))
     crash_after_period_id = job_dict_in.get("crash_after_period_id")
     commit_str = job_dict_in["commit_str"]
     code_hash_str = job_dict_in["code_hash_str"]
@@ -457,19 +461,21 @@ def run_candidate_job_dict(job_dict_in):
     if checkpoint_dict is None:
         design = design_module.get_candidate_design(candidate)
         engine = get_candidate_engine(design_module)
-        loop = DailyLoop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
-                         config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
-                         job_dict_in["design_file_path_str"], check_source_bool_in=False)
+        loop = get_stream_loop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
+                               config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                               job_dict_in["design_file_path_str"], False, design_module)
         score_row_list = []
         completed_period_id_set = set()
     else:
         design = checkpoint_dict["design"]
         engine = checkpoint_dict["engine"]
-        loop = DailyLoop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
-                         config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
-                         job_dict_in["design_file_path_str"], check_source_bool_in=False)
+        loop = get_stream_loop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
+                               config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                               job_dict_in["design_file_path_str"], False, design_module)
         loop.restore_progress(checkpoint_dict["next_session_pos"], checkpoint_dict["target_weight_list"],
                               checkpoint_dict["decision_session_list"], checkpoint_dict["decision_dict_list"])
+        if hasattr(loop, "restore_checkpoint_extra"):
+            loop.restore_checkpoint_extra(checkpoint_dict)
         score_row_list = list(checkpoint_dict.get("score_row_list") or read_score_row_list(run_id_str, candidate_token_str))
         completed_period_id_set = {int(row["period_id"]) for row in score_row_list}
     # BLOCK DIRECT LOADER CALLS FOR THE WHOLE STREAM
@@ -494,14 +500,17 @@ def run_candidate_job_dict(job_dict_in):
                                                 job_dict_in["trial_log_path_str"])
             score_row_list.append(score_dict)
             completed_period_id_set.add(period_id)
-            write_checkpoint_dict(run_id_str, candidate_token_str, {
+            checkpoint_payload_dict = {
                 "design": loop.design, "engine": loop.engine, "next_session_pos": loop.next_session_pos_int,
                 "target_weight_list": list(loop.target_weight_list),
                 "decision_session_list": list(loop.decision_session_list),
                 "decision_dict_list": list(loop.decision_dict_list), "period_id": period_id,
                 "score_row_list": list(score_row_list),
                 "commit_str": commit_str, "code_hash_str": code_hash_str,
-            })
+            }
+            if hasattr(loop, "get_checkpoint_extra_dict"):
+                checkpoint_payload_dict.update(loop.get_checkpoint_extra_dict())
+            write_checkpoint_dict(run_id_str, candidate_token_str, checkpoint_payload_dict)
             write_decisions_list(run_id_str, candidate_token_str, loop.decision_dict_list)
             write_score_row_list(run_id_str, candidate_token_str, score_row_list)
             if crash_after_period_id is not None and int(period_id) == int(crash_after_period_id):
@@ -638,10 +647,12 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
         selection_pdf = get_runner_selection_pdf(score_pdf, design_module_in)
         governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
         dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
-        initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
+        default_weight = 0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0
+        initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", default_weight))
         prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
                                                              candidate_decision_dict, governing_dict, period_pdf, dead_band,
-                                                             initial_weight, engine_in=get_candidate_engine(design_module_in))
+                                                             initial_weight, engine_in=get_candidate_engine(design_module_in),
+                                                             design_module_in=design_module_in)
         return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
                 "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
                 "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,

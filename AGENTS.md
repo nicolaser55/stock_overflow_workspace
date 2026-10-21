@@ -18,8 +18,8 @@ to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine 
 
 ## The project in five lines
 
-- Code: `so/` (shared library, including `so.runner` through 4b-2a: daily view, fractional / trailing-stop / barrier
-  engines), `pipeline/` (shared data notebooks 00-06), `experiments/expNN_<name>/` (one folder per experiment:
+- Code: `so/` (shared library, including `so.runner` through 4b-2b: daily view, fractional / trailing-stop / barrier
+  engines, minute mode), `pipeline/` (shared data notebooks 00-06), `experiments/expNN_<name>/` (one folder per experiment:
   `PROTOCOL.md`, `config.py`, code, `stepNN_*.ipynb`), `tests/`, `docs/`, `records/`.
 - Data (never in git): the folder in SO_DATA_PATH (`so.paths`).
 - Every experiment run is logged in `store04_experiments/trial_log.csv` (never edit it) and reported in

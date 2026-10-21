@@ -7,7 +7,7 @@ from so.core.continuous_replay import get_period_return_pdf, get_prior_only_peri
 from so.core.reentry_simulation import get_buy_and_hold_result_dict
 # IMPORT THE ENGINE-ONLY REPLAY OF RECORDED DECISIONS
 from so.runner.engine import FractionalWeightEngine, get_decision_dict
-from so.runner.loop import run_engine_decisions_dict
+from so.runner.loop import run_engine_decisions_dict, get_design_mode_str, MODE_MINUTE_STR
 from so.runner.periods import get_period_date
 
 """
@@ -198,24 +198,48 @@ def run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, 
                                        initial_capital_in=config.INITIAL_CAPITAL,
                                        entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
                                        market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
-                                       engine_in=None):
+                                       engine_in=None, design_module_in=None):
     """
     One engine pass. Each session uses the governing candidate's recorded decision. The position is carried across
-    switches. The last session sells at the close.
+    switches. The last session sells at the close. Minute mode stitches every recorded minute of the candidate in
+    force that session.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span bounds
-        session_date_list_in (list): Window session dates (aligned with each candidate's decision list)
-        candidate_decision_dict_in (dict): candidate -> list of decision dicts, one per window session
+        session_date_list_in (list): Window session dates (aligned with each candidate's decision list in daily mode)
+        candidate_decision_dict_in (dict): candidate -> list of decision dicts
         governing_dict_in (dict): period_id -> candidate
         period_pdf_in (pd.DataFrame): Periods
         dead_band_in, initial_weight_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine
         engine_in (Engine | None): None uses a fresh FractionalWeightEngine
+        design_module_in (module | None): Design (MODE); None is daily
 
     Returns:
         dict: Engine result plus governing_dict
     """
+    # MINUTE DECISIONS ARE MANY PER SESSION; THE ENGINE REPLAY FILLS AT THE NEXT OPEN
+    if design_module_in is not None and get_design_mode_str(design_module_in) == MODE_MINUTE_STR:
+        from so.runner.minute import run_engine_minute_decisions_dict, SESSION_DATE_KEY_STR
+        session_candidate_dict = get_session_candidate_dict(session_date_list_in, period_pdf_in, governing_dict_in)
+        decision_dict_list = []
+        for session_date in session_date_list_in:
+            session_day = get_period_date(session_date)
+            candidate = session_candidate_dict.get(session_day)
+            if candidate is None:
+                continue
+            for recorded_dict in candidate_decision_dict_in.get(candidate, []):
+                recorded_session = recorded_dict.get(SESSION_DATE_KEY_STR)
+                if recorded_session is None:
+                    continue
+                if get_period_date(recorded_session) != session_day:
+                    continue
+                decision_dict_list.append(dict(recorded_dict))
+        result_dict = run_engine_minute_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_dict_list,
+                                                       engine_in, initial_weight_in, initial_capital_in,
+                                                       entry_slippage_in, market_exit_slippage_in)
+        result_dict["governing_dict"] = dict(governing_dict_in)
+        return result_dict
     # ONE DECISION PER SESSION FROM THE CANDIDATE IN FORCE THAT DAY
     session_candidate_dict = get_session_candidate_dict(session_date_list_in, period_pdf_in, governing_dict_in)
     first_candidate = next(iter(candidate_decision_dict_in.values()))
