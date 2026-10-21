@@ -1,0 +1,443 @@
+"""
+Workspace Tests: runner baselines, verdict, report, manifest (infrastructure 4b-1b)
+
+Run from the workspace root:   python tests/test_runner_verdict.py   (or python tests/run_all_tests.py)
+(Plain asserts, no test framework required.)
+
+Synthetic data only. The data root is a temporary folder. records/holdout_windows.csv is not written.
+SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are not set. No real-data run.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import shutil
+import numpy as np
+import pandas as pd
+
+# FORCE UTF-8 SO THE PASS MARK PRINTS ON A WINDOWS CONSOLE
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+# POINT THE DATA ROOT AT AN EMPTY TEMPORARY FOLDER BEFORE so.paths IS IMPORTED
+WORKSPACE_PATH_STR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, WORKSPACE_PATH_STR)
+sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "tests"))
+_CURRENT_DATA_PATH_STR = os.environ.get("SO_DATA_PATH", "").strip()
+_TEMP_DIR_STR = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+OWNED_TEMP_BOOL = False
+if _CURRENT_DATA_PATH_STR and os.path.normcase(os.path.abspath(_CURRENT_DATA_PATH_STR)).startswith(_TEMP_DIR_STR + os.sep):
+    TEMP_ROOT_STR = _CURRENT_DATA_PATH_STR
+else:
+    TEMP_ROOT_STR = tempfile.mkdtemp(prefix="so_runner_verdict_")
+    os.environ["SO_DATA_PATH"] = TEMP_ROOT_STR
+    OWNED_TEMP_BOOL = True
+os.environ.pop("SO_HOLDOUT_PATH", None)
+os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+os.environ.pop("SO_QUARANTINE_PATH", None)
+# THE DATA ROOT MUST BE INSIDE A TEMPORARY FOLDER
+from temporary_data_root import assert_temporary_data_root
+assert_temporary_data_root()
+# IMPORT THE SHARED MODULES
+from so import paths, config
+from so.core.evaluation import get_success_criteria_dict, get_rolling_month_window_pdf
+from so.core.trade_execution import get_ohlcv_array_dict
+from so.runner import (run_development_dict, check_clean_tree, CLEAN_TREE_MESSAGE_STR, get_code_hash_str,
+                       get_guarded_code_folder_list, get_runner_baseline_dict, get_random_timing_weight_arr,
+                       get_random_timing_seed_list, run_weight_path_dict, get_runner_verdict_dict,
+                       get_return_verdict_dict, get_consistency_verdict_dict, get_baseline_verdict_dict,
+                       LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR, EMAIL_WORTHY_STR,
+                       NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR)
+from so.runner.checkpoint import get_run_folder_str
+from so.runner.baselines import get_weight_switch_count_int, get_unique_weight_list
+from so.runner.verdict import REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR
+from synthetic_data import get_synthetic_ohlcv_pdf
+import runner_candidate_design as cand_design
+
+# KEEP THE REAL REGISTRY PATH AND POINT THIS SUITE AT A TEMPORARY FILE
+REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
+REGISTRY_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
+paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REGISTRY_PATH_STR
+
+
+# FUNCTION: PRINT A PASSED TEST
+def passed(name_str_in):
+    """
+    Prints the passing line for one test.
+
+    Args:
+        name_str_in (str): What was checked
+
+    Returns:
+        None
+    """
+    # PRINT THE CHECK
+    print(f"✅ {name_str_in}")
+
+
+# FUNCTION: ONE SESSION PER MONTH WITH A CONSTANT DAILY RETURN
+def get_month_return_pdf(start_str_in, return_list_in):
+    """
+    Args:
+        start_str_in (str): First month start
+        return_list_in (list[float]): One return per month
+
+    Returns:
+        pd.DataFrame: date, daily_return
+    """
+    # THE FIRST CALENDAR DAY OF EACH MONTH
+    date_index = pd.date_range(start_str_in, periods=len(return_list_in), freq="MS")
+    return pd.DataFrame({"date": list(date_index.date), "daily_return": [float(value) for value in return_list_in]})
+
+
+# FUNCTION: A BASELINE DICT THE VERDICT CAN BEAT OR LOSE TO
+def get_hand_baseline_dict(constant_return_in, random_return_in, draw_count_int_in=100):
+    """
+    Args:
+        constant_return_in (float): Constant-exposure total return
+        random_return_in (float): Each random draw's total return
+        draw_count_int_in (int): How many identical draws
+
+    Returns:
+        dict: Fields get_baseline_verdict_dict reads
+    """
+    # FIXED SEEDS ARE RECORDED BUT NOT USED
+    return {"constant_exposure_total_return": float(constant_return_in), "constant_exposure_weight": 0.5,
+            "random_timing_return_list": [float(random_return_in)] * int(draw_count_int_in),
+            "random_timing_seed_list": get_random_timing_seed_list(draw_count_int_in),
+            "random_timing_switch_count": 2, "buy_hold_total_return": 0.0}
+
+
+# FUNCTION: THREE INJECTED PERIODS ON A SHORT SYNTHETIC SPAN
+def get_injected_period_pdf(session_date_list_in):
+    """
+    Args:
+        session_date_list_in (list): Session dates (at least 12)
+
+    Returns:
+        pd.DataFrame: period_id, period_start, period_end, session_count, valid_start, valid_end
+    """
+    # THE SAME SPLIT AS test_runner_candidates
+    session_date_list = [pd.Timestamp(session_date).date() for session_date in session_date_list_in]
+    assert len(session_date_list) >= 12
+    bound_list = [(0, 3), (4, 7), (8, len(session_date_list) - 1)]
+    row_dict_list = []
+    for period_id, (start_idx, end_idx) in enumerate(bound_list):
+        start_date, end_date = session_date_list[start_idx], session_date_list[end_idx]
+        row_dict_list.append({"period_id": period_id, "period_start": start_date, "period_end": end_date,
+                              "session_count": int(end_idx - start_idx + 1), "valid_start": start_date, "valid_end": end_date})
+    return pd.DataFrame(row_dict_list)
+
+
+# FUNCTION: A TRIAL-LOG PATH INSIDE THE TEMPORARY DATA ROOT
+def get_test_trial_log_path_str(file_name_str_in):
+    """
+    Args:
+        file_name_str_in (str): File name
+
+    Returns:
+        str: CSV path
+    """
+    # THE FOLDER IS CREATED HERE
+    folder_str = os.path.join(paths.LOCAL_EXPERIMENTZONE_PATH_STR, "runner_verdict_test")
+    os.makedirs(folder_str, exist_ok=True)
+    return os.path.join(folder_str, file_name_str_in)
+
+
+# FUNCTION: EACH RETURN PART PASSES AND FAILS, INCLUDING THE 90-100% BAND
+def test_return_verdict_parts():
+    """
+    >= buy-and-hold passes. The comparable band passes only with a smaller drawdown or a higher Sharpe. Below 90%
+    fails.
+
+    Returns:
+        None
+    """
+    # CONSTANT POSITIVE BUY-AND-HOLD
+    buy_hold_pdf = pd.DataFrame({"date": pd.bdate_range("2010-01-04", periods=20).date,
+                                 "daily_return": np.full(20, 0.001)})
+    same_pdf = buy_hold_pdf.copy()
+    same_success_dict = get_success_criteria_dict(same_pdf, buy_hold_pdf)
+    same_dict = get_return_verdict_dict(same_success_dict)
+    assert same_dict["pass_bool"] and same_dict["reason_str"] == "total_return_at_least_buy_hold"
+    better_pdf = buy_hold_pdf.assign(daily_return=0.002)
+    better_dict = get_return_verdict_dict(get_success_criteria_dict(better_pdf, buy_hold_pdf))
+    assert better_dict["pass_bool"] and better_dict["reason_str"] == "total_return_at_least_buy_hold"
+    # BELOW 90%: HALF THE DAILY RETURN
+    below_pdf = buy_hold_pdf.assign(daily_return=0.0004)
+    below_success_dict = get_success_criteria_dict(below_pdf, buy_hold_pdf)
+    below_dict = get_return_verdict_dict(below_success_dict)
+    assert not below_dict["pass_bool"] and below_dict["reason_str"] == "below_comparable"
+    assert below_success_dict["strategy_total_return"] < 0.9 * below_success_dict["buy_hold_total_return"]
+    # 90-100% BAND, ZERO VOLATILITY: NO SECONDARY WIN
+    band_pdf = buy_hold_pdf.assign(daily_return=0.00095)
+    band_success_dict = get_success_criteria_dict(band_pdf, buy_hold_pdf)
+    band_dict = get_return_verdict_dict(band_success_dict)
+    assert band_success_dict["comparable_return"] and band_success_dict["strategy_total_return"] < band_success_dict["buy_hold_total_return"]
+    assert not band_dict["pass_bool"] and band_dict["reason_str"] == "comparable_without_secondary"
+    # 90-100% BAND WITH A SMALLER DRAWDOWN (ALWAYS-UP VS AN OSCILLATING BUY-AND-HOLD)
+    osc_pdf = pd.DataFrame({"date": pd.bdate_range("2010-01-04", periods=20).date,
+                            "daily_return": np.array([0.04, -0.02] * 10, dtype=float)})
+    flat_pdf = osc_pdf.assign(daily_return=np.full(20, 0.009))
+    scaled_success_dict = get_success_criteria_dict(flat_pdf, osc_pdf)
+    scaled_dict = get_return_verdict_dict(scaled_success_dict)
+    assert scaled_success_dict["comparable_return"] and scaled_success_dict["strategy_total_return"] < scaled_success_dict["buy_hold_total_return"]
+    assert scaled_success_dict["secondary_drawdown"] and scaled_dict["pass_bool"]
+    assert scaled_dict["reason_str"] == "comparable_with_secondary"
+    # 90-100% BAND WITH A HIGHER SHARPE (LOWER VOLATILITY, STILL SOME MOVEMENT)
+    low_vol_pdf = osc_pdf.assign(daily_return=np.array([0.012, 0.006] * 10, dtype=float))
+    sharpe_success_dict = get_success_criteria_dict(low_vol_pdf, osc_pdf)
+    sharpe_dict = get_return_verdict_dict(sharpe_success_dict)
+    assert sharpe_success_dict["comparable_return"] and sharpe_success_dict["strategy_total_return"] < sharpe_success_dict["buy_hold_total_return"]
+    assert sharpe_success_dict["secondary_sharpe"] and sharpe_dict["pass_bool"]
+    passed("each return verdict part passes and fails including the 90-100% band")
+
+
+# FUNCTION: CONSISTENCY PASSES AT 60% AND FAILS BELOW
+def test_consistency_verdict_parts():
+    """
+    16 months, 5 rolling 12-month windows. Three windows ahead is 60% (pass). One window ahead is 20% (fail).
+    Zero windows fail.
+
+    Returns:
+        None
+    """
+    # BUY-AND-HOLD FLAT; STRATEGY GETS A +10% MONTH IN THE FIRST THREE MONTHS
+    buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 16)
+    pass_pdf = get_month_return_pdf("2010-01-01", [0.10, 0.10, 0.10] + [0.0] * 13)
+    pass_dict = get_consistency_verdict_dict(pass_pdf, buy_hold_pdf)
+    assert pass_dict["window_count"] == 5 and pass_dict["ahead_count"] == 3
+    assert np.isclose(pass_dict["ahead_share"], 0.6) and pass_dict["pass_bool"]
+    fail_pdf = get_month_return_pdf("2010-01-01", [0.10] + [0.0] * 15)
+    fail_dict = get_consistency_verdict_dict(fail_pdf, buy_hold_pdf)
+    assert fail_dict["window_count"] == 5 and fail_dict["ahead_count"] == 1
+    assert not fail_dict["pass_bool"]
+    short_pdf = get_month_return_pdf("2010-01-01", [0.01] * 3)
+    short_dict = get_consistency_verdict_dict(short_pdf, get_month_return_pdf("2010-01-01", [0.0] * 3))
+    assert short_dict["window_count"] == 0 and not short_dict["pass_bool"]
+    window_pdf = get_rolling_month_window_pdf(pass_pdf, buy_hold_pdf, 12, 1)
+    assert list(window_pdf["ahead_bool"]) == [True, True, True, False, False]
+    passed("consistency passes at 60% of rolling 12-month windows and fails below")
+
+
+# FUNCTION: BASELINE VERDICT PASSES AND FAILS ON HAND-BUILT RETURNS
+def test_baseline_verdict_parts():
+    """
+    Above the constant baseline and 95 of 100 random draws passes. Below the constant, or only 94 of 100, fails.
+
+    Returns:
+        None
+    """
+    # 96 OF 100 DRAWS BELOW THE PATH, CONSTANT BELOW THE PATH
+    pass_baseline_dict = {"constant_exposure_total_return": 0.10, "constant_exposure_weight": 0.5,
+                          "random_timing_return_list": [0.05] * 96 + [0.40] * 4, "random_timing_seed_list": list(range(100)),
+                          "random_timing_switch_count": 2, "buy_hold_total_return": 0.12}
+    pass_dict = get_baseline_verdict_dict(0.20, pass_baseline_dict)
+    assert pass_dict["constant_pass_bool"] and pass_dict["random_pass_bool"] and pass_dict["pass_bool"]
+    assert pass_dict["random_timing_beaten_count"] == 96
+    constant_fail_dict = get_baseline_verdict_dict(0.20, {**pass_baseline_dict, "constant_exposure_total_return": 0.25})
+    assert not constant_fail_dict["constant_pass_bool"] and not constant_fail_dict["pass_bool"]
+    random_fail_dict = get_baseline_verdict_dict(0.20, {**pass_baseline_dict,
+                                                       "random_timing_return_list": [0.05] * 94 + [0.40] * 6})
+    assert random_fail_dict["random_timing_beaten_count"] == 94 and not random_fail_dict["random_pass_bool"]
+    passed("baseline verdict passes and fails on constant exposure and the 95% random rule")
+
+
+# FUNCTION: EMAIL-WORTHY ONLY WHEN EVERY PART PASSES
+def test_email_worthy_needs_every_part():
+    """
+    A path that beats buy-and-hold, 60% of windows, the constant baseline and 95% of random draws is email-worthy
+    only when look-ahead is pass. pending or a failed part is not email-worthy.
+
+    Returns:
+        None
+    """
+    # 16 MONTHS AHEAD OF A FLAT BUY-AND-HOLD, EASY BASELINES
+    strategy_pdf = get_month_return_pdf("2010-01-01", [0.01] * 16)
+    buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 16)
+    easy_baseline_dict = get_hand_baseline_dict(-0.5, -0.5, 100)
+    pass_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR)
+    assert pass_dict["return_dict"]["pass_bool"] and pass_dict["consistency_dict"]["pass_bool"]
+    assert pass_dict["baseline_dict"]["pass_bool"] and pass_dict["look_ahead_dict"]["pass_bool"]
+    assert pass_dict["email_worthy_bool"] and pass_dict["label_str"] == EMAIL_WORTHY_STR
+    assert pass_dict["failed_list"] == []
+    pending_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PENDING_STR)
+    assert not pending_dict["email_worthy_bool"] and pending_dict["label_str"] == NOT_EMAIL_WORTHY_STR
+    assert pending_dict["failed_list"] == ["look-ahead"]
+    look_fail_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_FAIL_STR)
+    assert look_fail_dict["failed_list"] == ["look-ahead"]
+    hard_baseline_dict = get_hand_baseline_dict(10.0, 10.0, 100)
+    base_fail_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, hard_baseline_dict, LOOK_AHEAD_PASS_STR)
+    assert "baselines" in base_fail_dict["failed_list"] and not base_fail_dict["email_worthy_bool"]
+    passed("email-worthy only when every verdict part passes")
+
+
+# FUNCTION: RANDOM TIMING IS REPRODUCIBLE AND CONSTANT WEIGHT 1 EQUALS BUY-AND-HOLD
+def test_baselines_reproducible_and_constant_one_equals_buy_hold():
+    """
+    The same bars and seeds give the same random-timing returns. Constant exposure at weight 1 matches buy-and-hold
+    through the same engine.
+
+    Returns:
+        None
+    """
+    # A SHORT SYNTHETIC SPAN
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-22", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    session_count = len(ohlcv_array_dict["session_date_list"])
+    one_arr = np.ones(session_count, dtype=float)
+    one_dict = run_weight_path_dict(ohlcv_array_dict, date1, date2, one_arr, 1.0, 0.0)
+    one_dict["metric_dict"]["mean_weight"] = 1.0
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, one_dict, seed_count_int_in=8)
+    assert np.isclose(baseline_dict["constant_exposure_total_return"], baseline_dict["buy_hold_total_return"], atol=0.0)
+    assert np.allclose(baseline_dict["constant_exposure_daily_equity_pdf"]["equity"].to_numpy(dtype=float),
+                       baseline_dict["buy_hold_daily_equity_pdf"]["equity"].to_numpy(dtype=float), atol=0.0)
+    # TWO SWITCHES SO THE FIXED SEEDS MOVE THE SWITCH DATES
+    alt_arr = np.ones(session_count, dtype=float)
+    if session_count > 6:
+        alt_arr[3:6] = 0.0
+    alt_dict = run_weight_path_dict(ohlcv_array_dict, date1, date2, alt_arr, 1.0, 0.0)
+    first_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, alt_dict, seed_count_int_in=8)
+    second_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, alt_dict, seed_count_int_in=8)
+    assert first_dict["random_timing_return_list"] == second_dict["random_timing_return_list"]
+    assert first_dict["random_timing_seed_list"] == get_random_timing_seed_list(8)
+    seed_int = get_random_timing_seed_list(1)[0]
+    assert np.allclose(get_random_timing_weight_arr(alt_arr, seed_int),
+                       get_random_timing_weight_arr(alt_arr, seed_int), atol=0.0)
+    assert get_weight_switch_count_int(get_random_timing_weight_arr(alt_arr, seed_int)) == get_weight_switch_count_int(alt_arr)
+    assert get_unique_weight_list(alt_arr) == [1.0, 0.0]
+    passed("baselines are reproducible with the fixed seeds and constant weight 1 equals buy-and-hold")
+
+
+# FUNCTION: A CRASHED RUN LEAVES NO MANIFEST; A FINISHED RUN WRITES IT LAST
+def test_crashed_run_leaves_no_manifest():
+    """
+    Crash after the first period's checkpoint. The run folder has no manifest.json. A finished run has the
+    manifest, the two report files, and look-ahead pending.
+
+    Returns:
+        None
+    """
+    # THE SAME SHORT BARS AS THE CANDIDATE SUITE
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-22", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    period_pdf = get_injected_period_pdf(ohlcv_array_dict["session_date_list"])
+    crash_log_str = get_test_trial_log_path_str("crash_manifest.csv")
+    crashed_bool = False
+    try:
+        run_development_dict(cand_design, ohlcv_array_dict, run_id_str_in="verdict_crash", n_jobs_int_in=1,
+                             period_pdf_in=period_pdf, trial_log_path_str_in=crash_log_str, commit_str_in="testcommit",
+                             code_hash_str_in="testhash", crash_after_period_id_in=0, check_clean_tree_bool_in=False,
+                             check_view_bool_in=False, baseline_seed_count_int_in=2)
+    except RuntimeError as error:
+        crashed_bool = "runner crash after period 0" in str(error)
+    assert crashed_bool, "the crash hook did not fire"
+    crash_folder_str = get_run_folder_str("verdict_crash")
+    assert not os.path.isfile(os.path.join(crash_folder_str, MANIFEST_FILE_STR))
+    assert not os.path.isfile(os.path.join(crash_folder_str, REPORT_JSON_FILE_STR))
+    finish_log_str = get_test_trial_log_path_str("finish_manifest.csv")
+    result_dict = run_development_dict(cand_design, ohlcv_array_dict, run_id_str_in="verdict_finish", n_jobs_int_in=1,
+                                       period_pdf_in=period_pdf, trial_log_path_str_in=finish_log_str,
+                                       commit_str_in="testcommit", code_hash_str_in="testhash",
+                                       check_clean_tree_bool_in=False, check_view_bool_in=False,
+                                       baseline_seed_count_int_in=2)
+    run_folder_str = result_dict["run_folder_str"]
+    manifest_path_str = os.path.join(run_folder_str, MANIFEST_FILE_STR)
+    assert os.path.isfile(manifest_path_str)
+    assert os.path.isfile(os.path.join(run_folder_str, REPORT_JSON_FILE_STR))
+    assert os.path.isfile(os.path.join(run_folder_str, REPORT_MD_FILE_STR))
+    with open(manifest_path_str, "r", encoding="utf-8") as manifest_file:
+        manifest_dict = json.load(manifest_file)
+    assert manifest_dict["status"] == "finished" and manifest_dict["run_id"] == "verdict_finish"
+    assert manifest_dict["commit"] == "testcommit" and manifest_dict["code_hash"] == "testhash"
+    assert manifest_dict["verdict"]["label"] == NOT_EMAIL_WORTHY_STR
+    assert "look-ahead" in manifest_dict["verdict"]["failed_list"]
+    assert REPORT_JSON_FILE_STR in manifest_dict["output_files"]
+    with open(os.path.join(run_folder_str, REPORT_JSON_FILE_STR), "r", encoding="utf-8") as report_file:
+        report_dict = json.load(report_file)
+    assert report_dict["look_ahead_dict"]["status_str"] == LOOK_AHEAD_PENDING_STR
+    assert "strategy_total_return" in report_dict["return_dict"]
+    passed("a crashed run leaves no manifest and a finished run writes report then manifest")
+
+
+# FUNCTION: A DESIGN IMPORTING A DIRTY SIBLING EXPERIMENT FOLDER IS REFUSED
+def test_dirty_sibling_experiment_folder_is_refused():
+    """
+    Design A imports helper B. Uncommitted changes under B refuse. Changes under an unimported sibling C are
+    allowed. The code hash covers B and changes when B's files change, not when C's files change.
+
+    Returns:
+        None
+    """
+    # THREE TEMPORARY PACKAGES UNDER experiments/
+    folder_a_str = os.path.join(WORKSPACE_PATH_STR, "experiments", "_runner_guard_a")
+    folder_b_str = os.path.join(WORKSPACE_PATH_STR, "experiments", "_runner_guard_b")
+    folder_c_str = os.path.join(WORKSPACE_PATH_STR, "experiments", "_runner_guard_c")
+    design_path_str = os.path.join(folder_a_str, "design.py")
+    helper_b_path_str = os.path.join(folder_b_str, "helper.py")
+    helper_c_path_str = os.path.join(folder_c_str, "helper.py")
+    try:
+        os.makedirs(folder_a_str, exist_ok=True)
+        os.makedirs(folder_b_str, exist_ok=True)
+        os.makedirs(folder_c_str, exist_ok=True)
+        with open(helper_b_path_str, "w", encoding="utf-8") as helper_b_file:
+            helper_b_file.write("WEIGHT = 1.0\n")
+        with open(helper_c_path_str, "w", encoding="utf-8") as helper_c_file:
+            helper_c_file.write("WEIGHT = 0.0\n")
+        with open(design_path_str, "w", encoding="utf-8") as design_file:
+            design_file.write("from experiments._runner_guard_b.helper import WEIGHT\n")
+        guarded_list = get_guarded_code_folder_list(folder_a_str, design_file_path_str_in=design_path_str)
+        guarded_name_list = [os.path.basename(folder_str) for folder_str in guarded_list]
+        assert "_runner_guard_a" in guarded_name_list and "_runner_guard_b" in guarded_name_list
+        assert "_runner_guard_c" not in guarded_name_list
+        dirty_raised_bool = False
+        try:
+            check_clean_tree(folder_a_str, porcelain_str_in=" M experiments/_runner_guard_b/helper.py\n",
+                             design_file_path_str_in=design_path_str)
+        except RuntimeError as error:
+            dirty_raised_bool = CLEAN_TREE_MESSAGE_STR in str(error) and "experiments/_runner_guard_b/helper.py" in str(error)
+        assert dirty_raised_bool, "a dirty sibling experiment folder was accepted"
+        check_clean_tree(folder_a_str, porcelain_str_in=" M experiments/_runner_guard_c/helper.py\n",
+                         design_file_path_str_in=design_path_str)
+        check_clean_tree(folder_a_str, porcelain_str_in="?? scripts/foo.py\n", design_file_path_str_in=design_path_str)
+        hash_one_str = get_code_hash_str(folder_a_str, design_file_path_str_in=design_path_str)
+        with open(helper_b_path_str, "w", encoding="utf-8") as helper_b_file:
+            helper_b_file.write("WEIGHT = 0.5\n")
+        hash_two_str = get_code_hash_str(folder_a_str, design_file_path_str_in=design_path_str)
+        assert hash_one_str != hash_two_str
+        with open(helper_c_path_str, "w", encoding="utf-8") as helper_c_file:
+            helper_c_file.write("WEIGHT = 0.9\n")
+        hash_three_str = get_code_hash_str(folder_a_str, design_file_path_str_in=design_path_str)
+        assert hash_three_str == hash_two_str
+    finally:
+        shutil.rmtree(folder_a_str, ignore_errors=True)
+        shutil.rmtree(folder_b_str, ignore_errors=True)
+        shutil.rmtree(folder_c_str, ignore_errors=True)
+    passed("a design importing a dirty sibling experiment folder is refused")
+
+
+# RUN THE SUITE
+if __name__ == "__main__":
+    # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
+    try:
+        test_return_verdict_parts()
+        test_consistency_verdict_parts()
+        test_baseline_verdict_parts()
+        test_email_worthy_needs_every_part()
+        test_baselines_reproducible_and_constant_one_equals_buy_hold()
+        test_crashed_run_leaves_no_manifest()
+        test_dirty_sibling_experiment_folder_is_refused()
+        print("\nAll runner verdict tests passed ✅")
+    finally:
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REAL_WINDOWS_PATH_STR
+        os.environ.pop("SO_HOLDOUT_PATH", None)
+        os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+        os.environ.pop("SO_QUARANTINE_PATH", None)
+        if OWNED_TEMP_BOOL:
+            shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)
+            if _CURRENT_DATA_PATH_STR:
+                os.environ["SO_DATA_PATH"] = _CURRENT_DATA_PATH_STR
+            else:
+                os.environ.pop("SO_DATA_PATH", None)

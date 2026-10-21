@@ -17,7 +17,7 @@ from so.core.holdout import check_development_view
 # IMPORT THE 4A LOOP, PERIODS, SELECTION AND CHECKPOINTS
 from so.runner.engine import FractionalWeightEngine
 from so.runner.loop import DailyLoop
-from so.runner.preflight import check_design_file
+from so.runner.preflight import (check_design_file, get_design_follow_path_list, get_experiments_package_folder_str)
 from so.runner.periods import (check_quarantine_refused, get_development_run_period_pdf, get_period_date)
 from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_period_score_dict,
                                  get_runner_selection_pdf, get_governing_candidate_dict,
@@ -26,12 +26,17 @@ from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle,
                                   write_checkpoint_dict, read_checkpoint_dict, write_decisions_list, read_decisions_list,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict)
+from so.runner.baselines import get_runner_baseline_dict
+from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
+                               write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, LOOK_AHEAD_PENDING_STR,
+                               REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR)
 
 """
-Development Run (infrastructure step 4b-1a)
+Development Run (infrastructure steps 4b-1a and 4b-1b)
 
 Candidates, periods, pooled prior-only selection, trial logging, checkpoints and parallel streams on top of the 4a
-daily loop. Development view only: the quarantine root is refused (holdout evaluation is 4b-1c).
+daily loop. 4b-1b adds baselines over the prior-only span, the shared verdict, report.json / report.md, and
+manifest.json written last. Development view only: the quarantine root is refused (holdout evaluation is 4b-1c).
 
 The design module declares CANDIDATE_LIST and get_candidate_design(candidate), which returns a fresh design object
 per candidate. Each candidate is its own stream over the span (first period start through last period end). At the
@@ -44,9 +49,9 @@ single-process run is the same code path as n_jobs=1.
 Trial ids are stable: run id + candidate + period. A resumed run never writes the same trial twice. Each row carries
 the git commit and a hash of the design folder.
 
-A run refuses to start on uncommitted changes under so/ or the design folder, and it checks VIEW.json against the
-active holdout start. Each checkpoint stores the commit and the code hash (design folder + so/). A resume with a
-different commit or hash raises: start a new run id.
+A run refuses uncommitted changes in the code it uses (so/, the design folder, and every experiments/ folder the
+preflight already walks), a missing or stale VIEW.json, and the quarantine root. Each checkpoint stores the commit
+and the code hash of those same folders. A resume with a different commit or hash raises: start a new run id.
 """
 
 # CANDIDATES RUN IN AT MOST THIS MANY PROCESSES
@@ -54,8 +59,8 @@ MAX_CANDIDATE_PROCESS_COUNT = 8
 # A RESUME WHOSE CODE IS NOT THE CODE THAT WROTE THE CHECKPOINT
 RESUME_IDENTITY_MESSAGE_STR = ("this run's checkpoint was written by a different commit or code hash; "
                                "start a new run id")
-# UNCOMMITTED CHANGES UNDER so/ OR THE DESIGN FOLDER
-CLEAN_TREE_MESSAGE_STR = ("uncommitted changes under so/ or the design folder; "
+# UNCOMMITTED CHANGES IN THE CODE THIS RUN USES
+CLEAN_TREE_MESSAGE_STR = ("uncommitted changes in the code this run uses; "
                           "commit them or start a new run id")
 # SHARED PAYLOAD INSIDE THE RUN FOLDER
 OHLCV_FILE_STR = "ohlcv.pkl"
@@ -144,22 +149,50 @@ def get_git_head_str():
         return "unknown"
 
 
-# FUNCTION: SHA256 OF THE DESIGN FOLDER AND so/
-def get_code_hash_str(design_folder_str_in):
+# FUNCTION: FOLDERS THE CLEAN-TREE CHECK AND THE CODE HASH COVER
+def get_guarded_code_folder_list(design_folder_str_in, design_file_path_str_in=None):
     """
-    Content hash of the design folder and of so/, skipping __pycache__ and .pyc. A change in either tree changes it.
+    so/, the design folder, and every experiments/ package folder the preflight already walks from the design file.
 
     Args:
         design_folder_str_in (str): Design folder
+        design_file_path_str_in (str | None): Design file (None = so/ and the design folder only)
+
+    Returns:
+        list[str]: Absolute folder paths, sorted uniquely
+    """
+    # ALWAYS so/ AND THE DESIGN FOLDER
+    folder_set = {os.path.abspath(os.path.join(paths.WORKSPACE_PATH_STR, "so")),
+                  os.path.abspath(design_folder_str_in)}
+    if design_file_path_str_in:
+        for path_str in get_design_follow_path_list(design_file_path_str_in):
+            package_str = get_experiments_package_folder_str(path_str)
+            if package_str is not None:
+                folder_set.add(os.path.abspath(package_str))
+    return sorted(folder_set)
+
+
+# FUNCTION: SHA256 OF THE CODE THIS RUN USES
+def get_code_hash_str(design_folder_str_in, design_file_path_str_in=None):
+    """
+    Content hash of so/, the design folder, and every imported experiments/ package folder, skipping __pycache__
+    and .pyc. A change in any of those trees changes it.
+
+    Args:
+        design_folder_str_in (str): Design folder
+        design_file_path_str_in (str | None): Design file (None = so/ and the design folder only)
 
     Returns:
         str: Hex digest
     """
-    # TWO FOLDER HASHES, JOINED
+    # FOLDER RELATIVE PATHS PLUS CONTENT HASHES, IN PATH ORDER
     hasher = hashlib.sha256()
-    hasher.update(get_design_folder_hash_str(design_folder_str_in).encode("utf-8"))
-    hasher.update(b"\0")
-    hasher.update(get_design_folder_hash_str(os.path.join(paths.WORKSPACE_PATH_STR, "so")).encode("utf-8"))
+    for folder_str in get_guarded_code_folder_list(design_folder_str_in, design_file_path_str_in):
+        rel_str = os.path.relpath(folder_str, paths.WORKSPACE_PATH_STR).replace("\\", "/")
+        hasher.update(rel_str.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(get_design_folder_hash_str(folder_str).encode("utf-8"))
+        hasher.update(b"\0")
     return hasher.hexdigest()
 
 
@@ -205,14 +238,16 @@ def get_path_in_folder_bool(path_str_in, folder_str_in):
     return path_str == folder_str or path_str.startswith(folder_str + "/")
 
 
-# FUNCTION: REFUSE UNCOMMITTED CHANGES UNDER so/ OR THE DESIGN FOLDER
-def check_clean_tree(design_folder_str_in, porcelain_str_in=None):
+# FUNCTION: REFUSE UNCOMMITTED CHANGES IN THE CODE THIS RUN USES
+def check_clean_tree(design_folder_str_in, porcelain_str_in=None, design_file_path_str_in=None):
     """
-    git status --porcelain. Untracked files outside so/ and the design folder are allowed.
+    git status --porcelain. Untracked files outside so/, the design folder, and imported experiments/ folders are
+    allowed.
 
     Args:
         design_folder_str_in (str): Absolute or workspace-relative design folder
         porcelain_str_in (str | None): Injected status text (None = run git)
+        design_file_path_str_in (str | None): Design file whose experiments/ imports are also guarded
 
     Returns:
         None
@@ -226,10 +261,12 @@ def check_clean_tree(design_folder_str_in, porcelain_str_in=None):
             raise RuntimeError(f"could not read git status for the clean-tree guard: {error}") from error
     else:
         porcelain_str = porcelain_str_in
-    design_rel_str = os.path.relpath(os.path.abspath(design_folder_str_in), paths.WORKSPACE_PATH_STR).replace("\\", "/")
+    rel_folder_list = []
+    for folder_str in get_guarded_code_folder_list(design_folder_str_in, design_file_path_str_in):
+        rel_folder_list.append(os.path.relpath(folder_str, paths.WORKSPACE_PATH_STR).replace("\\", "/"))
     offender_list = []
     for path_str in get_porcelain_path_list(porcelain_str):
-        if get_path_in_folder_bool(path_str, "so") or get_path_in_folder_bool(path_str, design_rel_str):
+        if any(get_path_in_folder_bool(path_str, folder_str) for folder_str in rel_folder_list):
             offender_list.append(path_str)
     if offender_list:
         raise RuntimeError(f"{CLEAN_TREE_MESSAGE_STR}: {', '.join(offender_list)}")
@@ -460,11 +497,13 @@ def run_candidate_job_list(job_dict_list_in, n_jobs_int_in):
 def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=None, run_id_str_in=None,
                          n_jobs_int_in=None, period_pdf_in=None, trial_log_path_str_in=None, commit_str_in=None,
                          crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
-                         check_view_bool_in=True):
+                         check_view_bool_in=True, baseline_seed_count_int_in=None,
+                         look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR):
     """
     Development view. Refuses the quarantine root. Forms periods from PERIOD_RULE unless period_pdf_in is passed
     (tests). Streams each candidate, logs each candidate-period as it is scored, then builds the prior-only path
-    from the recorded decisions.
+    from the recorded decisions. After a finished path it runs the shared baselines, applies the verdict, writes
+    report.json and report.md, and writes manifest.json last.
 
     Args:
         design_module_in (module): Design (CANDIDATE_LIST, get_candidate_design, PERIOD_RULE, SELECTION_RULE)
@@ -476,12 +515,15 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         trial_log_path_str_in (str | None): Trial log CSV (None = the shared log)
         commit_str_in (str | None): Injected commit (None = git HEAD)
         crash_after_period_id_in (int | None): Test hook: raise after that period's checkpoint
-        code_hash_str_in (str | None): Injected code hash (None = hash of the design folder and so/)
-        check_clean_tree_bool_in (bool): Refuse uncommitted changes under so/ or the design folder
+        code_hash_str_in (str | None): Injected code hash (None = hash of the code this run uses)
+        check_clean_tree_bool_in (bool): Refuse uncommitted changes in the code this run uses
         check_view_bool_in (bool): Call check_development_view (tests that inject periods may pass False)
+        baseline_seed_count_int_in (int | None): Random-timing draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
+        look_ahead_status_str_in (str): pending until 4b-1c fills pass or fail
 
     Returns:
-        dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list
+        dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list,
+              baseline_dict, verdict_dict, report_dict, manifest_dict
     """
     # THE DEVELOPMENT VIEW NEVER OPENS THE QUARANTINE
     check_quarantine_refused()
@@ -495,13 +537,14 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
     design_file_path_str = get_module_file_path_str(design_module_in)
     design_folder_str = os.path.dirname(design_file_path_str)
     if check_clean_tree_bool_in:
-        check_clean_tree(design_folder_str)
+        check_clean_tree(design_folder_str, design_file_path_str_in=design_file_path_str)
     if check_view_bool_in:
         check_development_view()
     check_design_file(design_file_path_str)
     design_folder_hash_str = get_design_folder_hash_str(design_folder_str)
     commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
-    code_hash_str = str(code_hash_str_in) if code_hash_str_in is not None else get_code_hash_str(design_folder_str)
+    code_hash_str = (str(code_hash_str_in) if code_hash_str_in is not None
+                     else get_code_hash_str(design_folder_str, design_file_path_str_in=design_file_path_str))
     period_pdf = period_pdf_in
     if period_pdf is None:
         period_pdf, _fold_pdf = get_development_run_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"])
@@ -563,9 +606,35 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
     prior_only_dict = run_prior_only_from_decisions_dict(ohlcv_array_dict_in, date1, date2, window_session_date_list,
                                                          candidate_decision_dict, governing_dict, period_pdf, dead_band,
                                                          initial_weight)
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1, date2, prior_only_dict,
+                                             seed_count_int_in=baseline_seed_count_int_in)
+    strategy_return_pdf = get_equity_daily_return_pdf(prior_only_dict["daily_equity_pdf"])
+    buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
+    verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
+                                           look_ahead_status_str_in=look_ahead_status_str_in)
+    view_stamp_dict = get_view_stamp_dict()
+    report_dict = get_report_payload_dict(verdict_dict, {
+        "run_id_str": run_id_str, "experiment_name_str": experiment_name_str,
+        "protocol_version_str": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
+        "commit_str": commit_str, "code_hash_str": code_hash_str, "view_stamp_dict": view_stamp_dict,
+        "candidate_list": list(candidate_list), "trial_id_list": list(trial_id_list),
+        "date1": str(date1), "date2": str(date2),
+    })
+    write_run_report_dict(run_folder_str, report_dict)
+    manifest_dict = {"status": "finished", "run_id": run_id_str, "commit": commit_str, "code_hash": code_hash_str,
+                     "view_stamp": view_stamp_dict,
+                     "design": {"experiment_name": experiment_name_str,
+                                "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
+                                "file": design_file_path_str},
+                     "candidate_list": list(candidate_list), "trial_id_list": list(trial_id_list),
+                     "output_files": [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR],
+                     "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
+                                 "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"])}}
+    write_run_manifest_dict(run_folder_str, manifest_dict)
     return {"run_id_str": run_id_str, "period_pdf": period_pdf, "score_pdf": score_pdf, "selection_pdf": selection_pdf,
             "governing_dict": governing_dict, "prior_only_dict": prior_only_dict, "trial_id_list": trial_id_list,
             "date1": date1, "date2": date2, "window_session_date_list": window_session_date_list,
             "candidate_decision_dict": candidate_decision_dict, "commit_str": commit_str,
             "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
-            "run_folder_str": run_folder_str}
+            "run_folder_str": run_folder_str, "baseline_dict": baseline_dict, "verdict_dict": verdict_dict,
+            "report_dict": report_dict, "manifest_dict": manifest_dict}

@@ -316,6 +316,67 @@ def check_design_tree_node(node_in, file_path_str_in):
                 raise ValueError(f"design file uses banned name .{last_str}: {file_path_str_in}")
 
 
+# FUNCTION: THE EXPERIMENT PACKAGE FOLDER OF A FILE UNDER experiments/
+def get_experiments_package_folder_str(file_path_str_in):
+    """
+    experiments/<name> when the file lives in that package directory. A file sitting directly under experiments/
+    is not a package folder.
+
+    Args:
+        file_path_str_in (str): File the preflight walked
+
+    Returns:
+        str | None: Absolute package folder, or None
+    """
+    # ONLY FILES UNDER THIS REPO'S experiments/ TREE
+    path_str = os.path.abspath(file_path_str_in)
+    experiments_str = os.path.abspath(EXPERIMENTS_PATH_STR)
+    if path_str == experiments_str:
+        return None
+    prefix_str = experiments_str + os.sep
+    if not path_str.startswith(prefix_str):
+        return None
+    rel_str = path_str[len(prefix_str):]
+    first_str = rel_str.split(os.sep, 1)[0]
+    package_str = os.path.join(experiments_str, first_str)
+    if os.path.isdir(package_str):
+        return package_str
+    return None
+
+
+# FUNCTION: FILES THE PREFLIGHT WALKS FROM A DESIGN FILE
+def get_design_follow_path_list(file_path_str_in):
+    """
+    The design file and every experiments/ (or same-folder) module it imports, transitively. Same walk as
+    check_design_file, without the banned-name check.
+
+    Args:
+        file_path_str_in (str): Path of the design file
+
+    Returns:
+        list[str]: Absolute file paths, in walk order
+    """
+    # THE STARTING DIRECTORY LIMITS WHICH SIBLING HELPERS ARE FOLLOWED
+    start_dir_str = os.path.dirname(os.path.abspath(file_path_str_in))
+    seen_set = set()
+    path_list = []
+    stack_list = [os.path.abspath(file_path_str_in)]
+    while stack_list:
+        path_str = stack_list.pop()
+        if path_str in seen_set:
+            continue
+        seen_set.add(path_str)
+        path_list.append(path_str)
+        source_str = open(path_str, "r", encoding="utf-8").read()
+        tree = ast.parse(source_str, filename=path_str)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for follow_path_str in get_import_follow_path_list(path_str, node):
+                    if follow_path_str not in seen_set and get_follow_path_bool(follow_path_str, start_dir_str):
+                        stack_list.append(follow_path_str)
+    return path_list
+
+
 # FUNCTION: REFUSE A DESIGN FILE AND THE experiments/ MODULES IT IMPORTS
 def check_design_file(file_path_str_in):
     """
@@ -327,23 +388,12 @@ def check_design_file(file_path_str_in):
     Returns:
         None
     """
-    # THE STARTING DIRECTORY LIMITS WHICH SIBLING HELPERS ARE FOLLOWED
-    start_dir_str = os.path.dirname(os.path.abspath(file_path_str_in))
-    seen_set = set()
-    stack_list = [os.path.abspath(file_path_str_in)]
-    while stack_list:
-        path_str = stack_list.pop()
-        if path_str in seen_set:
-            continue
-        seen_set.add(path_str)
+    # THE SAME FILES THE FOLDER GUARDS HASH AND CHECK FOR A DIRTY TREE
+    for path_str in get_design_follow_path_list(file_path_str_in):
         source_str = open(path_str, "r", encoding="utf-8").read()
         tree = ast.parse(source_str, filename=path_str)
         for node in ast.walk(tree):
             check_design_tree_node(node, path_str)
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                for follow_path_str in get_import_follow_path_list(path_str, node):
-                    if follow_path_str not in seen_set and get_follow_path_bool(follow_path_str, start_dir_str):
-                        stack_list.append(follow_path_str)
 
 
 # FUNCTION: THE FILE A DESIGN OBJECT WAS LOADED FROM
