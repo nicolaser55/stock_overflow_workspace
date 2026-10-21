@@ -634,6 +634,16 @@ def get_banned_snippet_list():
         ("so.runner", "import so.runner\n" + header_str + "        return 1.0\n"),
         ("so.core.point_in_time", "from so.core.point_in_time import DataContext\n" + header_str + "        return 1.0\n"),
         ("so.core.holdout", "from so.core.holdout import get_perturbed_ohlcv_dict\n" + header_str + "        return 1.0\n"),
+        ("open", header_str + "        open('x')\n        return 1.0\n"),
+        ("eval", header_str + "        eval('1')\n        return 1.0\n"),
+        ("vars", header_str + "        vars(view_in)\n        return 1.0\n"),
+        ("os", "import os\n" + header_str + "        return 1.0\n"),
+        ("pickle", "import pickle\n" + header_str + "        return 1.0\n"),
+        ("so.paths", "import so.paths\n" + header_str + "        return 1.0\n"),
+        ("so.core.raw_data", "from so.core.raw_data import get_complete_ohlcv_pdf\n" + header_str + "        return 1.0\n"),
+        ("read_parquet", "import pandas as pd\n" + header_str + "        pd.read_parquet('x')\n        return 1.0\n"),
+        ("load", "import numpy as np\n" + header_str + "        np.load('x')\n        return 1.0\n"),
+        ("getattr_base", header_str + "        getattr(view_in.get_bar_array_dict()['close_arr'], 'base')\n        return 1.0\n"),
     ]
 
 
@@ -675,6 +685,134 @@ def test_preflight_refuses_banned_names():
     finally:
         shutil.rmtree(temp_dir_str, ignore_errors=True)
     passed("preflight refuses each banned name in a design file")
+
+
+# FUNCTION: WRITE A DESIGN FILE AND A HELPER NEXT TO IT
+def write_design_helper_tuple(temp_dir_str_in, design_source_str_in, helper_source_str_in):
+    """
+    Writes design.py and helper_mod.py in temp_dir_str_in.
+
+    Args:
+        temp_dir_str_in (str): Folder
+        design_source_str_in (str): design.py text
+        helper_source_str_in (str): helper_mod.py text
+
+    Returns:
+        str: Path of design.py
+    """
+    # THE HELPER IS WHAT THE PREFLIGHT MUST FOLLOW
+    helper_path_str = os.path.join(temp_dir_str_in, "helper_mod.py")
+    design_path_str = os.path.join(temp_dir_str_in, "design.py")
+    with open(helper_path_str, "w", encoding="utf-8") as helper_file:
+        helper_file.write(helper_source_str_in)
+    with open(design_path_str, "w", encoding="utf-8") as design_file:
+        design_file.write(design_source_str_in)
+    return design_path_str
+
+
+# FUNCTION: TEST THAT A HELPER USING .base IS REFUSED
+def test_preflight_follows_helper_base():
+    """
+    A design that imports a helper using .base is refused, including through experiments/.
+
+    Returns:
+        None
+    """
+    # SIBLING HELPER AND AN experiments/ HELPER; BOTH MUST FAIL
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-18", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    temp_dir_str = tempfile.mkdtemp(prefix="so_runner_preflight_helper_")
+    experiments_helper_path_str = os.path.join(WORKSPACE_PATH_STR, "experiments", "_preflight_test_helper.py")
+    try:
+        design_source_str = ("from helper_mod import get_weight_float\n"
+                             "class Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n"
+                             "    def decide(self, view_in):\n        return get_weight_float(view_in)\n")
+        helper_source_str = ("def get_weight_float(view_in):\n"
+                             "    return view_in.get_bar_array_dict()['close_arr'].base\n")
+        design_path_str = write_design_helper_tuple(temp_dir_str, design_source_str, helper_source_str)
+        raised_bool = False
+        try:
+            check_design_file(design_path_str)
+        except ValueError as err:
+            raised_bool = ".base" in str(err)
+        assert raised_bool, "check_design_file accepted a helper using .base"
+        loop_raised_bool = False
+        try:
+            run_daily_dict(ConstantOneDesign(), ohlcv_array_dict, date1, date2, design_file_path_str_in=design_path_str)
+        except ValueError:
+            loop_raised_bool = True
+        assert loop_raised_bool, "run_daily_dict accepted a helper using .base"
+        with open(experiments_helper_path_str, "w", encoding="utf-8") as experiments_file:
+            experiments_file.write(helper_source_str)
+        exp_design_path_str = os.path.join(temp_dir_str, "exp_design.py")
+        with open(exp_design_path_str, "w", encoding="utf-8") as exp_design_file:
+            exp_design_file.write("from experiments._preflight_test_helper import get_weight_float\n"
+                                  "class Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n"
+                                  "    def decide(self, view_in):\n        return get_weight_float(view_in)\n")
+        exp_raised_bool = False
+        try:
+            check_design_file(exp_design_path_str)
+        except ValueError as err:
+            exp_raised_bool = ".base" in str(err)
+        assert exp_raised_bool, "check_design_file did not follow experiments/ helper using .base"
+    finally:
+        shutil.rmtree(temp_dir_str, ignore_errors=True)
+        if os.path.isfile(experiments_helper_path_str):
+            os.remove(experiments_helper_path_str)
+    passed("preflight follows a helper using .base (sibling and experiments/)")
+
+
+# FUNCTION: TEST THAT pd.read_parquet AND open ARE REFUSED IN THE DESIGN OR A HELPER
+def test_preflight_refuses_read_and_open():
+    """
+    A design calling pd.read_parquet is refused. A helper calling open is refused.
+
+    Returns:
+        None
+    """
+    # ONE FILE EACH, THEN THE LOOP
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-18", seed_in=4)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    temp_dir_str = tempfile.mkdtemp(prefix="so_runner_preflight_read_")
+    try:
+        read_path_str = os.path.join(temp_dir_str, "read_design.py")
+        with open(read_path_str, "w", encoding="utf-8") as read_file:
+            read_file.write("import pandas as pd\nclass Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n"
+                            "    def decide(self, view_in):\n        pd.read_parquet('x')\n        return 1.0\n")
+        read_raised_bool = False
+        try:
+            check_design_file(read_path_str)
+        except ValueError as err:
+            read_raised_bool = "read_parquet" in str(err)
+        assert read_raised_bool, "check_design_file accepted pd.read_parquet"
+        loop_read_bool = False
+        try:
+            run_daily_dict(ConstantOneDesign(), ohlcv_array_dict, date1, date2, design_file_path_str_in=read_path_str)
+        except ValueError:
+            loop_read_bool = True
+        assert loop_read_bool, "run_daily_dict accepted pd.read_parquet"
+        design_source_str = ("from helper_mod import get_weight_float\n"
+                             "class Design:\n    DATA_SOURCE_LIST = ['SPY_1MIN']\n"
+                             "    def decide(self, view_in):\n        return get_weight_float()\n")
+        helper_source_str = "def get_weight_float():\n    open('x')\n    return 1.0\n"
+        open_path_str = write_design_helper_tuple(temp_dir_str, design_source_str, helper_source_str)
+        open_raised_bool = False
+        try:
+            check_design_file(open_path_str)
+        except ValueError as err:
+            open_raised_bool = "open" in str(err)
+        assert open_raised_bool, "check_design_file accepted a helper calling open"
+        loop_open_bool = False
+        try:
+            run_daily_dict(ConstantOneDesign(), ohlcv_array_dict, date1, date2, design_file_path_str_in=open_path_str)
+        except ValueError:
+            loop_open_bool = True
+        assert loop_open_bool, "run_daily_dict accepted a helper calling open"
+    finally:
+        shutil.rmtree(temp_dir_str, ignore_errors=True)
+    passed("preflight refuses pd.read_parquet and open in the design or a helper")
 
 
 # FUNCTION: TEST THAT THE FRACTIONAL ENGINE MATCHES simulate_fractional_exposure_dict
@@ -801,6 +939,8 @@ if __name__ == "__main__":
         test_lookahead_cut()
         test_first_decision_no_future()
         test_preflight_refuses_banned_names()
+        test_preflight_follows_helper_base()
+        test_preflight_refuses_read_and_open()
         test_weight_one_is_buy_and_hold()
         test_identical_runs()
         test_later_bar_perturbation()
