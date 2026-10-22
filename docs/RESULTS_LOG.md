@@ -799,6 +799,21 @@ Mathematically: the prior-only total return is 0.415088 and buy-and-hold is 1.99
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847826, the constant-exposure hold is **1.687609**. The prior-only path, 0.415088, is 1.272521 below that held-once blend. The path was already below both random medians. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.587718**. The path is 1.172630 below it. No new run. No new trial.
 
+## exp04_trend_exit_v2_1
+
+**Protocol 2.1. Status: machinery calibration, not a new research result.** Label: machinery only, runner port, no rule change. Pre-registered in commit `bac7983` (2026-10-22). Config hash `02dbb9d999`. One development run through `scripts/run_development.py`, run id `exp04_trend_exit_v2_1_20261022030246710390`, 2026-10-22T03:02:46 → 03:08:20 (363.2 s). 369 validation trials, note `4c calibration`, `test_window_touched` false on every row. No summary trial (the runner logs candidate-periods only). Protocol 2.0's STOP stays the recorded evidence. Details: `docs/CALIBRATION_exp04.md`.
+
+**Step 01, runner development, 41 periods, 2015-03-19 → 2025-06-18 (2,579 sessions).** Numbers below are from `store04_experiments/runs/exp04_trend_exit_v2_1_20261022030246710390/report.md` and `report.json` unless a file is named.
+- **Prior-only path: 0.517088 vs buy-and-hold 1.844214** (+51.71% vs +184.42%). This is not the v2 span (2015-04-20 → 2025-07-17, +41.51% vs +199.04%). The scored sessions differ (calibration difference 1).
+- Runner verdict **not email-worthy**. Failed: return (below the 90% comparable floor 1.659793), consistency (6 of 113 rolling 12-month windows ahead; need 0.60), baselines (constant exposure +1.414475 at weight 0.829562; random timing 1 of 100). Look-ahead **pass** (cuts 2015-07-08, 2021-04-07, 2024-04-10; 229.1 s).
+- Against saved v2, session by session (tolerance 1e-6): **decisions 9/9 candidates on 2,558 overlapping sessions**; **trades 9/9** when both engines run on the runner span. Period bounds 0/41. Period scores 0/369 by `fold_id`. Selection in force 15/41 (first split period 3: runner `0.03|5`, v2 `0.03|1`). Prior-only equity levels first differ 2015-04-20 by 90.44; daily returns first differ 2015-04-22 by 4.40e-6.
+
+Cause of the number gaps, traced: `get_development_run_period_pdf` counts the embargo on a gapped calendar (truncated bars plus the holdout start, missing the sessions between development end and the window). v2 used `span_dict["anchor_session_list"]`, which still has those dates, so its last period ended 2025-07-17. v2's saved **strategy** scores are fresh windows (its continuous-slice helper did not match those periods); its **buy-and-hold** column is a continuous slice. A fresh window of `0.00|1` on the saved v2 fold-0 dates, on these bars, is −0.002569, equal to the saved row. No rule was changed. No unexplained difference. No holdout evaluation.
+
+In plain words: the 200-session rule on the runner is the same rule. It sells and buys on the same days as v2 on the days both scored. The account values differ because the runner started a month earlier and stopped a month earlier, not because the signal changed.
+
+Workspace trial log **7,343** rows after this run (369 added), plus the 4,089 legacy trials **11,432**.
+
 ## exp04_trend_exit
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp04_trend_exit_v2`. This protocol 1.0 entry is unchanged.
