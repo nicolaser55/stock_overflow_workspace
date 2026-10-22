@@ -656,29 +656,21 @@ def test_fresh_design_module():
     assert "invalid_lookahead" in leak_stdout.getvalue()
     assert not os.path.isfile(os.path.join(results_path_str, leak_row["window_id"], "cache_leak", "strategy_daily_equity.csv"))
     assert leak_module._fit_cache_dict == {}
-    # THE TEMPLATE: ONE FIT PER WINDOW INSIDE ONE REPLAY, AND THE IMPORTED MODULE'S CACHE STAYS EMPTY
+    os.environ.pop("SO_HOLDOUT_PATH", None)
+    os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
+    shutil.rmtree(token_dir_str, ignore_errors=True)
+    shutil.rmtree(results_path_str, ignore_errors=True)
+    # THE TEMPLATE IS ON THE RUNNER: NO MODULE-LEVEL FIT CACHE, get_candidate_design RETURNS A FRESH OBJECT
     from experiments._template import design as template_design
-    import so.core.rolling_retrain as rolling_retrain
-    call_dict = {"count": 0}
-    real_func = rolling_retrain.run_rolling_retrain_dict
-    def count_retrain_dict(*args, **kwargs):
-        # COUNT ONE WALK OF ONE WINDOW
-        call_dict["count"] += 1
-        return real_func(*args, **kwargs)
-    rolling_retrain.run_rolling_retrain_dict = count_retrain_dict
-    try:
-        assert template_design._retrain_cache_dict == {}
-        get_prior_only_result_dict(template_design, ohlcv_array_dict, get_active_holdout_window_dict())
-    finally:
-        rolling_retrain.run_rolling_retrain_dict = real_func
-        os.environ.pop("SO_HOLDOUT_PATH", None)
-        os.environ.pop("SO_HOLDOUT_EVALUATION_TOKEN", None)
-        shutil.rmtree(token_dir_str, ignore_errors=True)
-        shutil.rmtree(results_path_str, ignore_errors=True)
-    assert call_dict["count"] == len(template_design.CANDIDATE_LIST)
-    assert template_design._retrain_cache_dict == {}
-    passed("fresh module (window-only cache -> invalid_lookahead; template fits each window once per replay)")
-    print(f"    fresh module detail: cache leak {leak_row['status']}; template retrain calls {call_dict['count']}; imported template cache empty")
+    from so.runner.preflight import check_design_file
+    check_design_file(template_design.__file__)
+    assert not hasattr(template_design, "_retrain_cache_dict")
+    assert hasattr(template_design, "get_candidate_design")
+    first_design = template_design.get_candidate_design(template_design.CANDIDATE_LIST[0])
+    second_design = template_design.get_candidate_design(template_design.CANDIDATE_LIST[0])
+    assert first_design is not second_design
+    passed("fresh module (window-only cache -> invalid_lookahead; template has no module cache)")
+    print(f"    fresh module detail: cache leak {leak_row['status']}; template candidates {len(template_design.CANDIDATE_LIST)}")
 
 # FUNCTION: THE TEMPLATE'S FIRST THREE REFITS ON A SHORT SYNTHETIC SERIES
 def test_template_refit_log():
@@ -690,13 +682,28 @@ def test_template_refit_log():
     """
     # ABOUT FOUR MONTHS OF FOUR-BAR SESSIONS, ENOUGH FOR A 20-SESSION LABEL AND THE MINIMUM ROW COUNT
     from experiments._template import design as template_design
+    from so.core.point_in_time import add_tsday_fwd_label_known_ts_pdf, get_minute_bar_available_ts, get_runner_context
+    from so.features.daily_features import get_daily_feature_pdf
+    from so.runner import run_daily_dict
     session_date_list = [day.date() for day in pd.bdate_range("2022-01-03", periods=120)]
     ohlcv_array_dict = get_ohlcv_array_dict(get_four_bar_ohlcv_pdf(session_date_list, 2))
-    result_dict = template_design.get_window_retrain_dict(ohlcv_array_dict, "6M")
-    refit_pdf = result_dict["refit_log_pdf"].head(3)
+    label_pdf = add_tsday_fwd_label_known_ts_pdf(get_daily_feature_pdf(ohlcv_array_dict))
+    limit_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][-1])
+    data_context = get_runner_context(ohlcv_array_dict, {"TSDAY_FWD": label_pdf}, limit_ts, list(template_design.DATA_SOURCE_LIST))
+    date1, date2 = session_date_list[50], session_date_list[-1]
+    candidate_design = template_design.get_candidate_design("6M")
+    run_daily_dict(candidate_design, ohlcv_array_dict, date1, date2, data_context_in=data_context,
+                   design_file_path_str_in=template_design.__file__)
+    refit_pdf = pd.DataFrame(candidate_design.refit_log_list).head(3)
     assert len(refit_pdf) == 3
     assert (refit_pdf["rows_used"] >= template_design.MIN_TRAIN_ROW_COUNT).all()
-    assert (refit_pdf["last_label_known_ts"].map(pd.Timestamp) < refit_pdf["decision_ts"].map(pd.Timestamp)).all()
+    def get_ny_ts(value_in):
+        timestamp = pd.Timestamp(value_in)
+        if timestamp.tzinfo is None:
+            return timestamp.tz_localize("America/New_York")
+        return timestamp.tz_convert("America/New_York")
+    assert all(get_ny_ts(left_ts) < get_ny_ts(right_ts)
+               for left_ts, right_ts in zip(refit_pdf["last_label_known_ts"], refit_pdf["decision_ts"]))
     # PRINT THE THREE ROWS THE REPLY QUOTES
     print("    template first 3 refits:")
     for refit_row in refit_pdf.itertuples(index=False):

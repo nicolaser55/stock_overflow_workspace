@@ -21,7 +21,7 @@ Shared code is imported from `so` (`so.core`, `so.features`), shared constants f
 | `exp01_minute_entry` | Minute-level long entries with a model-chosen symmetric SL/TP distance (LightGBM P(TP) + expected-return policy). Weekly refit, windows 3, 5 and 10 years | 01 development replay | 2.0 | **STOP** (2026-10-15), re-run under the new rules, not new evidence (prior-only +136.53% vs +217.35%). Protocol 1.0/1.1 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp02_stop_reentry` | Invested by default; volatility trailing stop; re-entry when a logistic model of the 20-session return says so | 01 development replay | 2.0 | **STOP** (2026-10-12), re-run under the new rules, not new evidence (prior-only +61.82% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp03_ath_exit` | Sell when the close is near the all-time high; buy back after a delay or a dip (15 rules) | 01 development replay | 2.0 | **STOP** (2026-10-12), re-run under the new rules, not new evidence (prior-only +111.12% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
-| `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +41.51% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
+| `exp04_trend_exit` | Benchmark of the "stay invested, exit rarely" family: exit below the 200-session average with buffer/confirmation | 01 development replay | 2.0 (research STOP); 2.1 runner port, period scores fresh windows → continuous slices | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +41.51% vs +199.04%). v2.1 calibration rerun (`docs/CALIBRATION_exp04.md`): period bounds 41/41, decisions 9/9, component a/b match; remaining score/selection/path gaps are the scoring-method change. Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp05_vol_scaled_exposure` | Hold w = min(1, max(floor, σ_target / σ̂)) of the account in SPY, 20-point dead band (4 candidates) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +142.59% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp06_capped_regret_reentry` | Trend or near-ATH exit + buy-stop at S × (1 + b) with a cooling-off, or recovery above the 200-session average (12 candidates; data-dependent follow-up of exp03) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +132.25% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
 | `exp07_warning_lights_exit` | Exit when at least k of 5 fixed warning lights are on, buy back when fewer than k − 1 are (k ∈ {3, 4, 5}) | 01 development replay | 2.0 | **STOP** (2026-10-14), re-run under the new rules, not new evidence (prior-only +40.95% vs +199.04%). Protocol 1.0 stays in `docs/RESULTS_LOG.md`; its code and notebooks are at tag `pre-port-20261012` |
@@ -43,24 +43,39 @@ statistically supported".*
 
 1. **Copy `_template/`** to `expNN_<name>/` (next free number, short snake_case name).
 2. **Write `PROTOCOL.md`** from the template and agree it before exploring any data: question, success criteria, data,
-   rules, target, features, model, walk-forward and selection, baselines (always include the uninformed version of the
+   sources, rules, target, features, model, walk-forward and selection, baselines (always include the uninformed version of the
    informed component), stopping rules, reporting, limitations. Exploration only on 2005-2014.
 3. **Fill `config.py`**: `EXPERIMENT_NAME = "expNN_<name>"`, `PROTOCOL_VERSION = "1.0"`, and every experiment constant.
    Never copy a shared constant: read it from `so.config`. If the experiment needs a NEW shared constant (e.g. a new daily
    feature), add it to `so/config.py` only if it does not change existing values (that would change every experiment's
    hash) and say so in the protocol.
-4. **Write the code** in the folder, reusing `so.core` (schedule, simulators, evaluation, trial log, signal-check blocks).
-   If something becomes useful to several experiments, move it to `so/core` or `so/features` with tests.
-5. **Write the notebooks** `step01_...`, `step02_...` with the standard cells (see `_template/step01_template.ipynb`):
-   docstring, imports, header (name, version, hash, output folder, earlier-trial warning), data, work, save, **log**,
-   trial count. Walk-forward notebooks follow exp02 step 03 (candidates → pooled selection → prior-only path with
-   baselines → summary entry → test only in `latest` / `history`).
+4. **Write `design.py`** on the runner interface (below). Helpers for signals may live next to it. Do not copy replay,
+   selection, baseline or report code; `so.runner` does that. If something becomes useful to several experiments, move it
+   to `so/core` or `so/features` with tests.
+5. **Development run:** `venv-main\Scripts\python.exe scripts\run_development.py experiments\expNN_<name>`. That script
+   loads the design, the development bars and the declared sources, calls `run_development_dict`, and prints the report
+   path. Do not read the holdout.
 6. **Add tests** `tests/test_expNN.py` (synthetic data; at least: no look-ahead of new features, rule mechanics, the
-   prior-only runner reproduces the validation candidates) and add the file to `tests/run_all_tests.py`.
+   design's `decide(view)` on a short runner loop) and add the file to `tests/run_all_tests.py`.
 7. **Register it** in the table above and in the root `README.md`; add a section to `docs/RESULTS_LOG.md` when it runs.
-8. **Expose a design module** `design.py` for the rolling holdout (below). Development folds come from
-   `so.core.schedule.get_development_fold_pdf`, anchored on `so.core.holdout.get_development_end_date`. Do not hard-code
-   a holdout date.
+8. **Commit the protocol, config, code and tests before the first validation run** (message starts with `preregister expNN`).
+   Development folds come from `PERIOD_RULE` and `so.core.schedule.get_development_fold_pdf`, anchored on
+   `so.core.holdout.get_development_end_date`. Do not hard-code a holdout date.
+
+`design.py` exposes:
+
+- `CANDIDATE_LIST` and `get_candidate_design(candidate)` → a fresh design object with `decide(view)` (daily) or a
+  module-level `signal` (minute).
+- `PERIOD_RULE`: `embargo_sessions` and `train_years`. Default: the validation quarters of `get_development_fold_pdf`.
+- `SELECTION_RULE`: `pooled_periods` and `tie_break`. Optional `CANDIDATE_TIE_VALUE_DICT`.
+- `DATA_SOURCE_LIST`: registered sources only (`docs/DATA_SOURCES.md`).
+- `ENGINE_NAME`: `fractional`, `trailing_stop` or `barrier`. Optional `DEAD_BAND`, `INITIAL_WEIGHT`, `MAX_CASH_SESSIONS`.
+- A model refits inside `decide` on its pre-registered schedule, through `view.get_labels`. Features come from the
+  view's bars or `view.get`. The preflight refuses `so.runner`, `so.core.point_in_time`, `so.core.holdout`, file I/O
+  and `.base`.
+
+The template (`experiments/_template/design.py`) is that design: a logistic regression on two daily features, a
+20-session label (`TSDAY_FWD`), weekly refits, fractional engine.
 
 ## Holdout evaluation (new experiments)
 
@@ -75,23 +90,16 @@ embargo before its start. Validation uses `get_development_fold_pdf` (validation
 window. Agents never set `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`, and never
 run `scripts/holdout_window.py` or `scripts/holdout_evaluate.py`.
 
-`design.py` (it imports the experiment's own code) exposes:
+A design with `get_candidate_design` is evaluated through `so.runner.run_holdout_dict`. A design not yet ported keeps
+the old replay (`run_candidate_replay_dict`, `run_prior_only_path_dict`, `get_baseline_return_dict`) until it is
+ported. The first printed line of the evaluation script says which path ran.
 
-- `PERIOD_RULE`: how candidate periods are formed. Default: the validation quarters of `get_development_fold_pdf`, extended through the holdout with the same step and made non-overlapping by `get_replay_period_pdf`.
-- `CANDIDATE_LIST` and `SELECTION_RULE` (the protocol's rule, for example the mean period score over the last 4 periods and its tie order), or a single candidate.
-- `run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in)` → the dict the development replay returns (`daily_equity_pdf` at least). Features (volatility, VIX, ...) are loaded through the guarded loaders. Inside the runner the boundary is the day after the window end.
-- `run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in)` → the continuous prior-only path, with the position carried across periods. An exit-family design calls `so.core.replay_walk_forward.run_prior_only_replay_dict`. The template uses `simulate_fractional_exposure_dict`.
-- `get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in)` → the uninformed baselines the protocol names, over the span the runner passes (the holdout only), with fixed seeds.
-
-A model-based design calls `so.core.rolling_retrain.run_rolling_retrain_dict` inside `run_candidate_replay_dict` and `run_prior_only_path_dict`. The default is a weekly refit (the first session of each week; a Monday holiday is a Tuesday refit) on the candidates `6M`, `2Y` and `10Y`. The first session of the decision span is always a refit. The frequency and the windows are pre-registered; changing either after a result is a new version. One optional pre-registered comparison of weekly against quarterly is allowed. A training row must have `label_known_ts` strictly before the retraining decision. Rows that fail are dropped and counted as purged, never filled with 0 or any other value. Features go through `DataContext` and `check_feature_available_ts`. The candidate in force for a quarter is chosen from the last 4 completed quarters before it, prior-only; a tie takes the longer window. `so.core.evaluation.get_performance_over_time_pdf` reports the cumulative log excess, the rolling 63-session and 252-session excess, and both drawdowns, with a per-quarter table; turnover per year, trades, and candidate switches are reported beside it, and the refit log reports rows used, the share purged, and how far predictions moved between refits. The template (`experiments/_template/design.py`) is that design: a logistic regression on two daily features, a 20-session label, weekly refits, on the fractional-exposure family.
-
-The runner scores every period as the candidate's return minus buy-and-hold, selects for period f from earlier periods only, replays from the first period through the window end, and reports the holdout sessions (equity rebased at the window start). Before writing a result it checks each of 12 month-ends twice: the sessions after the cut are dropped (the cut session stays whole), and every bar strictly after that session's decision bar is perturbed while the session structure stays. Target weights and signals through the cut must match; fills on the cut session are not compared. Ledger status is `valid` or `invalid_lookahead`. An `invalid_lookahead` row writes no daily paths and counts against the budget of 10. The design hash is the sha256 of `git rev-parse HEAD:<design folder>`, `git rev-parse HEAD:so`, and the config hash.
-
-The report uses the same honest numbers as `so.core.evaluation`: total return against buy-and-hold, annualized log excess
-with a 6-month block-bootstrap interval, time in the market, Sharpe, maximum drawdown, the uninformed baselines,
-the minimum detectable effect of the window, the success criteria (primary: total return above buy-and-hold;
-secondary: higher Sharpe or a smaller drawdown with at least 90% of buy-and-hold's return), and the candidate in force
-in each holdout period.
+The runner scores every period as the candidate's continuous-slice return minus buy-and-hold, selects for period f
+from earlier periods only, builds the prior-only path from the recorded decisions, and reports the holdout sessions
+(equity rebased at the window start). Look-ahead is truncation and perturbation at three sampled cuts. Baselines are
+buy-and-hold, daily-rebalanced constant exposure, and 100-seed random timing. The report names total return against
+buy-and-hold, time in the market, the uninformed baselines, the runner verdict, and the candidate in force in each
+holdout period. The never-read tail of the window is labelled a sanity check.
 
 ## Changing an experiment after its first validation run
 

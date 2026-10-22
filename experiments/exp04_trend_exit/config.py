@@ -17,8 +17,8 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp04_trend_exit_v2"
-PROTOCOL_VERSION = "2.0"
+EXPERIMENT_NAME = "exp04_trend_exit_v2_1"
+PROTOCOL_VERSION = "2.1"
 
 """
 Rules (PROTOCOL.md §4): 3 buffers x 3 confirmations = 9 candidates (fixed by the roadmap of 2026-10-06, never fitted)

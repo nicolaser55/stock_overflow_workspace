@@ -35,7 +35,9 @@ bars it is computed from. The step-01 snapshot loop only sees bars up to the cur
 config.PA_EXTREMA_ORDER bars later (add_minima_col needs `order` bars on each side; the snapshot count increases only
 once those bars exist). A swing stored on its own bar is therefore knowable only at the end of the confirmation bar.
 TSCTX states that the row of bar t uses only bars <= t. TSDAY features are the decision bar of the session; the
-forward-return columns on that row are labels and are not served on the feature path. TSBAR is a label: label_known_ts
+forward-return columns on that row are labels and are not served on the feature path. TSDAY_FWD is those same files
+as a label: label_known_ts is the decision moment of the session LABEL_HORIZON_SESSIONS later; unfinished rows (no
+horizon session) are dropped; a redacted blank y_fwd stays as a missing label. TSBAR is a label: label_known_ts
 is the end of the bar where TP or SL was hit, or the end of the horizon. The files store that bar as exit_bar_count
 on each distance cell (minute bars from entry_ts). The row clock is the latest of those bars. An unresolved cell,
 or an exit bar that is not in the loaded minute bars, leaves the row unfinished.
@@ -387,6 +389,51 @@ def add_tsbar_label_known_ts_pdf(label_pdf_in, timestamp_index_in=None):
     stamped_pdf["available_ts"] = stamped_pdf["label_known_ts"]
     return stamped_pdf
 
+# FUNCTION: ADD label_known_ts TO THE FIXED-HORIZON TSDAY LABEL
+def add_tsday_fwd_label_known_ts_pdf(label_pdf_in):
+    """
+    Copies a TSDAY frame as a label. label_known_ts is the decision moment of the session LABEL_HORIZON_SESSIONS
+    later. The last horizon sessions have no clock and are dropped. A redacted blank y_fwd / fwd_ cell becomes a
+    missing label; the row stays if it has a clock.
+
+    Args:
+        label_pdf_in (pd.DataFrame): TSDAY rows
+
+    Returns:
+        pd.DataFrame: Copy with label_known_ts and available_ts, unfinished rows dropped
+    """
+    # NOTHING TO STAMP
+    if label_pdf_in is None or len(label_pdf_in) == 0:
+        return pd.DataFrame() if label_pdf_in is None else label_pdf_in.copy()
+    stamped_pdf = label_pdf_in.copy()
+    # A FRAME THAT ALREADY CARRIES THE CLOCK IS NOT SHIFTED A SECOND TIME
+    if "label_known_ts" in stamped_pdf.columns:
+        stamped_pdf["label_known_ts"] = [pd.NaT if pd.isna(label_ts) else get_ny_timestamp(label_ts)
+                                         for label_ts in stamped_pdf["label_known_ts"]]
+        stamped_pdf["available_ts"] = stamped_pdf["label_known_ts"]
+        keep_mask = [pd.notna(label_ts) for label_ts in stamped_pdf["label_known_ts"]]
+        return stamped_pdf.loc[keep_mask].reset_index(drop=True)
+    if "decision_ts" not in stamped_pdf.columns:
+        raise ValueError("TSDAY_FWD needs decision_ts so the horizon clock can be placed.")
+    # THE CLOCK IS THE DECISION OF SESSION i + HORIZON
+    decision_list = [get_decision_ts(label_ts) for label_ts in stamped_pdf["decision_ts"]]
+    horizon_int = int(config.LABEL_HORIZON_SESSIONS)
+    known_list = [pd.NaT] * len(decision_list)
+    for row_idx in range(max(0, len(decision_list) - horizon_int)):
+        known_list[row_idx] = decision_list[row_idx + horizon_int]
+    stamped_pdf["label_known_ts"] = known_list
+    stamped_pdf["available_ts"] = known_list
+    # A REDACTED BLANK FORWARD COLUMN IS A MISSING LABEL, NOT A ZERO
+    label_column_list = [column_str for column_str in stamped_pdf.columns if column_str.startswith("fwd_") or column_str.startswith("y_fwd")]
+    for column_str in label_column_list:
+        cell_series = stamped_pdf[column_str]
+        if cell_series.dtype == object:
+            cell_series = cell_series.replace("", np.nan)
+        stamped_pdf[column_str] = pd.to_numeric(cell_series, errors="coerce")
+    # AN UNFINISHED ROW HAS NO CLOCK AND MUST NOT ENTER THE FEED
+    keep_mask = [pd.notna(label_ts) for label_ts in stamped_pdf["label_known_ts"]]
+    return stamped_pdf.loc[keep_mask].reset_index(drop=True)
+
 # FUNCTION: KEEP A VINTAGE available_ts THAT THE ROW ALREADY CARRIES
 def keep_vintage_available_ts_pdf(vintage_pdf_in):
     """
@@ -452,6 +499,11 @@ SOURCE_SPEC_DICT = {
               "availability_func": add_cache_available_ts_pdf, "revision_policy": "not revised",
               "revision_reason": "The daily table is recomputed from the bars. Forward-return columns are labels and are not served here.",
               "role": "feature", "holdout": "development boundary; runner window end"},
+    "TSDAY_FWD": {"loader": "so.core.local_file_management.read_csv_files_from_path", "time_zone": NY_TZ_STR,
+                  "timestamp_convention": "label_known_ts is the decision of session i + LABEL_HORIZON_SESSIONS",
+                  "availability_func": add_tsday_fwd_label_known_ts_pdf, "revision_policy": "not revised",
+                  "revision_reason": "The 20-session sign is a function of the bars. It is not a revised print.",
+                  "role": "label", "holdout": "development boundary; runner window end"},
     "TSBAR": {"loader": "so.core.local_file_management.read_date_range_csv_files_from_path", "time_zone": NY_TZ_STR,
               "timestamp_convention": "label_known_ts is the hit bar or the horizon end",
               "availability_func": add_tsbar_label_known_ts_pdf, "revision_policy": "not revised",
@@ -489,7 +541,7 @@ def unregister_source(source_name_str_in):
         None
     """
     # KEEP THE BUILT-IN SOURCES
-    if source_name_str_in not in SOURCE_SPEC_DICT or source_name_str_in in ("SPY_1MIN", "VIX_1MIN", "VIX_DAILY", "VIX3M_1MIN", "VIX3M_DAILY", "TSIND", "TSSEG", "TSCTX", "TSDAY", "TSBAR"):
+    if source_name_str_in not in SOURCE_SPEC_DICT or source_name_str_in in ("SPY_1MIN", "VIX_1MIN", "VIX_DAILY", "VIX3M_1MIN", "VIX3M_DAILY", "TSIND", "TSSEG", "TSCTX", "TSDAY", "TSDAY_FWD", "TSBAR"):
         raise ValueError(f"{source_name_str_in} is not a test source.")
     # DROP THE TEST SOURCE
     del SOURCE_SPEC_DICT[source_name_str_in]
@@ -1107,7 +1159,7 @@ def get_registry_frame_pdf(source_name_str_in, end_date_in):
                    "TSCTX": paths.LOCAL_TSCTX_DATA_FILE_PATH_STR, "TSBAR": paths.LOCAL_TSBAR_DATA_FILE_PATH_STR}
     if source_name_str_in in folder_dict:
         return read_date_range_csv_files_from_path(folder_dict[source_name_str_in], None, end_str, enforce_holdout_bool_in=True)
-    if source_name_str_in == "TSDAY":
+    if source_name_str_in in ("TSDAY", "TSDAY_FWD"):
         return read_csv_files_from_path(paths.LOCAL_TSDAY_DATA_FILE_PATH_STR, enforce_holdout_bool_in=True)
     raise ValueError(f"{source_name_str_in} is registered but has no disk loader.")
 

@@ -387,7 +387,7 @@ def get_candidate_engine(design_module_in):
 
 # FUNCTION: APPEND ONE CANDIDATE-PERIOD TRIAL
 def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_in, period_row_in, score_dict_in,
-                                    commit_str_in, design_folder_hash_str_in, trial_log_path_str_in):
+                                    commit_str_in, design_folder_hash_str_in, trial_log_path_str_in, note_str_in=""):
     """
     One row, as soon as the period is scored, before any summary. A stable id that is already present is skipped.
 
@@ -400,6 +400,7 @@ def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_i
         commit_str_in (str): Git commit
         design_folder_hash_str_in (str): Hash of the design folder
         trial_log_path_str_in (str): Trial log CSV
+        note_str_in (str): Free text on the trial row
 
     Returns:
         dict: The trial row
@@ -416,7 +417,8 @@ def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_i
                 "valid_start": get_period_date(period_row_in["period_start"] if not isinstance(period_row_in, dict) else period_row_in["period_start"]),
                 "valid_end": get_period_date(period_row_in["period_end"] if not isinstance(period_row_in, dict) else period_row_in["period_end"])}
     return log_trial_dict(design_module_in, "validation", setting_dict, metric_dict, False, fold_row_in=fold_row,
-                          file_path_str_in=trial_log_path_str_in, trial_id_str_in=trial_id_str)
+                          note_str_in=str(note_str_in or ""), file_path_str_in=trial_log_path_str_in,
+                          trial_id_str_in=trial_id_str)
 
 
 # FUNCTION: ONE CANDIDATE STREAM (THE SPAWN TARGET)
@@ -497,7 +499,8 @@ def run_candidate_job_dict(job_dict_in):
             if log_trial_bool:
                 log_candidate_period_trial_dict(design_module, run_id_str, candidate, period_row_dict, score_dict,
                                                 job_dict_in["commit_str"], job_dict_in["design_folder_hash_str"],
-                                                job_dict_in["trial_log_path_str"])
+                                                job_dict_in["trial_log_path_str"],
+                                                note_str_in=job_dict_in.get("note_str_in", ""))
             score_row_list.append(score_dict)
             completed_period_id_set.add(period_id)
             checkpoint_payload_dict = {
@@ -547,7 +550,7 @@ def run_candidate_job_list(job_dict_list_in, n_jobs_int_in):
 def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf_in, data_context_in=None,
                                run_id_str_in=None, n_jobs_int_in=None, trial_log_path_str_in=None, commit_str_in=None,
                                crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
-                               log_trial_bool_in=True, runs_root_str_in=None):
+                               log_trial_bool_in=True, runs_root_str_in=None, note_str_in=""):
     """
     Shared stream used by a development run and a holdout run. Scores each candidate-period from the continuous
     stream, does pooled prior-only selection, and builds the prior-only path from the recorded decisions. A
@@ -567,6 +570,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
         check_clean_tree_bool_in (bool): Refuse uncommitted changes in the code this run uses
         log_trial_bool_in (bool): Write a candidate-period trial row (False on a holdout run)
         runs_root_str_in (str | None): Checkpoint root (None = development experiment zone)
+        note_str_in (str): Free text copied onto each candidate-period trial row
 
     Returns:
         dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list,
@@ -628,6 +632,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
                 "commit_str": commit_str, "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
                 "trial_log_path_str": trial_log_path_str, "crash_after_period_id": crash_after_period_id_in,
                 "log_trial_bool": bool(log_trial_bool_in), "runs_root_str": runs_root_str_in,
+                "note_str_in": str(note_str_in or ""),
             })
         run_candidate_job_list(job_dict_list, n_jobs_int)
         score_row_list = []
@@ -781,7 +786,8 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
                          n_jobs_int_in=None, period_pdf_in=None, trial_log_path_str_in=None, commit_str_in=None,
                          crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
                          check_view_bool_in=True, baseline_seed_count_int_in=None,
-                         look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, run_lookahead_bool_in=True):
+                         look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, run_lookahead_bool_in=True,
+                         note_str_in=""):
     """
     Development view. Refuses the quarantine root. Forms periods from PERIOD_RULE unless period_pdf_in is passed
     (tests). Streams each candidate, logs each candidate-period as it is scored, then builds the prior-only path
@@ -805,6 +811,7 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         baseline_seed_count_int_in (int | None): Random-timing draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
         look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
         run_lookahead_bool_in (bool): Run the automatic look-ahead check (default True)
+        note_str_in (str): Free text copied onto each candidate-period trial row
 
     Returns:
         dict: run_id, period_pdf, score_pdf, selection_pdf, governing_dict, prior_only_dict, trial_id_list,
@@ -821,7 +828,7 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         design_module_in, ohlcv_array_dict_in, period_pdf, data_context_in=data_context_in, run_id_str_in=run_id_str_in,
         n_jobs_int_in=n_jobs_int_in, trial_log_path_str_in=trial_log_path_str_in, commit_str_in=commit_str_in,
         crash_after_period_id_in=crash_after_period_id_in, code_hash_str_in=code_hash_str_in,
-        check_clean_tree_bool_in=check_clean_tree_bool_in, log_trial_bool_in=True)
+        check_clean_tree_bool_in=check_clean_tree_bool_in, log_trial_bool_in=True, note_str_in=note_str_in)
     finish_dict = write_runner_finish_dict(
         design_module_in, ohlcv_array_dict_in, stream_dict, stream_dict["prior_only_dict"], stream_dict["date1"],
         stream_dict["date2"], baseline_seed_count_int_in=baseline_seed_count_int_in,

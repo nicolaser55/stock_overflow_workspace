@@ -45,6 +45,7 @@ before the cutoff. `check_feature_available_ts` raises when a feature row's `ava
 | `TSSEG` | feature | same; the snapshot shows a swing only after it is confirmed | not revised |
 | `TSCTX` | feature | end of bar t; the row uses only bars `<= t` | not revised |
 | `TSDAY` | feature | end of the decision bar. Forward-return columns are not served on this path | not revised |
+| `TSDAY_FWD` | label | same TSDAY files; `label_known_ts` is the decision of session i + `LABEL_HORIZON_SESSIONS`; unfinished rows dropped | not revised |
 | `TSBAR` | label | `label_known_ts` is the end of the bar where TP or SL was hit, or the end of the horizon | not revised |
 
 The SPY evidence is the raw files: 2005-01-03 has 390 bars from 09:30 through 15:59, and the half day 2005-11-25 has
