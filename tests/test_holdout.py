@@ -770,7 +770,7 @@ def get_evaluation_path_dict():
 # FUNCTION: TEST THE PRIOR-ONLY REPLAY
 def test_evaluation():
     """
-    Checks the preconditions, selection carried across the window, the dead band, the template, and a leaking design.
+    Checks the preconditions, selection carried across the window, the dead band, and a leaking design.
 
     Returns:
         None
@@ -846,26 +846,10 @@ def test_evaluation():
             assert trade_row.trade_ts.hour == 15 and trade_row.trade_ts.minute == 59
             decision_ts = ohlcv_array_dict["timestamp_index"][int(idx_dict["decision_idx_arr"][session_idx])]
             assert decision_ts.hour == 15 and decision_ts.minute == 58
-    # THE TEMPLATE DESIGN PASSES THE TRUNCATION TEST, AND ITS BASELINES USE THE HOLDOUT ONLY
+    # THE TEMPLATE IS ON THE RUNNER (get_candidate_design); THE OLD REPLAY PATH IS NOT USED FOR IT
     from experiments._template import design as template_design
-    saved_rule_dict = template_design.PERIOD_RULE
-    saved_baseline = template_design.get_baseline_return_dict
-    seen_dict = {}
-    def baseline_recorder(ohlcv_array_dict_in, date1_in, date2_in):
-        # RECORD THE SPAN AND CALL THE TEMPLATE
-        seen_dict["span"] = (pd.Timestamp(date1_in).date(), pd.Timestamp(date2_in).date())
-        return saved_baseline(ohlcv_array_dict_in, date1_in, date2_in)
-    template_design.PERIOD_RULE = {"embargo_sessions": 5, "train_years": [1]}
-    template_design.get_baseline_return_dict = baseline_recorder
-    try:
-        template_ledger_str = os.path.join(TEMP_ROOT_STR, "template_evaluations.csv")
-        template_row = run_holdout_evaluation(template_design, "template", ohlcv_array_dict, path_dict["token_path_str"], git_dict,
-                                              ledger_path_str_in=template_ledger_str, trial_log_path_str_in=path_dict["trial_log_path_str"])
-    finally:
-        template_design.PERIOD_RULE = saved_rule_dict
-        template_design.get_baseline_return_dict = saved_baseline
-    assert template_row["status"] == "valid"
-    assert seen_dict["span"] == (pd.Timestamp(window_dict["start"]).date(), pd.Timestamp(window_dict["end"]).date())
+    assert hasattr(template_design, "get_candidate_design")
+    assert not hasattr(template_design, "run_candidate_replay_dict")
     # A DESIGN THAT READS THE NEXT CLOSE IS REJECTED AND CONSUMES A BUDGET SLOT
     leak_module = get_leak_design()
     leak_ledger_str = os.path.join(TEMP_ROOT_STR, "leak_evaluations.csv")
@@ -904,9 +888,9 @@ def test_evaluation():
         raise AssertionError("an eleventh design was accepted")
     except ValueError as error:
         assert "evaluations" in str(error)
-    # THE TEMPORARY TRIAL LOG HOLDS THE VALID RUNS ONLY
+    # THE TEMPORARY TRIAL LOG HOLDS THE VALID RUNS ONLY (SELECTION AND DEAD-BAND; THE TEMPLATE IS ON THE RUNNER)
     trial_pdf = pd.read_csv(path_dict["trial_log_path_str"])
-    assert len(trial_pdf) == 3 and set(trial_pdf["stage"]) == {"test"}
+    assert len(trial_pdf) == 2 and set(trial_pdf["stage"]) == {"test"}
     # THE PERTURBATION KEEPS THE DECISION BAR AND CHANGES THE FILL BAR
     cut_date = get_truncation_cut_date_list(ohlcv_array_dict["session_date_list"], window_dict)[0]
     perturbed_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict, cut_date)
@@ -969,8 +953,8 @@ def test_evaluation():
         raise AssertionError("a second evaluation after a writer crash was accepted")
     except ValueError as error:
         assert "already evaluated" in str(error)
-    passed("prior-only replay (selection carried, dead band, template truncation, leaking design counts)")
-    passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']}; template {template_row['status']})")
+    passed("prior-only replay (selection carried, dead band, leaking design counts)")
+    passed(f"perturbation (decision-bar average {honest_row['status']}; fill {leak_status_dict['fill']}; session close {leak_status_dict['session_close']})")
     passed("a crash in the daily-path writer still counts the evaluation; a second run is refused")
 
 # FUNCTION: TEST THAT THE LEDGER STORES THE DESIGN'S BASELINES

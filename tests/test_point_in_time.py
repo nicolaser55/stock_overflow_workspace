@@ -35,7 +35,7 @@ from so import paths, config
 from so.core.holdout import (compute_holdout_window_dict, open_holdout_window_dict, run_holdout_evaluation,
                              get_prior_only_result_dict, get_lookahead_difference_str, get_perturbed_ohlcv_dict,
                              get_truncation_cut_date_list)
-from so.core.point_in_time import (add_available_ts_pdf, add_tsbar_label_known_ts_pdf, get_as_of_pdf, get_minute_bar_available_ts, get_decision_ts,
+from so.core.point_in_time import (add_available_ts_pdf, add_tsbar_label_known_ts_pdf, add_tsday_fwd_label_known_ts_pdf, get_as_of_pdf, get_minute_bar_available_ts, get_decision_ts,
                                    get_vix_daily_available_ts, get_derived_available_ts, get_swing_available_ts,
                                    get_cut_clock_dict, check_feature_available_ts, DataContext, register_source_dict,
                                    unregister_source, raise_if_direct_read_blocked, SOURCE_SPEC_DICT)
@@ -191,6 +191,40 @@ def test_labels():
     none_pdf = context.get_labels("TSBAR", early_ts)
     assert list(early_pdf["y"]) == [1] and len(none_pdf) == 0
     passed("labels (TSBAR refused through get; get_labels keeps label_known_ts before the cutoff)")
+
+# FUNCTION: TEST THE TSDAY_FWD HORIZON CLOCK AND REDACTION
+def test_tsday_fwd_clock():
+    """
+    label_known_ts is the decision of session i + LABEL_HORIZON_SESSIONS. The last horizon rows are dropped. A blank
+    y_fwd becomes a missing label.
+
+    Returns:
+        None
+    """
+    # FIVE SESSIONS; HORIZON 20 WOULD DROP ALL, SO STAMP A SHORT TABLE WITH THE SHARED HORIZON AFTER A TINY FRAME
+    session_count = int(config.LABEL_HORIZON_SESSIONS) + 3
+    day_list = pd.bdate_range("2010-06-01", periods=session_count, tz=NY)
+    decision_list = [pd.Timestamp(day).tz_convert(NY).replace(hour=15, minute=58) for day in day_list]
+    label_pdf = pd.DataFrame({
+        "date": [day.date() for day in day_list],
+        "decision_ts": decision_list,
+        "y_fwd_positive": [1.0] * (session_count - 1) + [""],
+        "fwd_net_return_20d": [0.01] * (session_count - 1) + [""],
+    })
+    stamped_pdf = add_tsday_fwd_label_known_ts_pdf(label_pdf)
+    assert len(stamped_pdf) == session_count - int(config.LABEL_HORIZON_SESSIONS)
+    first_known = get_decision_ts(decision_list[int(config.LABEL_HORIZON_SESSIONS)])
+    assert pd.Timestamp(stamped_pdf["label_known_ts"].iloc[0]) == first_known
+    assert "TSDAY_FWD" in SOURCE_SPEC_DICT and SOURCE_SPEC_DICT["TSDAY_FWD"]["role"] == "label"
+    context = DataContext("development", frame_dict_in={"TSDAY_FWD": stamped_pdf})
+    try:
+        context.get("TSDAY_FWD", first_known + pd.Timedelta(days=1))
+        raise AssertionError("TSDAY_FWD was returned through get")
+    except ValueError as error:
+        assert "get_labels" in str(error)
+    known_pdf = context.get_labels("TSDAY_FWD", first_known + pd.Timedelta(seconds=1))
+    assert len(known_pdf) >= 1
+    passed("TSDAY_FWD (horizon clock; unfinished dropped; feature door refused)")
 
 # FUNCTION: TEST THAT A STORED TSBAR CELL BECOMES label_known_ts
 def test_tsbar_cell_clock():
@@ -725,6 +759,7 @@ if __name__ == "__main__":
         test_derived()
         test_vintage()
         test_labels()
+        test_tsday_fwd_clock()
         test_tsbar_cell_clock()
         test_unregistered()
         test_vix_regression()

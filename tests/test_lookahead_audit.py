@@ -172,8 +172,6 @@ def test_designs():
     ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
     session_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict["session_date_list"]]
     leak_period_pdf = get_period_pdf(session_list, 0, len(session_list) - 1)
-    # THE TEMPLATE'S FIRST PREDICTION IS AFTER THE WARMUP, SO THE PERIOD STARTS LATER
-    template_period_pdf = get_period_pdf(session_list, 60, len(session_list) - 1)
     for design_module, label_str in [(get_leak_design(), "next close"),
                                      (get_later_bar_design("fill"), "fill bar"),
                                      (get_later_bar_design("session_close"), "session close")]:
@@ -183,13 +181,10 @@ def test_designs():
         assert result_dict["first_difference"], label_str
         assert len(result_dict["cut_date_list"]) == 4
         passed(f"{label_str} fails ({result_dict['first_difference']})")
+    # THE TEMPLATE IS ON THE RUNNER; ITS LOOK-AHEAD IS so.runner.lookahead, NOT THIS OLD REPLAY AUDIT
     from experiments._template import design as template_design
-    template_reference_dict = get_replay_result_dict(template_design, ohlcv_array_dict, template_period_pdf, None)
-    template_result_dict = get_audit_result_dict(template_design, ohlcv_array_dict, template_period_pdf, None, 4, template_reference_dict)
-    assert template_result_dict["passed"] is True, template_result_dict["first_difference"]
-    assert template_result_dict["first_difference"] == ""
-    assert len(template_result_dict["cut_date_list"]) == 4
-    passed(f"template passes ({', '.join(template_result_dict['cut_date_list'])})")
+    assert hasattr(template_design, "get_candidate_design")
+    passed("template is on the runner (old replay audit not used)")
 
 # RUN THE SUITE
 if __name__ == "__main__":

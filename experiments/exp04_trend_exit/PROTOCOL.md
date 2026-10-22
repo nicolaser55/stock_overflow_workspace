@@ -1,6 +1,8 @@
-# exp04_trend_exit_v2: Protocol
+# exp04_trend_exit_v2_1: Protocol
 
-*Version 2.0 (2026-10-12). Experiment name `exp04_trend_exit_v2`. Config: `experiments/exp04_trend_exit/config.py` + `so/config.py`.*
+*Version 2.1 (2026-10-22). Experiment name `exp04_trend_exit_v2_1`. Config: `experiments/exp04_trend_exit/config.py` + `so/config.py`.*
+
+**Label: machinery only, runner port, no rule change.** Version 2.0's development result stays the recorded evidence. This version moves the same candidates, rules, periods, selection, dead band and costs onto `so.runner`. Differences against the saved v2 files are recorded in `docs/CALIBRATION_exp04.md`; no rule is changed to make numbers match.
 
 **Label: re-run under the new rules, not new evidence.** The version 1.0 run already used this data. Nothing was tuned and no rule was added. No further version may follow from this result.
 
@@ -43,6 +45,12 @@ If the path never exits, every random run equals the path. The information test 
 
 STOP if the prior-only path does not beat buy-and-hold, or does not beat the median of both random families. Otherwise: candidate result pending review. The 2005-2014 exploration does not change the grid and cannot stop the experiment.
 
+## 1.1 Version 2.1 changes (machinery only, 2026-10-22)
+
+- `design.py` implements the runner interface: `CANDIDATE_LIST`, `get_candidate_design`, `PERIOD_RULE`, `SELECTION_RULE`, `DATA_SOURCE_LIST`, `ENGINE_NAME` (`fractional`), `DEAD_BAND` 0, `INITIAL_WEIGHT` 1. `decide(view)` returns 0 on the exit signal, 1 on the re-entry signal, NaN otherwise. The 200-session distance is the decision close over the mean of the previous 200 complete session closes, counted on the data.
+- Development is `scripts/run_development.py experiments/exp04_trend_exit`. The notebook is not the development entry point.
+- No rule, grid, threshold, window, cost, baseline, selection or stopping rule change.
+
 ## 2. Version 2.0 changes (machinery only)
 
 - The development end is the session an embargo of 20 before the registered holdout start (`so.core.holdout`). Dates are not typed in `config.py`.
@@ -76,3 +84,4 @@ The limitations of protocol 1.0 still apply: dividends ignored (this favours a r
 | 2.0 | 2026-10-12 | Re-run under the new rules, not new evidence. Machinery only (§2). |
 | 2.0 | 2026-10-13 | Preregister amendment, before any version 2.0 run. Scores within NUMERIC_TOLERANCE (1e-6) of the best pooled score are tied, then this protocol's tie order. A comparison counts a difference of at most 1e-6 as a match and also reports the maximum absolute difference. Summary prints show 6 decimal places. Calculations, and files later code reads, stay at full precision. |
 | 2.0 | 2026-10-15 | Holdout report baselines are the development report's uninformed baselines over the span passed in, with this protocol's fixed seeds, through the point-in-time context. Report-only: no rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. Development results unchanged. |
+| 2.1 | 2026-10-22 | machinery only: runner port, no rule change. `design.py` is `decide(view)` on the fractional engine. Development is `scripts/run_development.py`. |

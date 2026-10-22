@@ -13,7 +13,7 @@ What is verified (synthetic data):
     4. Candidate paths: one row per (candidate, period), excess = total - buy-and-hold, period returns chain to the total.
     5. Prior-only path: with one candidate it equals that candidate replayed over the path span; both random families
        have RANDOM_RUN_COUNT runs; ties select the largest buffer and confirmation; period f's choice governs f + 1.
-    6. Holdout design: the 9 names, the same tie order, the first period uses the first rule, one finite replay.
+    6. Runner design: the 9 names, the same tie order, the first period uses the first rule, decide() 0/1/NaN matches the signals.
 """
 
 import os
@@ -40,7 +40,7 @@ from so.core.reentry_simulation import simulate_trend_rule_dict
 from so.core.continuous_replay import simulate_continuous_replay_dict
 from so.core.replay_walk_forward import run_candidate_replay_dict, run_prior_only_replay_dict
 from experiments.exp04_trend_exit.rules import get_schedule_tuple, get_rule_candidate_list, get_trend_exit_signal_arr, get_trend_reentry_signal_arr, get_rule_builder_func
-from experiments.exp04_trend_exit.design import CANDIDATE_LIST, SELECTION_RULE, run_candidate_replay_dict as run_design_replay_dict
+from experiments.exp04_trend_exit.design import CANDIDATE_LIST, SELECTION_RULE, ENGINE_NAME, get_candidate_design
 from synthetic_data import get_synthetic_ohlcv_pdf
 
 # DEFINE THE UNTOUCHED START USED BY THE TESTS (AFTER THE SYNTHETIC DATA)
@@ -144,24 +144,42 @@ def test_walk_forward(ohlcv_array_dict_in, daily_pdf_in):
     passed(f"walk-forward (9 x {len(period_pdf)} candidate periods chain to their totals; ties -> x 5%, n 10; prior-only f -> f + 1; "
            f"single candidate == direct replay; {len(baseline_name_list)} baseline rows)")
 
-# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID, TIE-BREAK AND ONE REPLAY
+# FUNCTION: TEST THE RUNNER DESIGN'S GRID, TIE-BREAK AND ONE STREAM
 def test_design(ohlcv_array_dict_in, daily_pdf_in):
-    # THE NINE NAMES AND THE PROTOCOL TIE ORDER
+    # THE NINE NAMES, THE ENGINE AND THE PROTOCOL TIE ORDER
     from so.core.holdout import get_governing_selection_pdf
+    from so.runner import run_daily_dict
+    from so.runner.preflight import check_design_file
     from experiments.exp04_trend_exit import design
     assert CANDIDATE_LIST == [f"{buffer:.2f}|{confirmation}" for buffer, confirmation in [(0.0, 1), (0.0, 5), (0.0, 10), (0.03, 1), (0.03, 5), (0.03, 10), (0.05, 1), (0.05, 5), (0.05, 10)]]
+    assert ENGINE_NAME == "fractional"
     assert SELECTION_RULE["pooled_periods"] == 4 and SELECTION_RULE["tie_break"] == [("buffer", False), ("confirmation", False)]
+    check_design_file(design.__file__)
     # EVERY SCORE TIED: THE LARGER BUFFER AND CONFIRMATION GOVERN EVERY PERIOD AFTER THE FIRST
     row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in CANDIDATE_LIST]
     period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
     governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
     assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == CANDIDATE_LIST[0]
     assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "0.05|10").all()
-    # ONE CANDIDATE ON A SPAN THAT IS NOT A DEVELOPMENT PERIOD RETURNS A FINITE EQUITY
+    # ONE CANDIDATE ON A SHORT SPAN RETURNS A FINITE EQUITY; 0/1/NaN MATCH THE RULE SIGNALS
     date1, date2 = daily_pdf_in["date"].iloc[260], daily_pdf_in["date"].iloc[-1]
-    replay_dict = run_design_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
+    candidate_design = get_candidate_design(CANDIDATE_LIST[0])
+    replay_dict = run_daily_dict(candidate_design, ohlcv_array_dict_in, date1, date2, design_file_path_str_in=design.__file__)
     assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
-    passed("holdout design (9 candidates, ties -> x 5% n 10, first period is 0.00|1, one finite replay)")
+    exit_arr = get_trend_exit_signal_arr(daily_pdf_in, 0.0, 1)
+    reentry_arr = get_trend_reentry_signal_arr(daily_pdf_in, 0.0)
+    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+    start_date, end_date = pd.Timestamp(date1).date(), pd.Timestamp(date2).date()
+    window_idx_list = [idx for idx, session_date in enumerate(session_date_list) if start_date <= session_date <= end_date]
+    target_arr = np.asarray(replay_dict["target_weight_arr"], dtype=float)
+    assert len(target_arr) == len(window_idx_list)
+    for weight_idx, session_idx in enumerate(window_idx_list[:-1]):
+        expected_float = 0.0 if exit_arr[session_idx] else (1.0 if reentry_arr[session_idx] else np.nan)
+        if np.isnan(expected_float):
+            assert np.isnan(target_arr[weight_idx])
+        else:
+            assert target_arr[weight_idx] == expected_float
+    passed("runner design (9 candidates, ties -> x 5% n 10, first period is 0.00|1, signals match 0/1/NaN)")
 
 """
 Runner
