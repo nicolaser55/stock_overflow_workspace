@@ -90,6 +90,29 @@ class MutatingTrailDesign(TrailDesign):
                 "volatility": self.volatility_float, "reentry_reason": "delay"}
 
 
+
+# CLASS: A DESIGN WHOSE STOP VOLATILITY CHANGES EVERY SESSION
+class VaryingTrailDesign(TrailDesign):
+    """Same re-entry as TrailDesign. Volatility cycles 0.004 / 0.008 / 0.012 by session index (known at the moment)."""
+
+    # FUNCTION: RE-ENTER WHEN IN CASH, WITH A SESSION-DEPENDENT STOP
+    def decide(self, view_in):
+        """
+        Args:
+            view_in (DecisionView): View at this moment
+
+        Returns:
+            dict: target_weight, trail_multiple, volatility
+        """
+        # THE SESSION INDEX IS PART OF THE MOMENT, NOT THE FUTURE
+        state_dict = view_in.get_engine_state_dict()
+        self.state_log_list.append(dict(state_dict))
+        self.session_date_list.append(view_in.session_date)
+        target_weight = 1.0 if not state_dict["in_position"] else float("nan")
+        volatility_float = 0.004 * (1 + int(view_in.session_idx) % 3)
+        return {"target_weight": target_weight, "flatten_bool": False, "trail_multiple": self.trail_multiple_float,
+                "volatility": volatility_float, "reentry_reason": "delay"}
+
 # FUNCTION: A FRESH DESIGN OBJECT FOR ONE CANDIDATE
 def get_candidate_design(candidate_in):
     """

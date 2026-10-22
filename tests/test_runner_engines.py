@@ -112,79 +112,8 @@ def get_test_trial_log_path_str(file_name_str_in):
     return os.path.join(folder_str, file_name_str_in)
 
 
-# FUNCTION: DRIVE TrailingStopEngine WITH THE OLD SIMULATOR'S SESSION RULES
-def run_trailing_parity_dict(ohlcv_array_dict_in, date1_in, date2_in, volatility_arr_in, stop_k_in, reentry_func_in,
-                             reentry_reason_str_in="model", exit_signal_arr_in=None, max_cash_sessions_in=None):
-    """
-    Sets this session's k and volatility before the morning bars, then evaluates re-entry from the engine snapshot.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        date1_in, date2_in: Window
-        volatility_arr_in (np.ndarray): Per-session volatility
-        stop_k_in (float | np.ndarray | None): k
-        reentry_func_in: Old-sim re-entry rule
-        reentry_reason_str_in (str): Label
-        exit_signal_arr_in (np.ndarray | None): Flatten flags
-        max_cash_sessions_in (int | None): Forced re-entry
-
-    Returns:
-        dict: Engine result
-    """
-    # THE SAME WINDOW AS THE OLD SIMULATOR
-    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1_in, date2_in)
-    engine = TrailingStopEngine(max_cash_sessions_in)
-    engine.set_session_bounds(ohlcv_array_dict_in["session_end_idx_arr"], len(ohlcv_array_dict_in["close_arr"]))
-    first_session_idx = int(window_session_idx_arr[0])
-    first_entry_idx = get_session_first_entry_idx(ohlcv_array_dict_in, first_session_idx)
-    timestamp_index = ohlcv_array_dict_in["timestamp_index"]
-    engine.open_window({"bar_idx": int(first_entry_idx), "timestamp": timestamp_index[first_entry_idx],
-                        "raw_price": float(ohlcv_array_dict_in["open_arr"][first_entry_idx]),
-                        "close": float(ohlcv_array_dict_in["close_arr"][first_entry_idx]),
-                        "session_idx": first_session_idx,
-                        "session_date": ohlcv_array_dict_in["session_date_list"][first_session_idx]}, 1.0)
-    idx_dict = get_session_decision_idx_dict(ohlcv_array_dict_in)
-    for session_pos, session_idx in enumerate(window_session_idx_arr):
-        session_idx = int(session_idx)
-        start_idx = int(ohlcv_array_dict_in["session_start_idx_arr"][session_idx])
-        decision_idx = int(idx_dict["decision_idx_arr"][session_idx])
-        fill_idx = int(idx_dict["fill_idx_arr"][session_idx])
-        end_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][session_idx])
-        session_date = ohlcv_array_dict_in["session_date_list"][session_idx]
-        is_last_session = session_pos == len(window_session_idx_arr) - 1
-        session_k = stop_k_in if stop_k_in is None or np.ndim(stop_k_in) == 0 else stop_k_in[session_idx]
-        engine.set_stop_params(session_k, volatility_arr_in[session_idx])
-        morning_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, start_idx, decision_idx, session_date)
-        if morning_event_dict is not None:
-            engine.process_bars(morning_event_dict)
-        flatten_bool = False if exit_signal_arr_in is None else bool(exit_signal_arr_in[session_idx])
-        target_weight, exit_block_sessions, require_fresh_exit = 0.0, 0, False
-        state_dict = engine.get_state_dict()
-        if (not state_dict["in_position"]) and engine.episode_dict is not None and reentry_func_in is not None:
-            rule_bool = bool(reentry_func_in(int(session_idx), int(state_dict["cash_session_count"]), engine.episode_dict))
-            if rule_bool:
-                target_weight = 1.0
-                exit_block_sessions = int(engine.episode_dict.get("exit_block_sessions", 0))
-                require_fresh_exit = bool(engine.episode_dict.get("require_fresh_exit", False))
-        decision_dict = get_decision_dict({"target_weight": target_weight, "flatten_bool": flatten_bool,
-                                           "trail_multiple": session_k, "volatility": volatility_arr_in[session_idx],
-                                           "exit_block_sessions": exit_block_sessions,
-                                           "require_fresh_exit": require_fresh_exit,
-                                           "reentry_reason": reentry_reason_str_in})
-        if not is_last_session:
-            engine.apply_decision(get_fill_event_dict(ohlcv_array_dict_in, fill_idx, decision_idx, session_idx,
-                                                      session_date, end_idx),
-                                  decision_dict, float(ohlcv_array_dict_in["close_arr"][decision_idx]))
-        afternoon_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, decision_idx + 1, end_idx, session_date)
-        if afternoon_event_dict is not None:
-            engine.process_bars(afternoon_event_dict)
-        if is_last_session:
-            engine.close_window({"bar_idx": end_idx, "timestamp": timestamp_index[end_idx],
-                                 "raw_price": float(ohlcv_array_dict_in["close_arr"][end_idx]),
-                                 "close": float(ohlcv_array_dict_in["close_arr"][end_idx]),
-                                 "session_idx": session_idx, "session_date": session_date})
-        engine.close_session({"session_date": session_date, "close": float(ohlcv_array_dict_in["close_arr"][end_idx])})
-    return engine.get_result_dict()
+# THE OLD SIMULATOR'S SESSION TIMING LIVES IN so.runner.calibration (SHARED WITH THE PORT CALIBRATIONS)
+from so.runner.calibration import run_trailing_session_timing_dict as run_trailing_parity_dict
 
 
 # FUNCTION: ASSERT TRAILING ENGINE MATCHES THE OLD SIMULATOR
@@ -403,6 +332,39 @@ def test_trailing_daily_loop_constant_k():
                                  initial_weight_in=1.0)
     assert_trailing_match(runner_dict, sim_dict, "daily_loop_constant_k")
     passed("trailing DailyLoop with constant k matches simulate_stop_reentry_dict")
+
+
+
+# FUNCTION: THE REPLAY OF RECORDED DECISIONS REPRODUCES THE STREAM WHEN k AND VOLATILITY VARY
+def test_replay_matches_stream_varying_stop():
+    """
+    A trailing design whose volatility changes every session. The prior-only replay (run_engine_decisions_dict on
+    the recorded decisions) must give the same trades and equity as the candidate stream (DailyLoop): a decision's
+    stop parameters apply from its fill, in both.
+
+    Returns:
+        None
+    """
+    # IMPORT THE REPLAY HERE
+    from so.runner.loop import run_engine_decisions_dict
+    # ONE SYNTHETIC YEAR, THE STREAM, THEN THE REPLAY OF ITS DECISIONS
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2011-01-03", "2011-12-30", seed_in=11))
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    stream_dict = run_daily_dict(trail_design.VaryingTrailDesign(), ohlcv_array_dict, date1, date2,
+                                 engine_in=TrailingStopEngine(trail_design.MAX_CASH_SESSIONS), initial_weight_in=1.0,
+                                 design_file_path_str_in=trail_design.__file__)
+    replay_dict = run_engine_decisions_dict(ohlcv_array_dict, date1, date2, stream_dict["decision_dict_list"],
+                                            engine_in=TrailingStopEngine(trail_design.MAX_CASH_SESSIONS),
+                                            initial_weight_in=1.0)
+    stream_trade_pdf, replay_trade_pdf = stream_dict["trade_pdf"], replay_dict["trade_pdf"]
+    assert int(stream_dict["metric_dict"]["stop_count"]) > 3, "the test needs several stop-outs"
+    assert len(stream_trade_pdf) == len(replay_trade_pdf), (len(stream_trade_pdf), len(replay_trade_pdf))
+    assert stream_trade_pdf["buy_idx"].tolist() == replay_trade_pdf["buy_idx"].tolist()
+    assert stream_trade_pdf["sell_idx"].tolist() == replay_trade_pdf["sell_idx"].tolist()
+    assert stream_trade_pdf["exit_reason"].tolist() == replay_trade_pdf["exit_reason"].tolist()
+    assert np.allclose(stream_dict["daily_equity_pdf"]["equity"], replay_dict["daily_equity_pdf"]["equity"], atol=1e-9)
+    passed(f"trailing replay of recorded decisions == stream with varying k/volatility "
+           f"({int(stream_dict['metric_dict']['stop_count'])} stop-outs)")
 
 
 # FUNCTION: BARRIER ENGINE MATCHES THE OLD SIMULATOR ON RANDOM STREAMS
@@ -728,6 +690,7 @@ if __name__ == "__main__":
     try:
         test_trailing_parity_random_streams()
         test_trailing_daily_loop_constant_k()
+        test_replay_matches_stream_varying_stop()
         test_barrier_parity_random_streams()
         test_barrier_same_bar_sl_wins()
         test_barrier_half_day_exit()

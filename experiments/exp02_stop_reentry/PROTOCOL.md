@@ -1,6 +1,6 @@
-# exp02_stop_reentry_v2: Protocol
+# exp02_stop_reentry_v2 / v2_1: Protocol
 
-*Version 2.0 (2026-10-12). Experiment name `exp02_stop_reentry_v2`. Config: `experiments/exp02_stop_reentry/config.py` + `so/config.py`.*
+*Version 2.1 (2026-10-22), experiment name `exp02_stop_reentry_v2_1`: the runner port, section 10. Version 2.0 (2026-10-12), experiment name `exp02_stop_reentry_v2`. Config: `experiments/exp02_stop_reentry/config.py` + `so/config.py`.*
 
 **Label: re-run under the new rules, not new evidence.** The version 1.0 run already used this data. Nothing was tuned and no rule was added. No further version may follow from this result.
 
@@ -164,3 +164,30 @@ carries the position. The two numbers are not the same object. The old results s
 | 2.0 | 2026-10-13 | Shared selection now treats scores within NUMERIC_TOLERANCE (1e-6) as tied. This experiment is not re-run. Its trials stand. |
 | 2.0 | 2026-10-15 | Holdout report baselines are the development report's uninformed baselines over the span passed in, with this protocol's fixed seeds, through the point-in-time context. Report-only: no rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. Development results unchanged. |
 | 2.0 | 2026-10-16 | The removed `SO_ALLOW_LEGACY_REPRODUCTION` flag is no longer named. No rule, grid, threshold, window, cost, baseline, selection or stopping rule changes. |
+| 2.1 | 2026-10-22 | runner port; period scores change from fresh windows to continuous slices. A decision's stop parameters (k, volatility) apply from its fill until the next decision's fill. Section 10. |
+
+## 10. Version 2.1: runner port (2026-10-22)
+
+Machinery only. The trading rules, the 18 candidates, the weekly refit, the label, the purge, the minimum rows, the
+selection and tie order, the costs and `MAX_CASH_SESSIONS` are unchanged. Protocol 2.0's STOP stands as the recorded
+research result; version 2.1 does not replace it.
+
+- **Code path.** `design.py` is `decide(view)` on `so.runner` with the trailing-stop engine. Development is
+  `scripts/run_development.py experiments/exp02_stop_reentry`. The 2.0 model path is kept in `v2_reference.py` for the
+  calibration only.
+- **Inputs.** Today's features come from the registered `TSDAY` source and training rows from `TSDAY_FWD` (the same
+  `get_daily_feature_pdf` columns, served at their `available_ts` / `label_known_ts`). Version 2.0 computed the same
+  table in memory from the bars.
+- **Period scores.** A candidate-period score is the slice of that candidate's continuous stream over the period
+  (position carried in) minus buy-and-hold over the same dates. Version 2.0 scored a fresh window per period.
+- **Stop timing.** The k and volatility of the decision at session s apply from its 15:59 fill through the morning of
+  session s + 1. Version 2.0 applied session s + 1's volatility (and, on the first session of a period, the new
+  candidate's k) from the open of session s + 1. Both use only past closes; 2.1 uses the value known at the last
+  decision. The first session of the stream has no stop before its first decision.
+- **Refit schedule.** The first session of each ISO week on which today's features are finite, and the first such
+  session of the stream (the stream starts on 2015-04-20, a Monday). Version 2.0 used the same rule over its decision
+  list from the feature warmup.
+- **Baselines and verdict.** The runner's shared baselines (buy-and-hold, constant exposure at the path's average
+  weight, 100-seed random timing) and verdict. Version 2.0's same-stop fixed-delay and matched random re-entry
+  baselines are not part of the runner report.
+- **Calibration.** `scripts/compare_exp02_calibration.py`, recorded in `docs/CALIBRATION_exp02.md`.

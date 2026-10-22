@@ -18,8 +18,8 @@ What is verified:
     9. Daily signal check: a planted signal is found on both sides, noise is rejected; the optional month minimum
        rejects a degenerate one-month validation bin.
    10. Success criteria and the monthly bootstrap on hand-made returns.
-   11. End-to-end fold on synthetic data (validation candidates -> pooled selection -> test with baselines), and the
-       prior-only runner (window "valid") reproduces the validation candidate exactly.
+   11. The session-threshold re-entry rule equals the constant-threshold rule; the 2.1 runner design reproduces the
+       2.0 model path (probability, threshold, stop volatility, re-entry flag) on every session.
    12. Evaluation helpers: generic pooled selection, prior-only path, window summary and MDE, baseline summary.
 """
 
@@ -56,7 +56,7 @@ from so.core.reentry_simulation import simulate_stop_reentry_dict, get_fixed_del
                                     get_window_session_idx_arr, get_buy_and_hold_result_dict, simulate_trend_rule_dict
 from experiments.exp02_stop_reentry.selection import get_pooled_selection_pdf
 from experiments.exp02_stop_reentry.model import get_session_threshold_reentry_func
-from experiments.exp02_stop_reentry.design import run_candidate_replay_dict, CANDIDATE_LIST, SELECTION_RULE
+from experiments.exp02_stop_reentry.design import CANDIDATE_LIST, SELECTION_RULE
 from so.core.evaluation import get_chained_daily_return_pdf, get_excess_return_bootstrap_dict, get_success_criteria_dict, get_prior_only_pdf, \
                                get_window_return_summary_dict, get_candidate_summary_pdf, get_baseline_summary_pdf, get_mde_float
 from so.core.evaluation import get_pooled_selection_pdf as get_generic_pooled_selection_pdf
@@ -414,10 +414,68 @@ def test_end_to_end(ohlcv_array_dict_in, daily_pdf_in):
     assert np.allclose(array_dict["daily_equity_pdf"]["equity"], old_dict["daily_equity_pdf"]["equity"], atol=1e-6)
     # THE GRID AND THE TIE ORDER ARE THE PROTOCOL'S
     assert len(CANDIDATE_LIST) == 18 and SELECTION_RULE["tie_break"] == [("stop_k", False), ("threshold_offset", False), ("train_window_months", True)]
-    # ONE CANDIDATE ON A SHORT WINDOW RETURNS A FINITE EQUITY (THE WEEKLY FIT IS THE SAME MODEL)
-    replay_dict = run_candidate_replay_dict(ohlcv_array_dict_in, date1, date2, CANDIDATE_LIST[0])
-    assert np.isfinite(replay_dict["metric_dict"]["total_return"]) and len(replay_dict["daily_equity_pdf"]) > 10
     passed("re-entry rule matches the original threshold rule; a constant stop array matches the scalar; 18 candidates")
+
+
+# FUNCTION: THE 2.1 RUNNER DESIGN REPRODUCES THE 2.0 MODEL PATH, SESSION BY SESSION
+def test_runner_design(ohlcv_array_dict_in, daily_pdf_in):
+    """
+    decide(view) on the runner, fed TSDAY and TSDAY_FWD built from the same bars, gives the same probability,
+    threshold, stop volatility and re-entry flag on every session as the 2.0 path (v2_reference: in-memory rows and
+    so.core.rolling_retrain.run_rolling_retrain_dict). The stream starts on the first session of an ISO week, so both
+    paths refit on the same sessions.
+
+    Returns:
+        None
+    """
+    # IMPORT THE RUNNER, THE PREFLIGHT, THE CONTEXT BUILDER AND BOTH PATHS
+    from so.runner import run_daily_dict, TrailingStopEngine
+    from so.runner.preflight import check_design_file
+    from so.core.point_in_time import get_minute_bar_available_ts, get_runner_context
+    from experiments.exp02_stop_reentry import design, v2_reference
+    # THE DESIGN FILE PASSES THE PREFLIGHT; ENGINE, SOURCES AND GRID ARE THE PORT'S
+    check_design_file(design.__file__)
+    assert design.ENGINE_NAME == "trailing_stop" and design.MAX_CASH_SESSIONS == exp_config.MAX_CASH_SESSIONS
+    assert design.DATA_SOURCE_LIST == ["SPY_1MIN", "TSDAY", "TSDAY_FWD"] and design.INITIAL_WEIGHT == 1.0
+    assert design.CANDIDATE_LIST[0] == "10Y|3|-0.05" and design.CANDIDATE_LIST[-1] == "ALL|5|0.05"
+    assert exp_config.EXPERIMENT_NAME == "exp02_stop_reentry_v2_1" and exp_config.PROTOCOL_VERSION == "2.1"
+    # THE SOURCES THE RUN WOULD LOAD, BUILT FROM THE SAME BARS
+    limit_ts = get_minute_bar_available_ts(ohlcv_array_dict_in["timestamp_index"][-1])
+    data_context = get_runner_context(ohlcv_array_dict_in, {"TSDAY": daily_pdf_in, "TSDAY_FWD": daily_pdf_in}, limit_ts,
+                                      list(design.DATA_SOURCE_LIST))
+    session_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+    session_pos_dict = {session_date: pos for pos, session_date in enumerate(session_list)}
+    start_idx = next(idx for idx in range(400, len(session_list))
+                     if session_list[idx].isocalendar()[:2] != session_list[idx - 1].isocalendar()[:2])
+    date1, date2 = session_list[start_idx], session_list[-1]
+    # THE 2.0 PATH, ONCE PER WINDOW
+    row_pdf = v2_reference.get_labelled_row_pdf(ohlcv_array_dict_in)
+    retrain_dict = {window_str: v2_reference.get_window_retrain_dict(ohlcv_array_dict_in, window_str, row_pdf)
+                    for window_str in exp_config.TRAIN_WINDOW_CANDIDATE_LIST}
+    reentry_count = 0
+    for candidate_str in ["10Y|4|0.00", "ALL|3|-0.05"]:
+        candidate_dict = design.parse_candidate_dict(candidate_str)
+        candidate_design = design.get_candidate_design(candidate_str)
+        result_dict = run_daily_dict(candidate_design, ohlcv_array_dict_in, date1, date2, data_context_in=data_context,
+                                     engine_in=TrailingStopEngine(design.MAX_CASH_SESSIONS), initial_weight_in=1.0,
+                                     design_file_path_str_in=design.__file__)
+        log_pdf = pd.DataFrame(candidate_design.decision_log_list)
+        aligned_dict = v2_reference.get_aligned_prediction_dict(ohlcv_array_dict_in, retrain_dict[candidate_dict["train_window"]],
+                                                                candidate_dict["threshold_offset"])
+        pos_list = [session_pos_dict[session_date] for session_date in log_pdf["session"]]
+        assert len(pos_list) == len(result_dict["target_weight_arr"]) - 1
+        assert np.allclose(log_pdf["proba"], aligned_dict["proba_arr"][pos_list], atol=1e-10, equal_nan=True), candidate_str
+        assert np.allclose(log_pdf["threshold"], aligned_dict["threshold_arr"][pos_list], atol=1e-10, equal_nan=True), candidate_str
+        assert np.allclose(log_pdf["volatility"], aligned_dict["volatility_arr"][pos_list], atol=1e-12, equal_nan=True), candidate_str
+        reference_bool_arr = v2_reference.get_reentry_bool_arr(aligned_dict["proba_arr"], aligned_dict["threshold_arr"])[pos_list]
+        runner_bool_arr = np.asarray(result_dict["target_weight_arr"][:-1], dtype=float) == 1.0
+        assert (runner_bool_arr == reference_bool_arr).all(), candidate_str
+        assert all(decision_dict["trail_multiple"] == candidate_dict["stop_k"] for decision_dict in result_dict["decision_dict_list"][:-1])
+        assert np.isfinite(result_dict["metric_dict"]["total_return"])
+        reentry_count += int(runner_bool_arr.sum())
+    assert reentry_count > 0, "the comparison needs some re-entry signals"
+    passed(f"runner design == 2.0 model path on {len(pos_list)} sessions x 2 candidates (probability, threshold, "
+           f"volatility, re-entry flag; {reentry_count} re-entry signals)")
 
 
 """
@@ -495,6 +553,7 @@ if __name__ == "__main__":
     test_daily_signal_check()
     test_success_criteria()
     test_end_to_end(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
+    test_runner_design(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_evaluation_helpers()
     test_trial_log()
     print("\nAll exp02 tests passed ✅")

@@ -3,7 +3,7 @@ from so import config
 from so.core.rolling_retrain import TRAIN_WINDOW_MONTH_DICT as SHARED_TRAIN_WINDOW_MONTH_DICT
 
 """
-Experiment Configuration: exp02_stop_reentry_v2 (PROTOCOL.md of this folder)
+Experiment Configuration: exp02_stop_reentry_v2_1 (PROTOCOL.md of this folder)
 
 Every constant specific to this experiment. Shared constants are READ from so.config, never copied. The trial-log
 configuration hash covers both files (so.core.trial_log.get_config_hash_str).
@@ -11,6 +11,9 @@ configuration hash covers both files (so.core.trial_log.get_config_hash_str).
 This version re-runs protocol 1.0 under the current evaluation rules. It is not new evidence. The trading rules, the
 candidate grid, the selection rule, the tie order, the baselines, the costs and the stopping rule are the rules of
 protocol 1.0 (tag pre-port-20261012).
+
+Version 2.1 (2026-10-22) is the runner port: same rules, decide(view) on the trailing-stop engine. Period scores change
+from fresh windows to continuous slices, and a decision's stop parameters apply from its fill (PROTOCOL.md section 10).
 """
 
 """
@@ -18,8 +21,8 @@ Experiment
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp02_stop_reentry_v2"
-PROTOCOL_VERSION = "2.0"
+EXPERIMENT_NAME = "exp02_stop_reentry_v2_1"
+PROTOCOL_VERSION = "2.1"
 
 """
 Rules (PROTOCOL.md of version 1.0, section 5)

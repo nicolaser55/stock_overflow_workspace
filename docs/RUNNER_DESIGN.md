@@ -31,6 +31,16 @@ The view carries a read-only copy of the engine state as of the decision moment 
 decision. The engine never shows the design anything after that moment. A design module names its engine with
 `ENGINE_NAME` (`fractional`, `trailing_stop`, `barrier`).
 
+**Stop parameters (2026-10-22).** The `trail_multiple` and `volatility` of a decision take effect at that decision's
+fill and stay in force until the next decision's fill, including the next session's morning. The last session of a
+window (no decision) keeps the previous ones; before the first decision the engine uses the design module's
+`TRAIL_MULTIPLE` / `VOLATILITY` (none: no stop). The candidate stream (`DailyLoop`) and the replay of recorded
+decisions (`run_engine_decisions_dict`, used for the prior-only path) follow the same rule, so a one-candidate replay
+reproduces that candidate's stream. Until 2026-10-22 the replay applied a session's recorded parameters to its own
+morning as well (the old simulator's timing); that was inconsistent with the stream and, for a design whose
+parameters use intraday data, would apply them to bars before the decision. The old simulator's timing survives only
+in `so.runner.calibration.run_trailing_session_timing_dict`, for engine tests and port calibrations.
+
 An idea that needs new stateful logic gets a new engine (an infrastructure change, reviewed like any other) or runs
 in the slow strict daily mode.
 

@@ -458,7 +458,10 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
                               market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
     """
     Applies one recorded decision per session at the 15:59 fill. The last session sells at the close. The position is
-    carried across the whole window. No view is built and decide() is not called.
+    carried across the whole window. No view is built and decide() is not called. Stop parameters follow the same
+    timing as DailyLoop: a decision's trail_multiple and volatility take effect at its fill and stay in force through
+    the next session's morning; the last session (no decision) keeps the previous ones. A replay of one candidate's
+    recorded decisions therefore reproduces that candidate's stream.
 
     Args:
         ohlcv_array_dict_in (dict): Full bar arrays
@@ -501,13 +504,14 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
         decision_dict = get_decision_dict(decision_dict_list_in[session_pos])
         decision_dict_list.append(dict(decision_dict))
         decision_session_list.append(session_date)
-        # RECORDED k AND VOLATILITY APPLY TO THIS WHOLE SESSION, INCLUDING THE MORNING
-        engine.set_stop_params(decision_dict.get("trail_multiple"), decision_dict.get("volatility"))
+        # THE MORNING RUNS ON THE STOP PARAMETERS OF THE PREVIOUS DECISION (THE SAME RULE AS DailyLoop): A DECISION'S k
+        # AND VOLATILITY APPLY FROM ITS OWN FILL UNTIL THE NEXT DECISION'S FILL, NEVER TO BARS BEFORE THE DECISION
         morning_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, start_idx, decision_idx, session_date)
         if morning_event_dict is not None:
             engine.process_bars(morning_event_dict)
         if not is_last_session:
             target_weight_list.append(float(decision_dict["target_weight"]))
+            engine.set_stop_params(decision_dict.get("trail_multiple"), decision_dict.get("volatility"))
             engine.apply_decision(get_fill_event_dict(ohlcv_array_dict_in, fill_idx, decision_idx, session_idx,
                                                       session_date, end_idx),
                                   decision_dict, float(close_arr[decision_idx]))
