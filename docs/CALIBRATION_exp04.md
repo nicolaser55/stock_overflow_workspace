@@ -1,113 +1,83 @@
 # exp04 runner calibration (4c-a, 2026-10-22)
 
-Machinery-only comparison of `exp04_trend_exit_v2_1` on `so.runner` against the saved v2 development files
-(`store04_experiments/exp04_trend_exit_v2/step01_development_data/`, written 2026-10-13T02:16:52). Protocol 2.1, commit
-`bac7983081d5305942a8cc57adb0a88b51bbb216`, config hash `02dbb9d999`. No rule was changed to make numbers match. The
-holdout was not read.
+Machinery comparison of `exp04_trend_exit_v2_1` on `so.runner` against the saved v2 development files
+(`store04_experiments/exp04_trend_exit_v2/step01_development_data/`, written 2026-10-13T02:16:52). Protocol 2.1.
+Holdout not read. A match is identical trades (date, side, shares, fill price) and equity within
+`so.config.NUMERIC_TOLERANCE` (1e-6). v2 did not save per-candidate decisions or trades; those were reconstructed from
+`experiments/exp04_trend_exit/rules.py` and `simulate_stop_reentry_dict`.
 
-A match is identical trades (date, side, shares, fill price) and equity within `so.config.NUMERIC_TOLERANCE` (1e-6).
-v2 did not save per-candidate decisions or trades. Those were reconstructed from `experiments/exp04_trend_exit/rules.py`
-and `simulate_stop_reentry_dict` on the runner's development bars (`ohlcv.pkl` of this run: 2005-01-03 → 2025-07-17,
-5,166 sessions). The reconstruction of a **fresh** window on the saved v2 fold-0 bounds matches the saved fold-0 score
-of `0.00|1` exactly (−0.002569), so those bars have not been rewritten since v2.
+Protocol 2.0's STOP (+41.51% vs +199.04%) stays the recorded research result. Protocol 2.1 does not replace it.
 
-Run: `scripts/run_development.py experiments/exp04_trend_exit --note "4c calibration"`. Run id
-`exp04_trend_exit_v2_1_20261022030246710390`. Wall time **363.2 s** (6.1 min; streams ~1 min, look-ahead 229.1 s).
-369 validation trial rows, note `4c calibration`, `test_window_touched` false. No summary trial (the runner logs
-candidate-periods only).
+## 4c calibration rerun (fixed periods)
 
-## What matched
+Commit `7a38916` (embargo counted on the NYSE calendar). Config hash `02dbb9d999` (trial-log column). Run:
+`scripts/run_development.py experiments/exp04_trend_exit --note "4c calibration rerun"`. Run id
+`exp04_trend_exit_v2_1_20261022120635892665`. Wall time **484.6 s** (8.1 min; look-ahead 301.3 s). 369 validation
+trial rows, note `4c calibration rerun`, `test_window_touched` false. No summary trial.
+
+### What matches
 
 | Check | Result |
 |---|---|
-| Candidate names | The same 9: `0.00\|1` … `0.05\|10` |
-| Decisions, overlapping sessions | **9 / 9 candidates**, 2,558 sessions 2015-04-20 → 2025-06-18. Target weight 0 / 1 / NaN from `decide(view)` equals the v2 exit / re-entry / keep mapping from current `ma200_dist_pct`. Last session of each span is NaN in both engines. |
-| Trades, same span as the runner | **9 / 9 candidates**. Fractional engine fills equal `simulate_stop_reentry_dict` fills (date, side, shares, price) when both start 2015-03-19 and end 2025-06-18. Fill counts: `0.00\|1` 70, `0.00\|5` 34, `0.00\|10` 24, `0.03\|1` 14, `0.03\|5` 14, `0.03\|10` 12, `0.05\|1` 10, `0.05\|5` 10, `0.05\|10` 10. |
-| Fresh-window fold 0 on v2 bounds | `0.00\|1` last/initial **−0.002569**, equal to the saved `score_data.csv` row. Buy-and-hold on that fresh window is 0.012471; the saved B&H column is 0.012543 (see difference 3). |
-| Look-ahead | **pass**. Cuts 2015-07-08, 2021-04-07, 2024-04-10; every candidate, truncation and perturbation. |
-| Holdout | Untouched. `test_window_touched` false on all 369 rows. VIEW.json `window_start` 2025-08-14. |
+| Period bounds | **41 / 41**. Both 2015-04-20 → 2025-07-17, 2,577 sessions, 41 periods. Period 0 is 2015-04-20 → 2015-07-17 (63 sessions). Last period ends **2025-07-17**. |
+| Buy-and-hold period scores | **369 / 369**. Maximum absolute difference 8.33e-17. Both columns are continuous slices of one B&H stream. Fold 0 is 0.012543. |
+| Decisions | **9 / 9 candidates**, all 2,577 sessions. Target weight 0 / 1 / NaN from `decide(view)` equals the v2 exit / re-entry / keep mapping. |
+| Trades, same span | **8 / 9 candidates**. Fill counts equal `simulate_stop_reentry_dict` except `0.00\|5` (below). |
+| Component (a) | Saved v2 candidate-period scores into `get_runner_selection_pdf` then `get_governing_candidate_dict`: **41 / 41** equal v2 `selection_data.csv`. |
+| Component (b) | Runner engine driven with v2's governing selection and v2's periods: prior-only daily equity **equals v2 within 1e-6** on all 2,577 sessions. |
+| Look-ahead | **pass**. Cuts 2015-08-06, 2021-05-05, 2024-05-08. |
+| Holdout | Untouched. VIEW.json `window_start` 2025-08-14. |
 
-The 200-session distance in `decide(view)` is the same number as `so.features.daily_features.ma200_dist_pct`: decision
-close (15:58) over the mean of the previous 200 complete session closes (15:59). Complete closes are taken as
-`close[start_idx[i+1] − 1]`, because `session_end_idx` on the view is filled only for the immediate previous session.
+The period-gap bug is gone: `get_development_run_period_pdf` fills the NYSE sessions between the last priced bar and
+the holdout start, so the 20-session embargo lands on 2025-07-17, as in v2. Component (b) shows the fractional engine
+plus v2's in-force rules reproduce v2's path. The remaining gaps are not an engine bug.
 
-## Differences
+### Remaining differences (scoring method)
 
-### 1. Period bounds (all 41)
+Saved v2 **strategy** scores are fresh windows. The runner scores a **continuous slice** of each candidate's stream
+(position carried in). Protocol 2.1 names that change. Evidence: a continuous-slice reconstruction of `0.00|1` on the
+saved v2 fold-0 dates is −0.00249865; the saved row is −0.002569; a fresh window on those dates is −0.002569.
 
-First date: runner period 0 is **2015-03-19 → 2015-06-18** (64 sessions); v2 period 0 is **2015-04-20 → 2015-07-17**
-(63 sessions). Last period: runner **2025-03-19 → 2025-06-18**; v2 **2025-04-21 → 2025-07-17**. Zero of 41 share both
-ends. Runner span 2,579 sessions; v2 span 2,577. Overlap 2015-04-20 → 2025-06-18 (2,558 sessions).
+**1. Period scores (0 / 369).** Fold 0, `0.00|1`: runner **−0.00249865** vs saved **−0.002569**, abs **7.035e-5**.
+Maximum absolute difference **0.126724**. Buy-and-hold on the same rows matches (difference 1 is not a bound shift).
+Cause: slice versus fresh window on the same dates.
 
-Cause, in code: `so.runner.periods.get_development_run_period_pdf` builds the fold anchor as the **truncated** price
-sessions (ending 2025-07-17) plus the holdout start 2025-08-14. The ~20 sessions between development end and the window
-start are missing, so `get_development_end_date` counts the 20-session embargo on a gapped calendar and lands on
-**2025-06-18**. v2 called `get_development_period_pdf(span_dict["anchor_session_list"], …)`. That list still has the
-intervening dates (`so.core.development_span.get_development_ohlcv_dict`), so the last validation window ended on
-development end **2025-07-17**. Price bars in this run still go to 2025-07-17; they are just not scored.
+**2. Selection in force (18 / 41).** First mismatch: period_id **3** (2016-01-19 → 2016-04-15), runner `0.03|5`,
+v2 `0.03|1`. Matched period_ids: 0–2, 9–18, 20–23, 40. Period 0 is `0.00|1` in both (first listed candidate).
+Cause: pooled prior-only selection on the scores in difference 1. Component (a) shows the selector itself, given v2's
+scores, reproduces v2's 41 rows. `SELECTION_RULE` is unchanged.
 
-Size: one calendar month of embargo miscount (~20 sessions). Not a leak. Not a rule change.
+**3. Prior-only path (same span, different rules in force).** Runner report: **0.454634 vs buy-and-hold 1.990442**
+over 2015-04-20 → 2025-07-17 (2,577 sessions). v2 saved: **0.415088 vs 1.990442** on the same dates. Buy-and-hold
+matches v2. Equity **levels** and **daily returns** first differ on **2020-03-18** (levels abs 1,033.69; daily-return
+abs 0.011579). Cause: from period 3 the governing candidate is not v2's, so the crash week is traded under a different
+rule. Component (b) on v2's governing selection matches v2's equity; this gap is the selection in difference 2.
 
-### 2. Period scores (0 / 369 by `fold_id`)
+### Other difference (not scoring)
 
-First cell: fold 0, `0.00|1`, runner **+0.013066** vs saved **−0.002569**, abs diff **0.015635**.
+`0.00|5` candidate stream: runner 35 fills vs reconstructed v2 34. First extra fill 2023-03-20, buy 1 share at 393.59
+(leftover-cash rebalance in `FractionalWeightEngine`). Decisions for that candidate still match on every session. The
+row is not in force on v2's path, and component (b) still matches v2 equity, so this fill does not explain difference 3.
 
-Cause: (a) the bounds in difference 1, so fold 0 is a different month; (b) v2's saved **strategy** column is a
-**fresh window** on those dates (`get_equity_total_return_float` of `run_candidate_replay_dict` after
-`get_bar_period_pdf` failed to match the report's periods — that helper used the same gapped anchor, so the continuous
-slice was not selected); (c) the runner scores a **continuous slice** of one stream, including the position carried in.
-A fresh window of `0.00|1` on the saved v2 fold-0 dates, on these bars, is −0.002569 and matches the saved strategy
-column. The saved buy-and-hold column on that row is the continuous B&H slice (0.012543), not the fresh-window B&H
-(0.012471). That mix is in the v2 report (`get_period_return_pdf` for B&H, `get_equity_total_return_float` for the
-candidate). It is not reproduced, and it is not changed.
+### Runner verdict (this span, not a new research STOP)
 
-### 3. Selection in force (15 / 41)
+From `report.md` / `report.json`: **not email-worthy**. Failed: return, consistency, baselines. Look-ahead: pass.
 
-First mismatch: period_id **3**, runner `0.03|5`, v2 `0.03|1`. Matched period_ids: 0, 1, 2, 15–18, 20–23, 25–28.
-
-Cause: pooled prior-only selection on the scores in difference 2. Period 0 is `0.00|1` in both (first listed candidate).
-The later splits are the different quarters, not a different tie-break. `SELECTION_RULE` is the same (last 4, larger
-buffer then larger confirmation).
-
-### 4. Prior-only daily equity and total return
-
-Runner (report.json): **+0.517088 vs buy-and-hold +1.844214** over 2015-03-19 → 2025-06-18 (2,579 sessions).
-v2 saved: **+0.415088 vs +1.990442** over 2015-04-20 → 2025-07-17 (2,577 sessions).
-
-On the 2,558 overlapping dates, equity **levels** first differ on **2015-04-20**: runner 99,926.22 vs v2 100,016.66
-(abs **90.44**). Daily **returns** first differ on **2015-04-22** (abs **4.40e-6**, just above 1e-6).
-
-Cause: the runner path opened on 2015-03-19 (first 10:00 fill of the gapped schedule). v2 opened on 2015-04-20. Same
-0/1/NaN decisions on the overlap do not imply the same share count: the buy was on a different day at a different
-price. Compounding from a different start is the 90-dollar gap on 2015-04-20. The 4.4e-6 daily-return gap on 2015-04-22
-is that share-count difference, not a different signal.
-
-The runner's recorded-decision prior-only path (decide() not called again) is the path in report.json. That is the
-honest path for protocol 2.1. It is not comparable to v2's +41.51% as a research number: the scored sessions differ.
-
-## Unexplained differences
-
-None after the traces above. Decisions match on every overlapping session. Trades match when the two engines are given
-the same span. Score, selection, equity and total-return gaps are the gapped embargo calendar and v2's fresh-window
-scores. Labels blanked near the holdout start are not involved (the distance uses prices only; the last scored runner
-session is 2025-06-18, 20 sessions before 2025-07-17).
-
-## Runner verdict (this span, not a new research STOP)
-
-From `report.md` / `manifest.json`: **not email-worthy**. Failed: return, consistency, baselines. Look-ahead: pass.
-
-- Return: 0.517088 vs 1.844214, below the 90% comparable floor (1.659793). Sharpe 0.350425 vs 0.651900. Max drawdown
-  −0.323222 vs −0.342298.
-- Consistency: ahead of buy-and-hold on 6 of 113 rolling 12-month windows (0.053; need 0.60).
-- Baselines: constant exposure weight 0.829562, daily rebalanced, +1.414475 (path not above). Random timing 1 of 100
+- Return: 0.454634 vs 1.990442, below the 90% comparable floor (1.791397). Sharpe 0.320043 vs 0.679611. Max drawdown
+  −0.323459 vs −0.342106.
+- Consistency: ahead of buy-and-hold on 8 of 113 rolling 12-month windows (0.071; need 0.60).
+- Baselines: constant exposure weight 0.822673, daily rebalanced, +1.502228 (path not above). Random timing 0 of 100
   seeds (need 0.95).
 
-Protocol 2.0's STOP (+41.51% vs +199.04% on 2015-04-20 → 2025-07-17) stays the recorded research result. Protocol 2.1
-does not replace it. No holdout evaluation.
+### Files
 
-## Files
+- Run folder: `store04_experiments/runs/exp04_trend_exit_v2_1_20261022120635892665/`
+- Comparison: `scripts/compare_exp04_calibration.py` (no trial rows; `--components-only` runs (a) and (b) without a run id)
+- Log: `logs/exp04_4c_rerun.out` (empty `.err`)
 
-- Run folder: `store04_experiments/runs/exp04_trend_exit_v2_1_20261022030246710390/` (`report.md`, `report.json`,
-  `lookahead.json`, `manifest.json`).
-- Comparison: `scripts/compare_exp04_calibration.py` (no trial rows).
-- Logs: `logs/exp04_4c.out` (PowerShell UTF-16), empty `logs/exp04_4c.err`.
+## First run (gapped periods, kept)
+
+Run id `exp04_trend_exit_v2_1_20261022030246710390`, commit `bac7983`, note `4c calibration`, 363.2 s, 369 trials.
+Period bounds were 0 / 41 (runner last period ended 2025-06-18) because `get_development_run_period_pdf` counted the
+embargo on truncated bars plus the holdout start. Decisions 9 / 9 on the 2,558 overlapping sessions. That period bug
+is fixed above; this run is not repeated.

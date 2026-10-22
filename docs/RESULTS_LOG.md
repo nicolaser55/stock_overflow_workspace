@@ -835,6 +835,18 @@ In plain words: the 200-session rule on the runner is the same rule. It sells an
 
 Workspace trial log **7,343** rows after this run (369 added), plus the 4,089 legacy trials **11,432**.
 
+*2026-10-22, 4c calibration rerun.* Period-gap fix in `get_development_run_period_pdf` (commit `7a38916`). One
+development run, run id `exp04_trend_exit_v2_1_20261022120635892665`, 484.6 s, 369 validation trials, note
+`4c calibration rerun`, `test_window_touched` false, config hash `02dbb9d999`. **Period bounds 41 / 41**
+(2015-04-20 → 2025-07-17, 2,577 sessions, last period end 2025-07-17). Buy-and-hold scores **369 / 369**. Decisions
+**9 / 9** on all 2,577 sessions. Component (a): v2 scores into the runner selector, governing **41 / 41**. Component
+(b): runner engine with v2 governing and v2 periods, prior-only equity within 1e-6 on 2,577 sessions. Remaining
+strategy-score gap **0 / 369** (fold 0 `0.00|1` −0.00249865 vs saved −0.002569) is slice versus fresh window; selection
+18 / 41 (first split period 3: `0.03|5` vs `0.03|1`); prior-only **0.454634 vs 1.990442** (v2 0.415088 vs 1.990442),
+equity first differs 2020-03-18 because the in-force rule differs. Verdict not email-worthy. Protocol 2.0 STOP
+unchanged. Details: `docs/CALIBRATION_exp04.md`. Workspace trial log **7,712** rows after this run (369 added; 7,712 +
+4,089 legacy = **11,801**).
+
 ## exp04_trend_exit
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp04_trend_exit_v2`. This protocol 1.0 entry is unchanged.
