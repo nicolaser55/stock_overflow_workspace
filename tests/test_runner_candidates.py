@@ -205,6 +205,35 @@ def test_period_rule_uses_existing_code():
     passed("PERIOD_RULE forms periods with get_development_fold_pdf and get_replay_period_pdf")
 
 
+# FUNCTION: A GAPPED BAR LIST STILL COUNTS THE EMBARGO ON THE REAL CALENDAR
+def test_period_rule_counts_embargo_on_gapped_bars():
+    """
+    Bars truncated at the true development end, with the embargo sessions omitted, still end the last period 20
+    sessions before the window start.
+
+    Returns:
+        None
+    """
+    # FULL NYSE CALENDAR; BARS STOP AT DEVELOPMENT END AND SKIP THE GAP
+    calendar_list = list(pd.to_datetime(get_date_range_market_schedule_pdf("2009-01-02", "2010-07-15")["date"]).dt.date)
+    embargo_int = 20
+    window_start = calendar_list[-1]
+    start_idx = calendar_list.index(window_start)
+    development_end = calendar_list[start_idx - embargo_int]
+    gapped_bar_list = [session_date for session_date in calendar_list if session_date <= development_end]
+    assert calendar_list[start_idx - 1] not in gapped_bar_list
+    assert gapped_bar_list[-1] == development_end
+    gapped_design = types.SimpleNamespace(PERIOD_RULE={"embargo_sessions": embargo_int, "train_years": [1]})
+    pd.DataFrame([{"window_id": "wgapped", "status": "active", "start": window_start, "end": window_start,
+                   "session_count": 1, "months_covered": 12.0, "opened_ts": "", "opened_by": "test",
+                   "data_last_session_at_open": window_start, "retired_ts": "", "retire_reason": ""}]).to_csv(
+        paths.HOLDOUT_WINDOWS_FILE_PATH_STR, index=False)
+    period_pdf, fold_pdf = get_development_run_period_pdf(gapped_design, gapped_bar_list)
+    assert len(period_pdf) >= 1 and len(fold_pdf) >= 1
+    assert pd.Timestamp(period_pdf["period_end"].iloc[-1]).date() == development_end
+    passed("PERIOD_RULE counts the embargo on the real calendar when the bar list is gapped")
+
+
 # FUNCTION: NO REGISTERED WINDOW IS A REFUSE WHEN PERIODS ARE NOT INJECTED
 def test_missing_window_is_refused():
     """
@@ -582,6 +611,7 @@ if __name__ == "__main__":
         test_selection_hand_computed_tie()
         test_quarantine_is_refused()
         test_period_rule_uses_existing_code()
+        test_period_rule_counts_embargo_on_gapped_bars()
         test_missing_window_is_refused()
         test_prior_only_matches_manual_engine()
         test_killed_run_resumes()

@@ -189,6 +189,27 @@ full suite (`logs/test_all_4b2b.out`).
 - **Status:** CONTINUE to 4c (template rewritten on the runner; exp04 daily calibration, then exp02). This is
   infrastructure, not an experiment result.
 
+## Infrastructure 4b-1a scoring-method correction (2026-10-22)
+
+Correction of the 4b-1a note in `docs/RUNNER_DESIGN.md` (2026-10-21), not a replacement of any experiment result. No
+new trial. The note had said exp01–exp03 and the old holdout scorer used fresh windows, implying the later ports
+already scored periods as continuous slices. The exp04 v2.1 calibration showed the saved v2 **strategy** scores are
+fresh windows. Checked in the current `design.py` / `report.py` of each remaining port:
+
+- **Ports that change the scoring method (protocol amendment):** exp01, exp02, exp03 (fresh windows by protocol 1.0,
+  already labelled); exp04, exp05, exp06, exp07, exp12, exp13. In exp04–exp07, exp12 and exp13 the report calls
+  `get_equity_total_return_float(run_candidate_replay_dict(...))`. `run_candidate_replay_dict` returns a continuous
+  slice only when the dates match `get_bar_period_pdf`, which builds `anchor_list = truncated bars + holdout start`
+  and therefore does not match the report's `get_development_period_pdf(span_dict["anchor_session_list"], …)` periods.
+  The fall-through is a fresh window. Buy-and-hold in those same reports is `get_period_return_pdf` of one stream (a
+  slice). exp13 aliases exp12's replay. The runner scores continuous slices, so these ports change the method used
+  to select.
+- **Ports that do not change the scoring method:** none of the listed v2 ports. There is no remaining experiment
+  whose saved v2 strategy scores are already continuous slices.
+
+exp04 protocol 2.1 change-log line updated to "runner port; period scores change from fresh windows to continuous
+slices". No holdout evaluation.
+
 ## Port queue, 2026-10-13 (development finished; calibrations and exp01 did not)
 
 The queue in `logs/port_queue_status.csv` ran from 2026-10-13T01:01:15 to 2026-10-13T06:17:33. `logs/port_queue.err` and `logs/port_queue.out` are empty. Trial-log counts below are from `read_trial_log_pdf()` on 2026-10-13. Headline returns of the six finished development notebooks are in those notebooks and are not copied here.

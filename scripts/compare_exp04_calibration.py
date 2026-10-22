@@ -10,6 +10,8 @@ from so.core.continuous_replay import get_period_return_pdf
 from so.core.reentry_simulation import simulate_stop_reentry_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.runner.checkpoint import get_run_folder_str, read_decisions_list, read_score_row_list
+from so.core.development_span import get_development_ohlcv_dict
+from so.runner.engine import get_decision_dict
 from so.runner.loop import run_engine_decisions_dict
 from so.runner.run import get_candidate_engine, get_candidate_token_str
 from so.runner.selection import (get_governing_candidate_dict, get_runner_selection_pdf,
@@ -296,6 +298,114 @@ def get_runner_run_dict(run_id_str_in):
             "session_dict": session_dict, "report_dict": report_dict, "candidate_list": candidate_list}
 
 
+# FUNCTION: DECISION DICTS FROM A TARGET-WEIGHT ARRAY
+def get_decision_list(weight_arr_in):
+    """
+    Args:
+        weight_arr_in (np.ndarray): Target weight per session (NaN = keep)
+
+    Returns:
+        list: Decision dicts
+    """
+    # ONE DECISION PER SESSION
+    return [get_decision_dict(float(weight_float) if np.isfinite(weight_float) else None)
+            for weight_float in np.asarray(weight_arr_in, dtype=float)]
+
+
+# FUNCTION: V2 SELECTION TABLE AS period_id -> CANDIDATE IN FORCE
+def get_v2_governing_dict(v2_dict_in):
+    """
+    Args:
+        v2_dict_in (dict): Saved v2 tables
+
+    Returns:
+        dict: period_id -> candidate
+    """
+    # THE SAVED ROW IS THE CANDIDATE IN FORCE
+    selection_pdf = v2_dict_in["selection_pdf"].copy()
+    id_col_str = "period_id" if "period_id" in selection_pdf.columns else "fold_id"
+    return {int(row[id_col_str]): str(row["candidate"])
+            for _, row in selection_pdf.sort_values(id_col_str).iterrows()}
+
+
+# FUNCTION: COMPONENT (a): V2 SCORES THROUGH THE RUNNER SELECTOR
+def run_component_a_dict(v2_dict_in):
+    """
+    Feeds the saved v2 candidate-period scores into get_runner_selection_pdf and get_governing_candidate_dict.
+
+    Args:
+        v2_dict_in (dict): Saved v2 tables
+
+    Returns:
+        dict: match_int, period_count_int, first_diff, governing_dict
+    """
+    # THE SAME SELECTOR THE RUNNER USES, ON THE SAVED SCORES
+    score_pdf = v2_dict_in["score_pdf"].copy()
+    if "fold_id" not in score_pdf.columns and "period_id" in score_pdf.columns:
+        score_pdf["fold_id"] = score_pdf["period_id"]
+    period_pdf = v2_dict_in["period_pdf"]
+    candidate_list = list(exp04_design.CANDIDATE_LIST)
+    selection_pdf = get_runner_selection_pdf(score_pdf, exp04_design)
+    governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
+    v2_governing_dict = get_v2_governing_dict(v2_dict_in)
+    period_id_list = [int(period_id) for period_id in period_pdf.sort_values("period_id")["period_id"]]
+    match_int = 0
+    first_diff = None
+    for period_id in period_id_list:
+        runner_candidate_str = governing_dict.get(period_id)
+        v2_candidate_str = v2_governing_dict.get(period_id)
+        if runner_candidate_str == v2_candidate_str:
+            match_int += 1
+        elif first_diff is None:
+            first_diff = {"first_label": period_id, "left": runner_candidate_str, "right": v2_candidate_str,
+                          "abs_diff": np.nan, "cause_str": "candidate"}
+    return {"match_int": match_int, "period_count_int": len(period_id_list), "first_diff": first_diff,
+            "governing_dict": governing_dict, "v2_governing_dict": v2_governing_dict}
+
+
+# FUNCTION: COMPONENT (b): RUNNER ENGINE ON V2 GOVERNING AND V2 PERIODS
+def run_component_b_dict(v2_dict_in, ohlcv_array_dict_in, daily_pdf_in):
+    """
+    Drives FractionalWeightEngine with v2's candidate-in-force and v2's period bounds. Compares daily equity to the
+    saved prior-only path within NUMERIC_TOLERANCE.
+
+    Args:
+        v2_dict_in (dict): Saved v2 tables
+        ohlcv_array_dict_in (dict): Bars covering the v2 span
+        daily_pdf_in (pd.DataFrame): Daily features aligned to every session of those bars
+
+    Returns:
+        dict: equity_diff, match_bool, runner_equity_pdf
+    """
+    # V2 SPAN, V2 GOVERNING, RUNNER ENGINE
+    period_pdf = v2_dict_in["period_pdf"]
+    date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
+    governing_dict = get_v2_governing_dict(v2_dict_in)
+    candidate_decision_dict = {}
+    window_date_list = None
+    for candidate_str in exp04_design.CANDIDATE_LIST:
+        replay_dict = get_v2_candidate_replay_dict(ohlcv_array_dict_in, daily_pdf_in, date1, date2, candidate_str)
+        candidate_decision_dict[candidate_str] = get_decision_list(replay_dict["target_weight_arr"])
+        window_date_list = replay_dict["window_date_list"]
+    prior_only_dict = run_prior_only_from_decisions_dict(
+        ohlcv_array_dict_in, date1, date2, window_date_list, candidate_decision_dict, governing_dict, period_pdf,
+        dead_band_in=float(exp04_design.DEAD_BAND), initial_weight_in=float(exp04_design.INITIAL_WEIGHT),
+        engine_in=get_candidate_engine(exp04_design), design_module_in=exp04_design)
+    runner_equity_pdf = prior_only_dict["daily_equity_pdf"].copy()
+    runner_equity_pdf["date"] = runner_equity_pdf["date"].map(get_day)
+    v2_equity_pdf = v2_dict_in["equity_pdf"]
+    merged_pdf = runner_equity_pdf.merge(v2_equity_pdf, on="date", suffixes=("_runner", "_v2"))
+    if len(merged_pdf) != len(v2_equity_pdf) or len(runner_equity_pdf) != len(v2_equity_pdf):
+        return {"equity_diff": {"first_label": None, "left": len(runner_equity_pdf), "right": len(v2_equity_pdf),
+                                "abs_diff": np.nan, "cause_str": "length", "merged_int": len(merged_pdf)},
+                "match_bool": False, "runner_equity_pdf": runner_equity_pdf, "merged_pdf": merged_pdf}
+    equity_diff = get_first_diff_dict(merged_pdf["equity_runner"].to_numpy(dtype=float),
+                                      merged_pdf["equity_v2"].to_numpy(dtype=float),
+                                      list(merged_pdf["date"]), "component b equity")
+    return {"equity_diff": equity_diff, "match_bool": equity_diff is None, "runner_equity_pdf": runner_equity_pdf,
+            "merged_pdf": merged_pdf}
+
+
 # FUNCTION: PRINT ONE DIFFERENCE LINE
 def print_diff_line(title_str_in, diff_dict_in):
     """
@@ -317,15 +427,43 @@ def print_diff_line(title_str_in, diff_dict_in):
 
 # PARSE THE COMMAND
 if __name__ == "__main__":
-    # ONE RUN ID
+    # RUN ID IS OPTIONAL WHEN ONLY THE COMPONENT CHECKS ARE REQUESTED
     parser = argparse.ArgumentParser(description="Compare an exp04 runner run to the saved v2 development files.")
-    parser.add_argument("run_id", help="store04_experiments/runs/<run_id>")
+    parser.add_argument("run_id", nargs="?", default=None, help="store04_experiments/runs/<run_id>")
+    parser.add_argument("--components-only", action="store_true",
+                        help="Selection from v2 scores and engine path from v2 governing; no runner-run compare")
     arg_dict = parser.parse_args()
     v2_dict = get_v2_saved_dict()
-    runner_dict = get_runner_run_dict(arg_dict.run_id)
-    ohlcv_array_dict = runner_dict["ohlcv_array_dict"]
+    print("COMPONENT a: v2 scores into runner selection")
+    component_a_dict = run_component_a_dict(v2_dict)
+    print(f"component a selection {component_a_dict['match_int']} / {component_a_dict['period_count_int']}")
+    print_diff_line("component a governing vs v2 selection_data.csv", component_a_dict["first_diff"])
+    runner_dict = None
+    ohlcv_array_dict = None
+    daily_pdf = None
+    if arg_dict.run_id:
+        runner_dict = get_runner_run_dict(arg_dict.run_id)
+        ohlcv_array_dict = runner_dict["ohlcv_array_dict"]
+    if ohlcv_array_dict is None:
+        print("loading development bars for component b")
+        span_dict = get_development_ohlcv_dict(int(exp04_design.PERIOD_RULE["embargo_sessions"]))
+        ohlcv_array_dict = span_dict["ohlcv_array_dict"]
+        print("development_end", span_dict["development_end"], "last_price", span_dict["last_price_date"])
     print("ohlcv", ohlcv_array_dict["session_date_list"][0], "->", ohlcv_array_dict["session_date_list"][-1],
           "n", len(ohlcv_array_dict["session_date_list"]))
+    print("building daily features for component b")
+    daily_pdf = get_daily_feature_pdf(ohlcv_array_dict)
+    print("COMPONENT b: runner engine with v2 governing and v2 periods")
+    component_b_dict = run_component_b_dict(v2_dict, ohlcv_array_dict, daily_pdf)
+    if component_b_dict["match_bool"]:
+        print(f"MATCH component b prior-only equity {len(component_b_dict['runner_equity_pdf'])} sessions within {TOLERANCE_FLOAT}")
+    else:
+        print_diff_line("component b prior-only equity vs v2", component_b_dict["equity_diff"])
+    if arg_dict.components_only:
+        print("done")
+        raise SystemExit(0)
+    if runner_dict is None:
+        raise SystemExit("run_id is required unless --components-only")
     v2_period_pdf = v2_dict["period_pdf"]
     runner_period_pdf = runner_dict["period_pdf"]
     print("v2 span", v2_period_pdf["period_start"].iloc[0], "->", v2_period_pdf["period_end"].iloc[-1],
@@ -342,14 +480,8 @@ if __name__ == "__main__":
         print("DIFF period bounds first_date",
               f"runner {runner_period_pdf['period_start'].iloc[0]}->{runner_period_pdf['period_end'].iloc[0]}",
               f"v2 {v2_period_pdf['period_start'].iloc[0]}->{v2_period_pdf['period_end'].iloc[0]}")
-        print("CAUSE period builder: so.runner.periods.get_development_run_period_pdf rebuilds the anchor from the "
-              "truncated price sessions plus the holdout start, so the 20-session embargo is counted on a gapped "
-              "calendar (the sessions between development_end and the window start are missing). v2 called "
-              "get_development_period_pdf on span_dict['anchor_session_list'], which still has those dates. "
-              "Last scored session runner", runner_period_pdf["period_end"].iloc[-1],
-              "v2", v2_period_pdf["period_end"].iloc[-1], ".")
-    print("building daily features on the runner bars")
-    daily_pdf = get_daily_feature_pdf(ohlcv_array_dict)
+        print("CAUSE period bounds still differ. Last scored session runner",
+              runner_period_pdf["period_end"].iloc[-1], "v2", v2_period_pdf["period_end"].iloc[-1], ".")
     v2_date1, v2_date2 = v2_period_pdf["period_start"].iloc[0], v2_period_pdf["period_end"].iloc[-1]
     runner_date1, runner_date2 = runner_period_pdf["period_start"].iloc[0], runner_period_pdf["period_end"].iloc[-1]
     overlap_date1 = max(v2_date1, runner_date1)
@@ -420,7 +552,7 @@ if __name__ == "__main__":
                                          v2_cand_score_pdf["total_return"].to_numpy(dtype=float)[:n_int],
                                          list(runner_cand_score_pdf["fold_id"].astype(int))[:n_int],
                                          f"score {candidate_str}")
-        print_diff_line(f"period scores {candidate_str} (aligned by fold_id, bounds differ)", score_diff)
+        print_diff_line(f"period scores {candidate_str} (aligned by fold_id)", score_diff)
     # SELECTION IN FORCE
     runner_gov_list = [runner_dict["governing_dict"][int(period_id)] for period_id in runner_period_pdf.sort_values("period_id")["period_id"]]
     v2_gov_list = [str(row["candidate"]) for _, row in v2_dict["selection_pdf"].sort_values("period_id").iterrows()]

@@ -82,8 +82,14 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Candidates and selection:** each candidate is its own stream; periods, pooled prior-only selection and the
   carried position are done once in shared code (no copies per experiment). Candidate-period scores are slices of
   each candidate's continuous stream (result over the period's dates, including any position carried in), minus
-  buy-and-hold sliced the same way. exp01-exp03 and the old holdout scorer used fresh windows; their ports are
-  labelled protocol amendments, not pure re-runs. (Decided 2026-10-21.)
+  buy-and-hold sliced the same way. Saved v2 **strategy** period scores are fresh windows for every listed port:
+  exp01–exp03 and the old holdout scorer by protocol 1.0; exp04, exp05, exp06, exp07, exp12 and exp13 because
+  `run_candidate_replay_dict` fell through to a new simulation when `get_bar_period_pdf` (truncated bars plus the
+  holdout start, embargo counted on that gapped calendar) did not match the report's periods. Those reports' buy-and-hold
+  column is a continuous slice. Runner ports of exp01–exp07, exp12 and exp13 therefore change the strategy scoring
+  method from fresh windows to continuous slices and are protocol amendments, not pure re-runs. None of those ports
+  keeps the saved scoring method. (Decided 2026-10-21; scoring-method list corrected 2026-10-22 from the exp04
+  calibration.)
 - **Run guards:** a run refuses uncommitted changes in the code it uses, a missing or stale `VIEW.json`, and the
   quarantine root; a resume refuses a checkpoint from a different commit or code hash. (Decided 2026-10-21.)
 - **Baselines:** buy-and-hold, constant exposure at the same average weight (daily rebalanced), and random timing

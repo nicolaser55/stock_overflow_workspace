@@ -1,17 +1,20 @@
+from datetime import timedelta
 import pandas as pd
 # IMPORT THE DEVELOPMENT BOUNDARY, THE PERIOD BUILDERS AND THE QUARANTINE REFUSAL
 from so.paths import check_quarantine_refused
 from so.core.holdout import get_active_holdout_window_dict, get_date, NO_WINDOW_MESSAGE_STR
 from so.core.schedule import get_development_fold_pdf
 from so.core.continuous_replay import get_replay_period_pdf
+from so.core.datetime_utils import get_date_range_market_schedule_pdf
 
 """
 Development Periods (infrastructure step 4b-1a)
 
 The development runner forms candidate periods from the design's PERIOD_RULE with the existing schedule code
-(get_development_fold_pdf, then get_replay_period_pdf). It refuses the quarantine root (so.paths.check_quarantine_refused):
-holdout evaluation is run_holdout_dict. Bars must end strictly before the active holdout start. No window registered
-is a hard refuse.
+(get_development_fold_pdf, then get_replay_period_pdf). The embargo is counted on the real NYSE session calendar,
+including the sessions between the last priced bar and the holdout start, so development periods end embargo_sessions
+before the window start. It refuses the quarantine root (so.paths.check_quarantine_refused): holdout evaluation is
+run_holdout_dict. Bars must end strictly before the active holdout start. No window registered is a hard refuse.
 """
 
 
@@ -61,11 +64,45 @@ def check_development_bars(session_date_list_in, window_dict_in):
     return window_start
 
 
+# FUNCTION: SESSION CALENDAR FOR THE EMBARGO, INCLUDING A GAP AFTER THE LAST BAR
+def get_anchor_session_list(session_date_list_in, window_start_in):
+    """
+    Price sessions plus the NYSE sessions from the day after the last bar through the holdout start. The embargo is
+    counted on that calendar. Prices of the filled dates are not required.
+
+    Args:
+        session_date_list_in (list): Sessions the bars actually contain
+        window_start_in: Holdout start
+
+    Returns:
+        list: Sorted session dates that include the window start
+    """
+    # FILL THE GAP WITH THE REAL SESSION CALENDAR, NOT A JUMP TO THE WINDOW START
+    session_date_list = [get_date(session_date) for session_date in session_date_list_in]
+    window_start = get_date(window_start_in)
+    seen_set = set(session_date_list)
+    anchor_session_list = list(session_date_list)
+    gap_start = session_date_list[-1] + timedelta(days=1)
+    if gap_start <= window_start:
+        schedule_pdf = get_date_range_market_schedule_pdf(str(gap_start), str(window_start))
+        if schedule_pdf is not None and len(schedule_pdf):
+            for session_date in schedule_pdf["date"]:
+                session_day = get_date(session_date)
+                if session_day not in seen_set:
+                    anchor_session_list.append(session_day)
+                    seen_set.add(session_day)
+    if window_start not in seen_set:
+        anchor_session_list.append(window_start)
+    return anchor_session_list
+
+
 # FUNCTION: DEVELOPMENT PERIODS FROM PERIOD_RULE
 def get_development_run_period_pdf(design_module_in, session_date_list_in):
     """
-    Validation quarters anchored on the development end (embargo before the holdout start), made non-overlapping.
-    The holdout start is appended as a date so the embargo index is defined; its prices are not required.
+    Validation quarters anchored on the development end (embargo sessions before the holdout start), made
+    non-overlapping. The embargo is counted on the real session calendar even when the bar list is truncated and
+    omits the sessions between development end and the window. The window start is a date only; its prices are not
+    required.
 
     Args:
         design_module_in (module): Design (PERIOD_RULE)
@@ -82,8 +119,8 @@ def get_development_run_period_pdf(design_module_in, session_date_list_in):
     rule_dict = get_period_rule_dict(design_module_in)
     session_date_list = [get_date(session_date) for session_date in session_date_list_in]
     window_start = check_development_bars(session_date_list, window_dict)
-    # THE ANCHOR LIST IS THE PRICE SESSIONS PLUS THE WINDOW START
-    anchor_session_list = session_date_list + [window_start]
+    # THE ANCHOR LIST FILLS THE EMBARGO GAP ON THE NYSE CALENDAR
+    anchor_session_list = get_anchor_session_list(session_date_list, window_start)
     fold_pdf = get_development_fold_pdf(anchor_session_list, int(rule_dict["embargo_sessions"]), list(rule_dict["train_years"]))
     if fold_pdf.empty:
         raise ValueError("the design has no development period on these sessions.")
