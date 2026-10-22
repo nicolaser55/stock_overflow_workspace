@@ -820,6 +820,8 @@ Mathematically: the prior-only total return is 0.415088 and buy-and-hold is 1.99
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847826, the constant-exposure hold is **1.687609**. The prior-only path, 0.415088, is 1.272521 below that held-once blend. The path was already below both random medians. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.587718**. The path is 1.172630 below it. No new run. No new trial.
 
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The STOP result is not reversed by this. The runner port re-runs the same rules under the agreed continuous-slice method (`docs/CALIBRATION_exp04.md`).
+
 ## exp04_trend_exit_v2_1
 
 **Protocol 2.1. Status: machinery calibration, not a new research result.** Label: machinery only, runner port, no rule change. Pre-registered in commit `bac7983` (2026-10-22). Config hash `02dbb9d999`. One development run through `scripts/run_development.py`, run id `exp04_trend_exit_v2_1_20261022030246710390`, 2026-10-22T03:02:46 → 03:08:20 (363.2 s). 369 validation trials, note `4c calibration`, `test_window_touched` false on every row. No summary trial (the runner logs candidate-periods only). Protocol 2.0's STOP stays the recorded evidence. Details: `docs/CALIBRATION_exp04.md`.
@@ -926,6 +928,8 @@ Mathematically: the prior-only total return is 1.425930 and buy-and-hold is 1.99
 
 *2026-10-15, exposure check.* No new run. No new trial. This protocol already includes a constant-exposure baseline. The saved figure is **1.701911** at weight 0.854666. The prior-only path, 1.425930, is 0.275981 below it. The one-entry blend used for the other experiments, at the same weight, is 1.701224, which is 0.000687 from that saved simulation. The stopping rule used the saved simulation. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight at 0.854666 is **1.605042**. The path is 0.179112 below it, and 0.275294 below the held-once blend 1.701224. No new run. No new trial.
 
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The STOP result is not reversed by this. The runner port re-runs the same rules under the agreed continuous-slice method.
+
 ## exp05_vol_scaled_exposure
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp05_vol_scaled_exposure_v2`. This protocol 1.0 entry is unchanged.
@@ -1029,6 +1033,8 @@ Mathematically: the prior-only total return is 1.322490 and buy-and-hold is 1.99
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.694876, the held-once blend is **1.383159**. The prior-only path, 1.322490, is 0.060669 below that blend. The path beats the saved random-exit median 0.980501 and the saved random-reentry median 1.137882. Those two wins are wins over those medians. The verdict stays STOP. *2026-10-16.* The 2026-10-15 word "below", and the sentence that the constant hold is higher than the path, refer to the held-once blend. The daily-rebalanced weight is **1.219744**, and the path is 0.102746 above it. No new run. No new trial. The verdict stays STOP.
 
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The STOP result is not reversed by this. The runner port re-runs the same rules under the agreed continuous-slice method.
+
 ## exp06_capped_regret_reentry
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp06_capped_regret_reentry_v2`. This protocol 1.0 entry is unchanged.
@@ -1125,6 +1131,8 @@ In plain words: over these ten years the account that stayed in SPY almost tripl
 Mathematically: the prior-only total return is 0.409471 and buy-and-hold is 1.990442, so the difference of total returns is −1.580971. The annualized log excess is −0.072794 per year. Its 6-month block interval [−0.126870, −0.028487] does not contain 0.
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.847438, the constant-exposure hold is **1.686836**. The prior-only path, 0.409472, is 1.277365 below that held-once blend. The saved random-reentry median is 0.274653 and the saved random-exit median is 1.653326. The path beats the random-reentry median. The held-once blend and the random-exit median are both above the path. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.586737**. The path is 1.177265 below it. No new run. No new trial.
+
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The STOP result is not reversed by this. The runner port re-runs the same rules under the agreed continuous-slice method.
 
 ## exp07_warning_lights_exit
 
@@ -1366,6 +1374,8 @@ Mathematically: the prior-only total return is 1.265069 and buy-and-hold is 1.99
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.918090, the constant-exposure hold is **1.827470**. The prior-only path, 1.265069, is 0.562401 below that held-once blend. The verdict stays STOP. *2026-10-16.* The daily-rebalanced weight is **1.769182**. The path is 0.504113 below it. No new run. No new trial.
 
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The STOP result is not reversed by this. The runner port re-runs the same rules under the agreed continuous-slice method.
+
 ## exp12_vix_fear_reentry
 
 *2026-10-14.* The version 2.0 re-run is recorded in `exp12_vix_fear_reentry_v2`. This protocol 1.0 entry is unchanged.
@@ -1515,6 +1525,8 @@ In plain words: on this shorter span the frozen rule, sell on the textbook trend
 Mathematically: the prior-only total return is 2.738521 and buy-and-hold is 1.990442, so the difference of total returns is +0.748079. The annualized log excess is +0.021607 per year. Its 6-month block interval [−0.010373, 0.061984] contains 0.
 
 *2026-10-15, exposure check.* No new run. No new trial. At the saved time in the market 0.939053, the constant-exposure hold is **1.869197**. The prior-only path, 2.738521, is 0.869324 above that held-once blend. The 6-month interval still contains 0. The status stays a candidate result pending review. Protocol 1.0's verdict, E1M1 IS NOT ROBUST, stands. No holdout evaluation was run. *2026-10-16.* The daily-rebalanced weight is **1.824818**. The path is 0.913703 above it as well. No new run. No new trial. The status is unchanged.
+
+*2026-10-22, scoring method.* The saved candidate-period **strategy** scores are fresh windows, not the intended continuous slices: `get_bar_period_pdf` built the embargo on a gapped calendar (truncated bars plus the holdout start), so `run_candidate_replay_dict` did not match the report's periods and simulated each quarter from a fresh start. Selections and the prior-only path were built on those scores. The recorded status (candidate result pending review) is not reversed by this, and protocol 1.0's E1M1 IS NOT ROBUST stands. The runner port re-runs the same rule under the agreed continuous-slice method.
 
 ## exp13_e1m1_robustness
 

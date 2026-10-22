@@ -53,11 +53,15 @@ matches v2. Equity **levels** and **daily returns** first differ on **2020-03-18
 abs 0.011579). Cause: from period 3 the governing candidate is not v2's, so the crash week is traded under a different
 rule. Component (b) on v2's governing selection matches v2's equity; this gap is the selection in difference 2.
 
-### Other difference (not scoring)
+### Other difference (leftover-cash rebalance, not a runner bug)
 
-`0.00|5` candidate stream: runner 35 fills vs reconstructed v2 34. First extra fill 2023-03-20, buy 1 share at 393.59
-(leftover-cash rebalance in `FractionalWeightEngine`). Decisions for that candidate still match on every session. The
-row is not in force on v2's path, and component (b) still matches v2 equity, so this fill does not explain difference 3.
+`0.00|5` candidate stream: runner 35 fills vs reconstructed v2 34 from `simulate_stop_reentry_dict`. First extra fill
+2023-03-20, buy 1 share at 393.59. `simulate_fractional_exposure_dict` on the same continuous span (2015-04-20 →
+2025-07-17) with the same 0 / 1 / NaN targets also records **35** fills, including that 1-share buy (`reason`
+rebalance, `target_weight` 1.0). `FractionalWeightEngine` matches the shared fractional simulator: leftover cash after
+fees is spent when the target is full weight. The stop-reentry simulator does not. Decisions for that candidate still
+match on every session. The row is not in force on v2's path, and component (b) still matches v2 equity, so this fill
+does not explain difference 3.
 
 ### Runner verdict (this span, not a new research STOP)
 
