@@ -60,11 +60,17 @@ def get_source_join_ts_series(frame_pdf_in):
     """
     # THE SNAPSHOT BAR IS THE JOIN KEY
     if "timestamp" in frame_pdf_in.columns:
-        ts_series = pd.to_datetime(frame_pdf_in["timestamp"])
+        raw_series = frame_pdf_in["timestamp"]
     elif "decision_ts" in frame_pdf_in.columns:
-        ts_series = pd.to_datetime(frame_pdf_in["decision_ts"])
+        raw_series = frame_pdf_in["decision_ts"]
     else:
         raise ValueError("a row source needs timestamp or decision_ts.")
+    # STORED STRINGS CARRY -05:00 AND -04:00 (WINTER AND SUMMER): PARSE THEM THROUGH UTC, NOT AS MIXED OBJECTS
+    if not pd.api.types.is_datetime64_any_dtype(raw_series):
+        first_str = str(raw_series.dropna().iloc[0]) if raw_series.notna().any() else ""
+        if len(first_str) > 6 and first_str[-6] in "+-" and first_str[-3] == ":":
+            return pd.to_datetime(raw_series, utc=True).dt.tz_convert("America/New_York")
+    ts_series = pd.to_datetime(raw_series)
     if getattr(ts_series.dt, "tz", None) is None:
         return ts_series.dt.tz_localize("America/New_York")
     return ts_series.dt.tz_convert("America/New_York")
