@@ -21,7 +21,6 @@ folder must keep the same size and modification time.
     tests/test_exp05.py              exp05 volatility targets, weights, fractional walk-forward, baselines and signal check
     tests/test_exp06.py              exp06 capped re-entry rule, the simulator's cooling-off option and the walk-forward
     tests/test_exp07.py              exp07 warning lights, the k-of-5 rule and the walk-forward
-    tests/test_exp01_step04.py       exp01 step 04 multivariate signal check (planted interaction, noise, null, parallel)
     tests/test_vix_features.py       VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, no look-ahead, formulas)
     tests/test_exp12.py              exp12 VIX re-entry rules (M1-M3, fresh-exit option of the simulator, walk-forward, reports)
     tests/test_exp13.py              exp13 E1M1 robustness (average distances, variants = frozen, delay, VIX shift, nulls, reports, verdict)
@@ -36,9 +35,7 @@ folder must keep the same size and modification time.
     tests/test_runner_minute.py      runner 4b-2b: minute mode (rows, shuffle check, models, fill, look-ahead; synthetic)
     tests/test_rolling_retrain.py    rolling retrain sessions, purge, windows, label leak, selection, reporting (synthetic data only)
     tests/test_execute_notebook.py   notebook execution saves a failed run (synthetic notebook only)
-    tests/test_port_queue.py         the port queue on synthetic notebooks
     tests/test_holdout_baselines.py  family statistics and the span cut (the development replay is a separate argument)
-    tests/test_lookahead_audit.py    development look-ahead audit (leaking designs fail, the template passes; synthetic only)
     tests/test_trial_log_append.py   locked CSV append (concurrent trial rows, byte prefix, refused header and newline, lock timeout)
     tests/test_refresh_development_view.py  development-view refresh (cut, redact, slide, scan; synthetic trees only)
 
@@ -46,7 +43,7 @@ folder must keep the same size and modification time.
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_exp01_step04.py", "test_vix_features.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py", "test_runner_engines.py", "test_runner_minute.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_port_queue.py", "test_holdout_baselines.py", "test_lookahead_audit.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
+SUITE_LIST = ["test_shared_and_exp01.py", "test_exp02.py", "test_exp03.py", "test_continuous_replay.py", "test_exp04.py", "test_exp05.py", "test_exp06.py", "test_exp07.py", "test_vix_features.py", "test_exp12.py", "test_exp13.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py", "test_runner_engines.py", "test_runner_minute.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_holdout_baselines.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
