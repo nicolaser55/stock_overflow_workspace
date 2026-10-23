@@ -1,3 +1,3 @@
 """
-exp01_minute_entry_v2: minute entry with a weekly refit, re-run under the current rules. Protocol: experiments/exp01_minute_entry/PROTOCOL.md version 2.0.
+exp01_minute_entry: minute entries with a model-chosen take-profit distance. Protocol: experiments/exp01_minute_entry/PROTOCOL.md.
 """

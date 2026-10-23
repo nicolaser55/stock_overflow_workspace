@@ -1,7 +1,7 @@
 """
 Workspace Tests
 
-Run from the workspace root:   python tests/test_shared_and_exp01.py   (or python tests/run_all_tests.py)
+Run from the workspace root:   python tests/test_pipeline_shared.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required. Every test prints ✅ or raises.)
 
 What is verified:
@@ -10,9 +10,7 @@ What is verified:
     3. Holding window: entry day = day 1, time limit at the close of the 10th session, NA when the data ends.
     4. The TSBAR target matrix and the simulator produce the same trade for the same decision.
     5. No look-ahead: TSCTX rows are identical when computed on data truncated just after the row.
-    6. Walk-forward schedule: embargo gaps and window lengths.
-    7. Uniqueness weights, costs, breakeven and the signal check on planted / random signals.
-    8. End-to-end fold run on synthetic data (fit -> policy -> simulation -> baselines).
+    6. Costs and breakeven.
     9. Snapshot features (steps 01-03): snapshot k only contains bars 0..k, confirmed swings never change, TSIND has 43
        fields, TSSEG rows are complete.
    10. Plot / buy evaluation utilities run without errors (figures are built but not displayed).
@@ -47,14 +45,8 @@ from so.core.trade_execution import get_ohlcv_array_dict, resolve_barrier_exit_d
                             get_expected_net_return_arr, get_trade_result_str
 from so.features.barrier_labels import get_date_TSBAR_pdf, get_date_market_open_ts_dict, add_TSBAR_label_cols, parse_TSBAR_cell_pdf, get_delta_col_str, format_TSBAR_pdf
 from so.features.context_features import add_cum_max_col, get_session_summary_pdf, get_relative_volume_reference_pdf, get_date_TSCTX_pdf
-from experiments.exp01_minute_entry import config as exp_config
-from experiments.exp01_minute_entry.model_dataset import apply_sampling_pdf, get_uniqueness_weight_arr, encode_feature_pdf
 from so.core.backtest_simulation import simulate_decision_trading_dict, simulate_buy_and_hold_dict
-from experiments.exp01_minute_entry.signal_check import get_signal_check_pdf, get_signal_check_verdict_dict, get_session_shifted_feature_pdf, \
-                                                         get_null_signal_count_pdf
 from so.core.schedule import get_walk_forward_fold_pdf
-from experiments.exp01_minute_entry import walk_forward
-from experiments.exp01_minute_entry.walk_forward import get_fold_pdf, run_walk_forward_fold_dict, run_window_with_baseline_dict, get_window_pdf
 from synthetic_data import get_synthetic_ohlcv_pdf
 import plotly.graph_objects as go
 from so.features.ohlcv_data_utils import ohlcv_pdf_to_PA_tf_ohlcv_pdf_list
@@ -101,7 +93,8 @@ def test_config_defaults():
     assert (config.PA_ATR_PERIOD, config.PA_SMOOTH_WINDOW, config.PA_EXTREMA_ORDER, config.PA_COMPOSITE_BIAS, config.PA_TREND_SLOPE_LIMIT) == (10, 4, 3, 0.4, 0.01)
     assert (config.STOCH_K_WINDOW, config.STOCH_D_WINDOW, config.RSI_WINDOW, config.BB_WINDOW, config.DC_WINDOW) == (14, 3, 14, 20, 20)
     # ASSERT THE EMBARGO COVERS THE HOLDING PERIOD
-    assert exp_config.EMBARGO_TRADING_DAYS >= config.MAX_HOLD_TRADING_DAYS
+    from experiments.exp01_minute_entry import config as exp01_config
+    assert exp01_config.EMBARGO_TRADING_DAYS >= config.MAX_HOLD_TRADING_DAYS
     # ASSERT EVERY CATEGORICAL FEATURE HAS LEVELS
     for col_str in config.get_feature_col_str_list(["categorical"]):
         assert col_str in config.CATEGORY_LEVEL_DICT, f"{col_str} has no category levels"
@@ -273,213 +266,21 @@ def test_context_no_lookahead(ohlcv_pdf_in, market_schedule_pdf_in):
 6. Walk-Forward Schedule
 """
 
-# FUNCTION: TEST THE WALK-FORWARD SCHEDULE
-def test_walk_forward_schedule():
-    # BUILD A REAL CALENDAR FROM 2005 TO 2026
-    session_date_list = list(pd.to_datetime(get_date_range_market_schedule_pdf("2005-01-03", "2026-08-13")["date"]).dt.date)
-    fold_pdf = get_fold_pdf(session_date_list)
-    # COLLECT THE SESSION POSITIONS
-    position_dict = {d: i for i, d in enumerate(session_date_list)}
-    # ITERATE OVER THE FOLDS
-    for _, fold_row in fold_pdf.iterrows():
-        # ASSERT THE EMBARGO GAPS (STRICTLY MORE THAN THE HOLDING PERIOD BETWEEN WINDOWS)
-        assert position_dict[fold_row["valid_start"]] - position_dict[fold_row["train_end"]] - 1 == exp_config.EMBARGO_TRADING_DAYS
-        assert position_dict[fold_row["test_start"]] - position_dict[fold_row["valid_end"]] - 1 == exp_config.EMBARGO_TRADING_DAYS
-        assert fold_row["refit_end"] == fold_row["valid_end"]
-        # ASSERT THE WINDOW ORDER
-        for train_years in exp_config.TRAIN_WINDOW_YEARS_LIST:
-            assert fold_row[f"train_start_{train_years}y"] < fold_row["train_end"] < fold_row["valid_start"] <= fold_row["valid_end"] < fold_row["test_start"] <= fold_row["test_end"]
-    # ASSERT THE LATEST TEST WINDOW ENDS ON THE LAST SESSION AND IS ABOUT 3 MONTHS LONG
-    assert fold_pdf["test_end"].iloc[-1] == session_date_list[-1]
-    assert 55 <= position_dict[fold_pdf["test_end"].iloc[-1]] - position_dict[fold_pdf["test_start"].iloc[-1]] + 1 <= 70
-    # ASSERT THE FIRST FOLD LEAVES 10 YEARS OF TRAINING DATA
-    assert fold_pdf["train_start_10y"].iloc[0] >= session_date_list[0]
-    passed(f"walk-forward schedule ({len(fold_pdf)} folds, first test {fold_pdf['test_start'].iloc[0]}, embargo {exp_config.EMBARGO_TRADING_DAYS} sessions)")
 
 """
 7. Weights, Sampling And Signal Check
 """
 
-# FUNCTION: TEST THE UNIQUENESS WEIGHTS
-def test_uniqueness_weights(ohlcv_array_dict_in):
-    # DEFINE THREE TRADES: TWO OVERLAPPING, ONE ALONE
-    ts_index = ohlcv_array_dict_in["timestamp_index"]
-    test_pdf = pd.DataFrame({"entry_ts": [ts_index[100], ts_index[100], ts_index[1000]], "exit_bar_count_0.0010": [9, 9, 9]})
-    weight_arr = get_uniqueness_weight_arr(test_pdf, 0.001, ohlcv_array_dict_in)
-    # ASSERT THE ISOLATED TRADE WEIGHS TWICE AS MUCH AS EACH OVERLAPPING TRADE
-    assert np.isclose(weight_arr[2] / weight_arr[0], 2.0) and np.isclose(weight_arr.mean(), 1.0)
-    passed("uniqueness weights")
-
-# FUNCTION: TEST THE SIGNAL CHECK
-def test_signal_check():
-    # CREATE A RANDOM LABELED DATASET OVER TWO YEARS
-    rng = np.random.default_rng(1)
-    row_count = 20_000
-    ts_series = pd.Series(pd.date_range("2020-01-01 10:00", periods=row_count, freq="47min", tz="America/New_York"))
-    planted_arr = rng.random(row_count)
-    # THE PLANTED FEATURE RAISES THE TP PROBABILITY TO 75% IN ITS TOP DECILE
-    y_arr = (rng.random(row_count) < np.where(planted_arr > 0.9, 0.75, 0.45)).astype(float)
-    test_pdf = pd.DataFrame({"decision_ts": ts_series, "entry_price": 700.0, "rsi": planted_arr * 100, "stoch_k": rng.random(row_count) * 100,
-                             "y_tp_0.0050": y_arr, "net_return_0.0050": np.where(y_arr == 1, 0.0049, -0.0051)})
-    train_pdf, valid_pdf = test_pdf.iloc[:14_000], test_pdf.iloc[14_000:]
-    # RUN THE SIGNAL CHECK
-    signal_pdf = get_signal_check_pdf(train_pdf, valid_pdf, ["rsi", "stoch_k"], [0.005], alert_in=False, iteration_count_in=300)
-    verdict_dict = get_signal_check_verdict_dict(signal_pdf)
-    # ASSERT THE PLANTED SIGNAL IS FOUND AND THE NOISE FEATURE IS NOT
-    assert verdict_dict["verdict"] == "CONTINUE" and verdict_dict["signal_feature_list"] == ["rsi"]
-    # ASSERT THE CHANCE COUNT AND THE DISTINCT BIN COUNT
-    assert verdict_dict["expected_chance_signal_count"] == round(verdict_dict["test_count"] * 2 * 0.025 ** 2, 1)
-    assert 1 <= verdict_dict["signal_bin_count"] <= verdict_dict["signal_count"]
-    passed(f"signal check (planted signal found, noise rejected; {verdict_dict['test_count']} tests)")
 
 
-# FUNCTION: TEST THE NULL CALIBRATION OF THE SIGNAL CHECK (SESSION-SHIFTED FEATURES)
-def test_signal_check_null():
-    # CREATE A LABELED DATASET WITH ONE PLANTED FEATURE AND THREE NOISE FEATURES
-    rng = np.random.default_rng(3)
-    row_count = 20_000
-    ts_series = pd.Series(pd.date_range("2020-01-01 10:00", periods=row_count, freq="47min", tz="America/New_York"))
-    planted_arr = rng.random(row_count)
-    y_arr = (rng.random(row_count) < np.where(planted_arr > 0.9, 0.75, 0.45)).astype(float)
-    test_pdf = pd.DataFrame({"decision_ts": ts_series, "entry_price": 700.0, "rsi": planted_arr * 100, "stoch_k": rng.random(row_count) * 100,
-                             "relative_volume": rng.random(row_count), "daily_volatility": rng.random(row_count),
-                             "y_tp_0.0050": y_arr, "net_return_0.0050": np.where(y_arr == 1, 0.0049, -0.0051)})
-    train_pdf, valid_pdf = test_pdf.iloc[:14_000], test_pdf.iloc[14_000:]
-    feature_list = ["rsi", "stoch_k", "relative_volume", "daily_volatility"]
-    # SHIFT THE FEATURES OF THE TRAINING WINDOW
-    shifted_pdf = get_session_shifted_feature_pdf(train_pdf, feature_list, np.random.default_rng(0))
-    session_count = train_pdf["decision_ts"].dt.date.nunique()
-    # ASSERT THE OUTCOMES STAY IN PLACE, THE FEATURE VALUES ARE ONLY MOVED, TOGETHER, BY 25%-75% OF THE SESSIONS
-    assert shifted_pdf["y_tp_0.0050"].equals(train_pdf["y_tp_0.0050"].reset_index(drop=True))
-    assert np.array_equal(np.sort(shifted_pdf["rsi"].to_numpy()), np.sort(train_pdf["rsi"].to_numpy()))
-    assert not np.array_equal(shifted_pdf["rsi"].to_numpy(), train_pdf["rsi"].to_numpy())
-    pair_set = set(zip(train_pdf["rsi"], train_pdf["stoch_k"]))
-    assert all(pair in pair_set for pair in zip(shifted_pdf["rsi"], shifted_pdf["stoch_k"]))
-    assert 0.25 * session_count - 1 <= shifted_pdf.attrs["null_shift_session_count"] <= 0.75 * session_count
-    # RUN THE REAL CHECK AND 5 NULL RUNS
-    check_kwargs = {"iteration_count_in": 300}
-    signal_pdf = get_signal_check_pdf(train_pdf, valid_pdf, feature_list, [0.005], alert_in=False, **check_kwargs)
-    null_pdf = get_null_signal_count_pdf(train_pdf, valid_pdf, feature_list, [0.005], run_count_in=5, job_count_in=1, **check_kwargs)
-    null_again_pdf = get_null_signal_count_pdf(train_pdf, valid_pdf, feature_list, [0.005], run_count_in=5, job_count_in=2, **check_kwargs)
-    verdict_dict = get_signal_check_verdict_dict(signal_pdf, null_pdf)
-    # ASSERT THE NULL RUNS ARE REPRODUCIBLE (ALSO IN PARALLEL) AND THE PLANTED SIGNAL BEATS EVERY RUN
-    assert null_pdf.equals(null_again_pdf) and len(null_pdf) == 5
-    assert verdict_dict["verdict"] == "CONTINUE" and verdict_dict["signal_bin_count"] > verdict_dict["null_max_signal_bin_count"]
-    assert np.isclose(verdict_dict["null_p_value"], 1 / 6)
-    # WITHOUT THE PLANTED FEATURE: THE CALIBRATED VERDICT STOPS
-    noise_list = feature_list[1:]
-    noise_verdict_dict = get_signal_check_verdict_dict(get_signal_check_pdf(train_pdf, valid_pdf, noise_list, [0.005], alert_in=False, **check_kwargs),
-                                                       get_null_signal_count_pdf(train_pdf, valid_pdf, noise_list, [0.005], run_count_in=5, job_count_in=1, **check_kwargs))
-    assert noise_verdict_dict["verdict"] == "STOP"
-    # A TIE WITH THE NULL STOPS
-    tie_pdf = null_pdf.assign(signal_bin_count=verdict_dict["signal_bin_count"])
-    assert get_signal_check_verdict_dict(signal_pdf, tie_pdf)["verdict"] == "STOP"
-    passed(f"signal check null (session shifts keep outcomes and feature rows; planted bins {verdict_dict['signal_bin_count']} vs null max "
-           f"{verdict_dict['null_max_signal_bin_count']}; noise stops; ties stop; parallel = sequential)")
 
-# FUNCTION: TEST THAT MARKET DRIFT ALONE IS NOT A SIGNAL (BASE-RATE REFERENCE, NEW IN exp01 1.0)
-def test_signal_check_drift_only():
-    # CREATE A DATASET WHERE EVERY ROW HAS THE SAME 62% TP PROBABILITY (DRIFT), WELL ABOVE BREAK-EVEN, AND NO FEATURE EFFECT
-    rng = np.random.default_rng(2)
-    row_count = 20_000
-    ts_series = pd.Series(pd.date_range("2020-01-01 10:00", periods=row_count, freq="47min", tz="America/New_York"))
-    y_arr = (rng.random(row_count) < 0.62).astype(float)
-    test_pdf = pd.DataFrame({"decision_ts": ts_series, "entry_price": 700.0, "rsi": rng.random(row_count) * 100,
-                             "y_tp_0.0050": y_arr, "net_return_0.0050": np.where(y_arr == 1, 0.0049, -0.0051)})
-    signal_pdf = get_signal_check_pdf(test_pdf.iloc[:14_000], test_pdf.iloc[14_000:], ["rsi"], [0.005], alert_in=False, iteration_count_in=300)
-    verdict_dict = get_signal_check_verdict_dict(signal_pdf)
-    # ASSERT EVERY TRAINING BIN IS ABOVE BREAK-EVEN (THE v1 CHECK WOULD HAVE PASSED THEM) BUT NONE IS A SIGNAL
-    assert (signal_pdf["train_tp_rate_ci_low"] > signal_pdf["train_breakeven_tp_rate"]).sum() >= 8
-    assert verdict_dict["verdict"] == "STOP" and verdict_dict["signal_count"] == 0
-    passed(f"signal check ignores drift (bins above break-even: {int((signal_pdf['train_tp_rate_ci_low'] > signal_pdf['train_breakeven_tp_rate']).sum())}, signals: 0)")
 
-# FUNCTION: TEST THE MONTH MINIMUM OF THE SIGNAL CHECK
-def test_signal_check_month_minimum():
-    # CREATE A DATASET WHOSE VALIDATION ROWS COVER ONLY TWO CALENDAR MONTHS, WITH A STRONG PLANTED SIGNAL
-    rng = np.random.default_rng(3)
-    train_ts = pd.Series(pd.date_range("2018-01-01 10:00", periods=14_000, freq="47min", tz="America/New_York"))
-    valid_ts = pd.Series(pd.date_range("2021-03-01 10:00", periods=1_500, freq="47min", tz="America/New_York"))
-    def make_pdf(ts_series_in):
-        feature_arr = rng.random(len(ts_series_in))
-        y_arr = (rng.random(len(ts_series_in)) < np.where(feature_arr > 0.9, 0.9, 0.45)).astype(float)
-        return pd.DataFrame({"decision_ts": ts_series_in, "entry_price": 700.0, "rsi": feature_arr * 100, "y_tp_0.0050": y_arr,
-                             "net_return_0.0050": np.where(y_arr == 1, 0.0049, -0.0051)})
-    train_pdf, valid_pdf = make_pdf(train_ts), make_pdf(valid_ts)
-    # ASSERT THE SIGNAL IS FOUND WITHOUT THE MINIMUM AND REJECTED WITH THE PROTOCOL MINIMUM (6 MONTHS)
-    without_dict = get_signal_check_verdict_dict(get_signal_check_pdf(train_pdf, valid_pdf, ["rsi"], [0.005], alert_in=False, iteration_count_in=300, min_month_count_in=None))
-    with_dict = get_signal_check_verdict_dict(get_signal_check_pdf(train_pdf, valid_pdf, ["rsi"], [0.005], alert_in=False, iteration_count_in=300))
-    assert without_dict["signal_count"] > 0 and with_dict["signal_count"] == 0
-    passed(f"signal check month minimum (validation of {valid_ts.dt.month.nunique()} months: signal without the minimum, none with {exp_config.SIGNAL_CHECK_MIN_MONTH_COUNT})")
+
 
 """
 8. End-To-End Fold
 """
 
-# FUNCTION: TEST AN END-TO-END FOLD ON SYNTHETIC DATA
-def test_end_to_end_fold(ohlcv_pdf_in, ohlcv_array_dict_in, market_schedule_pdf_in):
-    # DEFINE THE SCHEDULE DICTIONARIES
-    date_market_open_ts_dict = get_date_market_open_ts_dict(market_schedule_pdf_in)
-    date_market_schedule_dict = dict(zip(pd.to_datetime(market_schedule_pdf_in["date"]).dt.date,
-                                         zip(market_schedule_pdf_in["market_open_ts"], market_schedule_pdf_in["market_close_ts"])))
-    # PREPARE THE CONTEXT INPUTS
-    data_pdf = add_cum_max_col(ohlcv_pdf_in.copy())
-    summary_pdf = get_session_summary_pdf(data_pdf)
-    reference_pdf = get_relative_volume_reference_pdf(data_pdf, date_market_open_ts_dict)
-    # BUILD AN IN-MEMORY DATASET (TSBAR + TSCTX + A FEW RAW FEATURES)
-    dataset_pdf_list = []
-    for date_object in ohlcv_array_dict_in["session_date_list"]:
-        TSBAR_pdf = get_date_TSBAR_pdf(ohlcv_array_dict_in, date_market_open_ts_dict, str(date_object), [0.001, 0.002, 0.005])
-        TSCTX_pdf = get_date_TSCTX_pdf(data_pdf, summary_pdf, reference_pdf, date_market_schedule_dict, str(date_object))
-        bar_pdf = data_pdf[data_pdf["date"] == date_object][["timestamp", "close"]]
-        merged_pdf = TSBAR_pdf.merge(TSCTX_pdf.rename(columns={"timestamp": "decision_ts"}), on="decision_ts", how="left") \
-                              .merge(bar_pdf.rename(columns={"timestamp": "decision_ts"}), on="decision_ts", how="left")
-        merged_pdf["date"] = date_object
-        dataset_pdf_list.append(merged_pdf)
-    dataset_pdf = add_TSBAR_label_cols(pd.concat(dataset_pdf_list, ignore_index=True), [0.001, 0.002, 0.005], drop_cell_cols_in=True)
-    # ASSERT THE INTERVAL SAMPLING KEEPS 10:00, 10:15, ...
-    sampled_pdf = apply_sampling_pdf(dataset_pdf, "interval", 15)
-    assert set(sampled_pdf["entry_ts"].dt.minute.unique()) <= {0, 15, 30, 45}
-    # BUILD A SHORT SCHEDULE (1-YEAR TRAINING, 1-MONTH WINDOWS, TO FIT THE SYNTHETIC DATA)
-    fold_pdf = get_walk_forward_fold_pdf(ohlcv_array_dict_in["session_date_list"], exp_config.EMBARGO_TRADING_DAYS, [1], test_window_months_in=1,
-                                         validation_window_months_in=1, step_months_in=1, max_fold_count_in=1)
-    assert len(fold_pdf) == 1
-    # DEFINE THE FEATURES
-    feature_col_str_list = ["minutes_since_open", "day_of_week", "intraday_return_pct", "overnight_gap_pct", "relative_volume"]
-    # RUN THE FOLD (SMALL MODEL SETTINGS)
-    original_param_dict = dict(exp_config.LGBM_PARAM_DICT)
-    exp_config.LGBM_PARAM_DICT.update({"n_estimators": 30, "min_child_samples": 50})
-    original_run_count = exp_config.RANDOM_BASELINE_RUN_COUNT
-    exp_config.RANDOM_BASELINE_RUN_COUNT = 3
-    try:
-        result_dict = walk_forward.run_walk_forward_fold_dict(fold_pdf.iloc[0], sampled_pdf, dataset_pdf, ohlcv_array_dict_in, feature_col_str_list,
-                                                              delta_list_in=[0.001, 0.002, 0.005], train_window_years_list_in=[1], ev_threshold_list_in=[-1.0, 0.0], alert_in=False)
-    finally:
-        exp_config.LGBM_PARAM_DICT.clear()
-        exp_config.LGBM_PARAM_DICT.update(original_param_dict)
-        exp_config.RANDOM_BASELINE_RUN_COUNT = original_run_count
-    # ASSERT THE OUTPUTS
-    assert len(result_dict["selection_pdf"]) == 2
-    baseline_pdf = result_dict["baseline_metric_pdf"]
-    assert {"model", "fixed_time"} <= set(baseline_pdf["baseline"])
-    assert len(result_dict["cost_sensitivity_pdf"]) == len(config.COST_SENSITIVITY_SLIPPAGE_LIST)
-    # ASSERT HIGHER SLIPPAGE NEVER IMPROVES THE SAME DECISIONS
-    cost_return_arr = result_dict["cost_sensitivity_pdf"]["total_return"].to_numpy()
-    assert all(np.diff(cost_return_arr) <= 1e-12)
-    # ASSERT TRADES NEVER OVERLAP AND ALWAYS ENTER AFTER THE DECISION
-    transaction_pdf = result_dict["test_transaction_pdf"]
-    if len(transaction_pdf) > 1:
-        assert (transaction_pdf["buy_idx"].iloc[1:].to_numpy() > transaction_pdf["sell_idx"].iloc[:-1].to_numpy()).all()
-    if len(transaction_pdf) > 0:
-        assert (transaction_pdf["buy_ts"] > transaction_pdf["decision_ts"]).all()
-        assert (transaction_pdf["buy_ts"].dt.strftime("%H:%M") >= "10:00").all()
-    # ASSERT THE PRIOR-ONLY PATH RUNNER REPRODUCES A VALIDATION CANDIDATE EXACTLY (SAME DECISIONS, SAME SIMULATOR)
-    selection_row = result_dict["selection_pdf"].iloc[0]
-    decision_pdf = result_dict["valid_decision_pdf_dict"][(int(selection_row["train_years"]), float(selection_row["ev_threshold"]))]
-    window_dict = run_window_with_baseline_dict(decision_pdf, result_dict["valid_pdf"], ohlcv_array_dict_in, fold_pdf.iloc[0]["valid_start"], fold_pdf.iloc[0]["valid_end"])
-    assert np.isclose(window_dict["metric_dict"]["total_return"], selection_row["valid_total_return"])
-    assert np.isclose(window_dict["metric_dict"]["buy_hold_return"], selection_row["valid_buy_hold_total_return"])
-    assert len(window_dict["baseline_pdf"]) == 1 + exp_config.RANDOM_BASELINE_RUN_COUNT + 1
-    passed(f"end-to-end fold (validation candidates, test, {len(baseline_pdf)} baselines, cost sensitivity, no overlapping trades, prior-only runner == candidate)")
 
 """
 9. Snapshot Features (steps 01-03)
@@ -614,57 +415,8 @@ def test_bad_tick_rule(ohlcv_pdf_in):
     # DISPLAY INFORMATION
     passed("bad tick rule (3 planted wicks cut to the body, a real 5% drop kept, neighbours within the session, idempotent)")
 
-# FUNCTION: TEST THE HOLDOUT DESIGN'S GRID, TIE-BREAK AND LABEL PURGE
-def test_design_v2():
-    # TIES: THE SHORTER WINDOW, THEN THE HIGHER THRESHOLD. A LABEL KNOWN AFTER THE REFIT IS DROPPED.
-    from so.core.holdout import get_governing_selection_pdf
-    from so.core.point_in_time import get_ny_timestamp
-    from so.core.rolling_retrain import get_training_mask_arr
-    from experiments.exp01_minute_entry import design
-    assert len(design.CANDIDATE_LIST) == 12 and design.CANDIDATE_LIST[0] == "3Y|0.0000" and design.CANDIDATE_LIST[-1] == "10Y|0.0010"
-    assert design.SELECTION_RULE["tie_break"] == [("years", True), ("threshold", False)]
-    assert design.RETRAIN_FREQUENCY_STR == "weekly"
-    assert design.DATA_SOURCE_LIST == ["SPY_1MIN", "TSIND", "TSSEG", "TSCTX", "TSBAR"]
-    row_dict_list = [{"fold_id": fold_id, "candidate": candidate, "excess_return": 0.0} for fold_id in range(3) for candidate in design.CANDIDATE_LIST]
-    period_pdf = pd.DataFrame({"period_id": [0, 1, 2], "period_start": ["2022-01-03", "2022-04-01", "2022-07-01"], "period_end": ["2022-03-31", "2022-06-30", "2022-09-30"]})
-    governing_pdf = get_governing_selection_pdf(design, pd.DataFrame(row_dict_list), period_pdf)
-    assert governing_pdf.loc[governing_pdf["period_id"] == 0, "candidate"].iloc[0] == "3Y|0.0000"
-    assert (governing_pdf.loc[governing_pdf["period_id"] > 0, "candidate"] == "3Y|0.0010").all()
-    row_ts = [get_ny_timestamp("2022-01-04"), get_ny_timestamp("2024-07-14")]
-    known_ts = [get_ny_timestamp("2022-01-05"), get_ny_timestamp("2024-07-16 16:00")]
-    mask_arr = get_training_mask_arr(row_ts, known_ts, get_ny_timestamp("2024-07-15 10:00"), "3Y")
-    assert list(mask_arr) == [True, False]
-    passed("holdout design (12 candidates, ties -> 3Y at 0.10%, a label known after the refit is dropped)")
 
-# FUNCTION: UNUSED WEEKS STAY OFF THE WALK, AND THE CALENDAR IS NOT REBUILT ON THE SHORTENED LIST
-def test_kept_refit_sessions():
-    # A WEDNESDAY SCORE START KEEPS THE PREVIOUS MONDAY'S MODEL. REBUILDING THE CALENDAR WOULD REFIT ON THAT WEDNESDAY.
-    from so.core.rolling_retrain import get_retrain_session_list
-    from experiments.exp01_minute_entry.design import get_kept_session_list
-    session_list = list(pd.bdate_range("2014-01-01", "2015-08-31").date)
-    retrain_set = set(get_retrain_session_list(session_list, session_list[0], session_list[-1], "weekly"))
-    score_start, score_end = pd.Timestamp("2015-02-04").date(), pd.Timestamp("2015-07-31").date()
-    kept_list = get_kept_session_list(session_list, retrain_set, score_start, score_end)
-    governing = max(session_date for session_date in retrain_set if session_date <= score_start)
-    assert kept_list[0] == governing == pd.Timestamp("2015-02-02").date()
-    assert kept_list[-1] <= score_end and pd.Timestamp("2015-08-03").date() not in kept_list
-    assert score_start not in retrain_set and score_start in kept_list
-    short_list = [session_date for session_date in session_list if session_date >= score_start]
-    rebuilt_set = set(get_retrain_session_list(short_list, short_list[0], short_list[-1], "weekly"))
-    assert score_start in rebuilt_set
-    passed("kept refits (governing Monday kept, later weeks dropped, a rebuilt calendar would refit the Wednesday)")
 
-# FUNCTION: STORED TSBAR TIMESTAMPS ARE STRINGS; SAMPLING NEEDS THE NEW YORK CLOCK
-def test_csv_entry_ts_is_parsed_before_sampling():
-    raw_pdf = pd.DataFrame({
-        "decision_ts": ["2005-01-03 09:59:00-05:00", "2005-01-03 10:00:00-05:00", "2005-01-03 10:14:00-05:00"],
-        "entry_ts": ["2005-01-03 10:00:00-05:00", "2005-01-03 10:01:00-05:00", "2005-01-03 10:15:00-05:00"],
-    })
-    formatted_pdf = format_TSBAR_pdf(raw_pdf)
-    sampled_pdf = apply_sampling_pdf(formatted_pdf, "interval", 15)
-    assert list(sampled_pdf["entry_ts"].dt.hour) == [10, 10]
-    assert list(sampled_pdf["entry_ts"].dt.minute) == [0, 15]
-    passed("csv entry_ts strings become New York timestamps before interval sampling")
 
 """
 Runner
@@ -686,17 +438,7 @@ if __name__ == "__main__":
     test_label_cols(synthetic_TSBAR_pdf)
     test_costs()
     test_context_no_lookahead(synthetic_ohlcv_pdf, synthetic_market_schedule_pdf)
-    test_walk_forward_schedule()
-    test_uniqueness_weights(synthetic_ohlcv_array_dict)
-    test_signal_check()
-    test_signal_check_null()
-    test_signal_check_drift_only()
-    test_signal_check_month_minimum()
-    test_end_to_end_fold(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_market_schedule_pdf)
     synthetic_snapshot_pdf = test_snapshot_features(synthetic_ohlcv_pdf)
     test_plot_utils(synthetic_ohlcv_pdf, synthetic_ohlcv_array_dict, synthetic_TSBAR_pdf, synthetic_snapshot_pdf)
     test_bad_tick_rule(synthetic_ohlcv_pdf)
-    test_design_v2()
-    test_kept_refit_sessions()
-    test_csv_entry_ts_is_parsed_before_sampling()
     print("\nAll tests passed ✅")

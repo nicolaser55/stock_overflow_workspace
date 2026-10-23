@@ -1,5 +1,5 @@
 """
-Workspace Tests: the daily experiment designs on the runner (exp02-exp07, exp12, exp13) and their shared helpers
+Workspace Tests: the experiment designs on the runner (exp01 minute; exp02-exp07, exp12, exp13 daily) and their shared helpers
 
 Run from the workspace root:   python tests/test_experiments.py   (or python tests/run_all_tests.py)
 Synthetic data only (about 3 years of minute bars, synthetic VIX and VIX3M daily closes). The data root is a temporary
@@ -310,6 +310,60 @@ def test_lookahead(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_i
     passed("look-ahead check passes for exp12 (VIX sources, 6 candidates) and exp02 (weekly model, 18 candidates)")
 
 
+
+# FUNCTION: exp01 (MINUTE MODE): PREFLIGHT, MODEL ON PLANTED ROWS, ROW-LOCAL SIGNAL, UNIQUENESS WEIGHTS
+def test_exp01_model():
+    """
+    Returns:
+        None
+    """
+    # IMPORT THE MINUTE CHECKS, THE SHARED CONFIG AND exp01
+    from so import config
+    from so.runner.minute import check_minute_signal, get_shuffled_signal_list
+    from experiments.exp01_minute_entry import design as exp01_design
+    from experiments.exp01_minute_entry.model import MODEL_FEATURE_COL_LIST, get_uniqueness_weight_arr
+    from so.features.barrier_labels import get_delta_col_str
+    check_design_file(exp01_design.__file__)
+    check_minute_signal(exp01_design)
+    assert len(exp01_design.CANDIDATE_LIST) == 12 and exp01_design.CANDIDATE_LIST[0] == "3Y|0.0000"
+    # UNIQUENESS: TWO OVERLAPPING TRADES WEIGH HALF AN ISOLATED ONE
+    weight_arr = get_uniqueness_weight_arr(np.array([100, 100, 1000]), np.array([9, 9, 9]))
+    assert np.isclose(weight_arr[2] / weight_arr[0], 2.0) and np.isclose(weight_arr.mean(), 1.0)
+    # PLANTED TRAINING ROWS: TAKE PROFIT WHEN THE FIRST NUMERIC FEATURE IS HIGH
+    rng = np.random.default_rng(3)
+    row_count = 1500
+    row_dict = {}
+    numeric_list = [column_str for column_str in MODEL_FEATURE_COL_LIST if config.FEATURE_REGISTRY_DICT[column_str]["scale_type"] != "categorical"]
+    for column_str in MODEL_FEATURE_COL_LIST:
+        if column_str in numeric_list:
+            row_dict[column_str] = rng.random(row_count)
+        else:
+            row_dict[column_str] = rng.choice(list(config.CATEGORY_LEVEL_DICT[column_str]), row_count)
+    row_pdf = pd.DataFrame(row_dict)
+    row_pdf["close"] = 400.0
+    row_pdf["bar_idx"] = np.arange(row_count) * 15
+    tp_arr = row_pdf[numeric_list[0]].to_numpy() > 0.5
+    for delta in config.TRAIN_DELTA_LIST:
+        reason_arr = np.where(tp_arr, "TP", "SL")
+        row_pdf[get_delta_col_str(delta)] = [f"{int(count)}|400.0|{reason}" for count, reason in zip(rng.integers(1, 40, row_count), reason_arr)]
+    candidate_design = exp01_design.get_candidate_design("3Y|0.0005")
+    model = candidate_design.fit(row_pdf)
+    assert len(model["models"]) == len(config.TRAIN_DELTA_LIST) and model["threshold"] == 0.0005
+    # THE SIGNAL IS ROW-LOCAL AND ENTERS MOSTLY ON THE PLANTED ROWS
+    score_pdf = row_pdf[list(exp01_design.FEATURE_COL_LIST)].copy()
+    score_pdf["bar_idx"] = row_pdf["bar_idx"]
+    decision_list = get_shuffled_signal_list(score_pdf, model, exp01_design.signal, "exp01", list(exp01_design.FEATURE_COL_LIST))
+    enter_arr = np.array([float(decision_dict["target_weight"]) > 0 for decision_dict in decision_list])
+    assert enter_arr.any() and enter_arr[tp_arr].mean() > enter_arr[~tp_arr].mean()
+    # FEWER THAN 200 ROWS: NO MODEL, NO ENTRY
+    small_model = candidate_design.fit(row_pdf.head(150))
+    assert small_model["models"] == {}
+    small_decision_list = get_shuffled_signal_list(score_pdf.head(20), small_model, exp01_design.signal, "exp01", list(exp01_design.FEATURE_COL_LIST))
+    assert not any(float(decision_dict["target_weight"]) > 0 for decision_dict in small_decision_list)
+    passed(f"exp01 (minute): preflight, 21 distance models on planted rows, row-local signal enters on "
+           f"{enter_arr[tp_arr].mean():.0%} of planted vs {enter_arr[~tp_arr].mean():.0%} of other rows; <200 rows never enters")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     try:
@@ -320,6 +374,7 @@ if __name__ == "__main__":
         stream_date1 = synthetic_ohlcv_array_dict["session_date_list"][350]
         stream_date2 = synthetic_ohlcv_array_dict["session_date_list"][-1]
         test_tsday_columns(synthetic_daily_pdf)
+        test_exp01_model()
         result_dict = test_every_candidate_runs(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_dict, stream_date1, stream_date2)
         test_mechanics(result_dict, synthetic_daily_pdf)
         test_vix_history(synthetic_ohlcv_array_dict, synthetic_daily_pdf, synthetic_vix_dict, stream_date1, stream_date2)

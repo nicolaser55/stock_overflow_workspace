@@ -53,6 +53,7 @@ from so.core.trial_log import read_trial_log_pdf
 from synthetic_data import get_synthetic_ohlcv_pdf
 import runner_minute_design as minute_design
 import runner_minute_lgbm_design as lgbm_design
+import runner_minute_shared_design as shared_design
 
 # KEEP THE REAL REGISTRY PATH AND POINT THIS SUITE AT A TEMPORARY FILE
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
@@ -429,6 +430,59 @@ def test_model_windows_and_label_door():
     passed("a model never scores rows before its refit or after the next; training drops unfinished and future labels")
 
 
+
+# FUNCTION: TRAINING USES EARLIER ROWS; CANDIDATES WITH ONE FIT KEY SHARE THE FIT
+def test_history_and_shared_fit():
+    """
+    The scored span starts in the third week. With TRAIN_ROW_HISTORY_BOOL the first refit trains on the rows of the
+    first two weeks (labels known before the refit only) and scores only the span. Two candidates with one fit key
+    and a fit cache folder fit once per refit; the second candidate loads the first one's fit.
+
+    Returns:
+        None
+    """
+    # IMPORT THE CACHE SETTER HERE
+    from so.runner.minute import set_fit_cache_folder_str
+    register_minute_test_sources()
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-06-01", "2010-07-09", seed_in=12))
+    session_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_list[10], session_list[-1]
+    frame_dict = {MINUTE_FEAT_STR: get_planted_feature_pdf(ohlcv_array_dict),
+                  MINUTE_LABEL_STR: get_planted_label_pdf(ohlcv_array_dict)}
+    data_context = get_runner_context(ohlcv_array_dict, source_frame_dict_in=frame_dict,
+                                      declared_name_list_in=list(shared_design.DATA_SOURCE_LIST))
+    cache_folder_str = tempfile.mkdtemp(prefix="so_fit_cache_", dir=TEMP_ROOT_STR)
+    set_fit_cache_folder_str(cache_folder_str)
+    shared_design.FIT_CALL_LIST.clear()
+    try:
+        loop_list = []
+        for candidate in shared_design.CANDIDATE_LIST:
+            loop = MinuteLoop(shared_design.get_candidate_design(candidate), ohlcv_array_dict, date1, date2, data_context,
+                              None, 0.0, 0.0, config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
+                              config.MARKET_EXIT_SLIPPAGE_PER_SHARE, shared_design.__file__, True, shared_design)
+            loop.run_through_date(date2)
+            loop_list.append(loop)
+    finally:
+        set_fit_cache_folder_str(None)
+    first_loop = loop_list[0]
+    refit_count = len(first_loop.train_log_list)
+    assert refit_count >= 3, refit_count
+    # ONE REAL FIT PER REFIT, SHARED BY BOTH CANDIDATES
+    assert len(shared_design.FIT_CALL_LIST) == refit_count, (shared_design.FIT_CALL_LIST, refit_count)
+    # THE FIRST REFIT TRAINS ON ROWS BEFORE THE SCORED SPAN; EVERY LABEL WAS KNOWN BEFORE ITS REFIT
+    first_rows = int(first_loop.train_log_list[0]["row_count"])
+    assert first_rows > 0 and first_rows == shared_design.FIT_CALL_LIST[0]
+    assert first_loop.current_model is not None
+    for log_dict in first_loop.train_log_list:
+        refit_ts = get_ny_timestamp(log_dict["refit_ts"])
+        assert all(get_ny_timestamp(label_ts) < refit_ts for label_ts in log_dict["label_known_ts_list"])
+    # SCORED ROWS ARE THE SPAN ONLY
+    first_day = pd.Timestamp(date1).date()
+    assert all(pd.Timestamp(day).date() >= first_day for day in first_loop.row_pdf["session"])
+    passed(f"training uses {first_rows} rows from before the scored span at the first refit; "
+           f"2 candidates share {refit_count} fits")
+
+
 # FUNCTION: MINUTE MODE MATCHES THE OLD EXP01 SIMULATOR ON A FIXED MODEL
 def test_parity_with_old_exp01_replay():
     """
@@ -586,6 +640,7 @@ def run_all_tests():
     test_stateful_signal_refused()
     test_preflight_refuses_method_and_closure()
     test_model_windows_and_label_door()
+    test_history_and_shared_fit()
     test_parity_with_old_exp01_replay()
     test_lookahead_minute_passes()
     test_checkpoint_resume_matches()

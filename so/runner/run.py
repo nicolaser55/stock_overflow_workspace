@@ -438,6 +438,9 @@ def run_candidate_job_dict(job_dict_in):
         set_runs_root_str(job_dict_in["runs_root_str"])
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
+    # MINUTE DESIGNS WITH A FIT KEY SHARE FITS THROUGH THE RUN FOLDER
+    from so.runner.minute import set_fit_cache_folder_str
+    set_fit_cache_folder_str(os.path.join(get_run_folder_str(job_dict_in["run_id_str"]), "fit_cache"))
     candidate = job_dict_in["candidate"]
     log_trial_bool = bool(job_dict_in.get("log_trial_bool", True))
     candidate_token_str = get_candidate_token_str(candidate)

@@ -52,6 +52,43 @@ def load_design_module(design_folder_str_in):
     return design_module
 
 
+# FUNCTION: LOAD THE DECLARED SOURCES (MINUTE DESIGNS: ONLY THE SAMPLED MINUTES)
+def load_declared_frame_dict(design_module_in, declared_name_list_in, development_end_in):
+    """
+    A daily design loads every declared source at once. A minute design with ROW_SAMPLE_EVERY_N_MINUTES loads one
+    source at a time and keeps only the rows of the sampled minutes (the only rows minute mode joins), so the context
+    every candidate process unpickles stays small. TSBAR is loaded with SPY_1MIN, which places its label clocks.
+
+    Args:
+        design_module_in (module): Design
+        declared_name_list_in (list[str]): DATA_SOURCE_LIST
+        development_end_in: Last development session
+
+    Returns:
+        dict: source name -> stamped frame
+    """
+    # IMPORT THE MINUTE HELPERS HERE
+    import pandas as pd
+    from so.runner.minute import get_row_sample_minutes_int, get_source_join_ts_series
+    from so.runner.loop import get_design_mode_str, MODE_MINUTE_STR
+    sample_minutes_int = get_row_sample_minutes_int(design_module_in) if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else None
+    if sample_minutes_int is None:
+        return load_source_frame_dict(declared_name_list_in, development_end_in)
+    from so.runner.minute import get_sample_mask_arr
+    frame_dict = {}
+    for source_name_str in declared_name_list_in:
+        if source_name_str == "SPY_1MIN":
+            continue
+        load_list = ["SPY_1MIN", source_name_str] if source_name_str == "TSBAR" else [source_name_str]
+        frame_pdf = load_source_frame_dict(load_list, development_end_in)[source_name_str]
+        if len(frame_pdf):
+            join_index = pd.DatetimeIndex(get_source_join_ts_series(frame_pdf))
+            frame_pdf = frame_pdf.loc[get_sample_mask_arr(join_index, sample_minutes_int)].reset_index(drop=True)
+        frame_dict[source_name_str] = frame_pdf
+        print(f"loaded {source_name_str}: {len(frame_pdf):,} sampled rows", flush=True)
+    return frame_dict
+
+
 # THE RESULTS LOG EVERY DEVELOPMENT RUN APPENDS TO
 RESULTS_LOG_PATH_STR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "RESULTS_LOG.md")
 
@@ -101,7 +138,7 @@ if __name__ == "__main__":
     ohlcv_array_dict = span_dict["ohlcv_array_dict"]
     development_end = span_dict["development_end"]
     declared_name_list = get_declared_source_name_list(design_module)
-    source_frame_dict = load_source_frame_dict(declared_name_list, development_end)
+    source_frame_dict = load_declared_frame_dict(design_module, declared_name_list, development_end)
     limit_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][-1])
     data_context = get_runner_context(ohlcv_array_dict, source_frame_dict, limit_ts, declared_name_list)
     # RUN ON THE DEVELOPMENT VIEW

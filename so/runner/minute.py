@@ -591,6 +591,143 @@ def get_minute_fit_func(design_in, design_module_in):
     return None
 
 
+# FOLDER OF THE SHARED FIT CACHE OF THE CURRENT RUN (None = NO SHARING ACROSS PROCESSES)
+_FIT_CACHE_FOLDER_STR = None
+# HOW LONG A PROCESS WAITS FOR ANOTHER PROCESS'S FIT OF THE SAME ROWS BEFORE FITTING ITSELF
+FIT_CACHE_WAIT_SECONDS = 3 * 3600
+
+
+# FUNCTION: SET THE RUN'S FIT CACHE FOLDER
+def set_fit_cache_folder_str(folder_str_in):
+    """
+    The runner sets this to <run folder>/fit_cache before a candidate stream or a look-ahead stream. One run's code
+    is fixed (commit and code hash are checked on resume), so a fit keyed by the design's fit key and a hash of the
+    training rows is the same object in every process of that run.
+
+    Args:
+        folder_str_in (str | None): Folder, or None to switch sharing off
+
+    Returns:
+        None
+    """
+    # MODULE STATE, PER PROCESS
+    global _FIT_CACHE_FOLDER_STR
+    _FIT_CACHE_FOLDER_STR = None if folder_str_in is None else str(folder_str_in)
+
+
+# FUNCTION: A HASH OF THE TRAINING ROWS
+def get_train_rows_hash_str(train_pdf_in):
+    """
+    Content hash of every column and row (order kept).
+
+    Args:
+        train_pdf_in (pd.DataFrame): Training rows
+
+    Returns:
+        str: Hex digest
+    """
+    # IMPORT HERE (RUNNER-ONLY)
+    import hashlib
+    hasher = hashlib.sha256()
+    hasher.update(("|".join(str(column_str) for column_str in train_pdf_in.columns)).encode("utf-8"))
+    if len(train_pdf_in):
+        hasher.update(pd.util.hash_pandas_object(train_pdf_in, index=False).to_numpy().tobytes())
+    return hasher.hexdigest()
+
+
+# FUNCTION: FIT ONCE PER (FIT KEY, TRAINING ROWS) ACROSS THE RUN'S PROCESSES
+def get_shared_fit(fit_key_str_in, train_pdf_in, fit_func_in):
+    """
+    A design with fit_shared and FIT_KEY_STR declares that every candidate with the same key fits the same model on
+    the same rows. The first process writes <key>_<hash>.pkl; the others wait for it. A missing folder fits locally.
+
+    Args:
+        fit_key_str_in (str): Design fit key (e.g. the training window)
+        train_pdf_in (pd.DataFrame): Training rows
+        fit_func_in (callable): fit_shared(train_rows) -> shared model
+
+    Returns:
+        object: Shared model
+    """
+    # IMPORT HERE (RUNNER-ONLY FILE WORK)
+    import os
+    import pickle
+    import time
+    if _FIT_CACHE_FOLDER_STR is None:
+        return fit_func_in(train_pdf_in)
+    os.makedirs(_FIT_CACHE_FOLDER_STR, exist_ok=True)
+    stem_str = f"{fit_key_str_in}_{get_train_rows_hash_str(train_pdf_in)}"
+    model_path_str = os.path.join(_FIT_CACHE_FOLDER_STR, stem_str + ".pkl")
+    lock_path_str = os.path.join(_FIT_CACHE_FOLDER_STR, stem_str + ".lock")
+    # ALREADY FITTED
+    if os.path.isfile(model_path_str):
+        with open(model_path_str, "rb") as file_obj:
+            return pickle.load(file_obj)
+    # BECOME THE LEADER, OR WAIT FOR IT
+    try:
+        lock_fd = os.open(lock_path_str, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        start_time = time.time()
+        while time.time() - start_time < FIT_CACHE_WAIT_SECONDS:
+            if os.path.isfile(model_path_str):
+                with open(model_path_str, "rb") as file_obj:
+                    return pickle.load(file_obj)
+            time.sleep(1.0)
+        return fit_func_in(train_pdf_in)
+    os.close(lock_fd)
+    shared_model = fit_func_in(train_pdf_in)
+    temp_path_str = model_path_str + f".{os.getpid()}.tmp"
+    with open(temp_path_str, "wb") as file_obj:
+        pickle.dump(shared_model, file_obj)
+    os.replace(temp_path_str, model_path_str)
+    return shared_model
+
+
+# FUNCTION: ROW DAY ORDINALS AND LABEL CLOCKS FOR FAST TRAINING MASKS
+def get_train_clock_dict(train_pool_pdf_in):
+    """
+    Args:
+        train_pool_pdf_in (pd.DataFrame): Rows with decision_ts and label_known_ts (NaT allowed)
+
+    Returns:
+        dict: day_ord_arr (int64), label_ns_arr (int64), label_ok_arr (bool)
+    """
+    # NEW YORK DAYS OF THE DECISION; NANOSECONDS OF THE LABEL CLOCK
+    decision_index = pd.DatetimeIndex(pd.to_datetime(train_pool_pdf_in["decision_ts"], utc=True)).tz_convert("America/New_York")
+    day_ord_arr = np.asarray([day.toordinal() for day in decision_index.date], dtype=np.int64)
+    label_series = pd.to_datetime(train_pool_pdf_in["label_known_ts"], utc=True)
+    label_ok_arr = label_series.notna().to_numpy()
+    label_ns_arr = np.asarray([ts.value if pd.notna(ts) else 0 for ts in label_series], dtype=np.int64)
+    return {"day_ord_arr": day_ord_arr, "label_ns_arr": label_ns_arr, "label_ok_arr": label_ok_arr}
+
+
+# FUNCTION: THE TRAINING MASK, VECTORIZED (SAME RULE AS so.core.rolling_retrain.get_training_mask_arr)
+def get_fast_training_mask_arr(clock_dict_in, refit_ts_in, train_window_str_in):
+    """
+    Row day inside [refit day - window, refit day] and label_known_ts strictly before the refit moment. A missing
+    label clock is never a training row.
+
+    Args:
+        clock_dict_in (dict): Output of get_train_clock_dict
+        refit_ts_in: Refit moment
+        train_window_str_in (str): Training window
+
+    Returns:
+        np.ndarray: Boolean mask
+    """
+    # IMPORT THE WINDOW START HERE
+    from so.core.rolling_retrain import get_train_window_start_ts
+    refit_ts = get_ny_timestamp(refit_ts_in)
+    refit_day_ord = int(refit_ts.date().toordinal())
+    start_ts = get_train_window_start_ts(refit_ts, train_window_str_in)
+    day_ord_arr = clock_dict_in["day_ord_arr"]
+    mask_arr = day_ord_arr <= refit_day_ord
+    if start_ts is not None:
+        mask_arr &= day_ord_arr >= int(start_ts.date().toordinal())
+    mask_arr &= clock_dict_in["label_ok_arr"] & (clock_dict_in["label_ns_arr"] < int(refit_ts.value))
+    return mask_arr
+
+
 # FUNCTION: ATTACH RUNNER METADATA TO A RECORDED DECISION
 def get_recorded_decision_dict(decision_dict_in, bar_ts_in, session_date_in, bar_idx_in):
     """
@@ -678,7 +815,19 @@ class MinuteLoop:
             data_context = get_runner_context(ohlcv_array_dict_in,
                                               declared_name_list_in=get_declared_source_name_list(self.design_module))
         self.data_context = data_context
-        self.row_pdf = get_minute_row_pdf(self.design_module, ohlcv_array_dict_in, date1_in, date2_in, data_context)
+        # TRAINING MAY USE EVERY EARLIER SESSION OF THE BARS (TRAIN_ROW_HISTORY_BOOL); SCORING USES THE WINDOW ONLY
+        history_bool = self.fit_func is not None and bool(getattr(self.design_module, "TRAIN_ROW_HISTORY_BOOL", False))
+        pool_date1 = ohlcv_array_dict_in["session_date_list"][0] if history_bool else date1_in
+        pool_pdf = get_minute_row_pdf(self.design_module, ohlcv_array_dict_in, pool_date1, date2_in, data_context)
+        window_session_set = set(int(session_idx) for session_idx in self.window_session_idx_arr)
+        self.row_pdf = pool_pdf.loc[pool_pdf["session_idx"].astype(int).isin(window_session_set)].reset_index(drop=True)
+        self.train_pool_pdf = self.get_train_pool_pdf(pool_pdf)
+        self.train_clock_dict = get_train_clock_dict(self.train_pool_pdf) if len(self.train_pool_pdf) else None
+        self.train_decision_ns_arr = np.asarray([get_ny_timestamp(ts).value for ts in self.train_pool_pdf["decision_ts"]], dtype=np.int64) if len(self.train_pool_pdf) else np.array([], dtype=np.int64)
+        self.row_decision_ns_arr = np.asarray([get_ny_timestamp(ts).value for ts in self.row_pdf["decision_ts"]], dtype=np.int64)
+        self.session_bar_dict = {}
+        for session_idx, bar_idx in zip(self.row_pdf["session_idx"].astype(int), self.row_pdf["bar_idx"].astype(int)):
+            self.session_bar_dict.setdefault(int(session_idx), []).append(int(bar_idx))
         session_date_list = [ohlcv_array_dict_in["session_date_list"][int(session_idx)]
                              for session_idx in self.window_session_idx_arr]
         if session_date_list:
@@ -709,6 +858,71 @@ class MinuteLoop:
             initial_capital_in, entry_slippage_in, market_exit_slippage_in,
             config.LIMIT_EXIT_SLIPPAGE_PER_SHARE)
         self.engine.set_session_bounds(self.end_idx_arr, len(self.close_arr))
+
+    # FUNCTION: FEATURE ROWS JOINED ONCE WITH EVERY LABEL KNOWN BEFORE THE LAST ROW
+    def get_train_pool_pdf(self, pool_pdf_in):
+        """
+        The label door is applied per refit by the training mask (label_known_ts strictly before the refit moment).
+        Joining once here gives the same rows as get_minute_train_pdf at each refit, without re-reading the labels.
+        A design without a label source gets label_known_ts = NaT and is masked by the row clock only.
+
+        Args:
+            pool_pdf_in (pd.DataFrame): Minute rows (history and window)
+
+        Returns:
+            pd.DataFrame: Rows with label columns and label_known_ts
+        """
+        # NO ROWS, NO POOL
+        if pool_pdf_in is None or len(pool_pdf_in) == 0:
+            return pd.DataFrame()
+        label_name_list = get_label_source_name_list(self.design_module)
+        if not label_name_list or self.data_context is None:
+            train_pdf = pool_pdf_in.copy()
+            train_pdf["label_known_ts"] = pd.NaT
+            train_pdf["_no_label_bool"] = True
+            return train_pdf.reset_index(drop=True)
+        cutoff_ts = get_ny_timestamp(pool_pdf_in["decision_ts"].iloc[-1]) + pd.Timedelta(minutes=1)
+        train_pdf = pool_pdf_in.copy()
+        train_pdf["_join_ts"] = pd.DatetimeIndex(pd.to_datetime(train_pdf["bar_ts"])).tz_convert("America/New_York")
+        for source_name_str in label_name_list:
+            label_pdf = self.data_context.get_labels(source_name_str, cutoff_ts)
+            if label_pdf.empty:
+                return pool_pdf_in.iloc[0:0].copy()
+            label_pdf = label_pdf.copy()
+            label_pdf["_join_ts"] = get_source_join_ts_series(label_pdf)
+            drop_set = SIGNAL_DROP_COL_SET | {"_join_ts"}
+            keep_col_list = [column_str for column_str in label_pdf.columns if column_str not in drop_set or column_str == "label_known_ts"]
+            take_pdf = label_pdf[["_join_ts"] + [column_str for column_str in keep_col_list if column_str != "_join_ts"]]
+            train_pdf = train_pdf.merge(take_pdf.drop_duplicates("_join_ts", keep="last"), on="_join_ts", how="inner")
+        if len(train_pdf) and "label_known_ts" not in train_pdf.columns:
+            raise ValueError("label rows have no label_known_ts.")
+        return train_pdf.drop(columns=["_join_ts"], errors="ignore").reset_index(drop=True)
+
+    # FUNCTION: THE TRAINING ROWS OF ONE REFIT
+    def get_refit_train_pdf(self, refit_ts_in):
+        """
+        Rows dated inside the window, decided strictly before the refit moment, with a label known strictly before it.
+
+        Args:
+            refit_ts_in: Refit moment
+
+        Returns:
+            pd.DataFrame: Rows the fit may see
+        """
+        # AN EMPTY POOL TRAINS NOTHING
+        if self.train_clock_dict is None:
+            return pd.DataFrame()
+        refit_ns = int(get_ny_timestamp(refit_ts_in).value)
+        mask_arr = self.train_decision_ns_arr < refit_ns
+        if "_no_label_bool" in self.train_pool_pdf.columns:
+            from so.core.rolling_retrain import get_train_window_start_ts
+            refit_ts = get_ny_timestamp(refit_ts_in)
+            start_ts = get_train_window_start_ts(refit_ts, self.train_window_str)
+            if start_ts is not None:
+                mask_arr &= self.train_clock_dict["day_ord_arr"] >= int(start_ts.date().toordinal())
+            return self.train_pool_pdf.loc[mask_arr].drop(columns=["_no_label_bool"]).reset_index(drop=True)
+        mask_arr &= get_fast_training_mask_arr(self.train_clock_dict, refit_ts_in, self.train_window_str)
+        return self.train_pool_pdf.loc[mask_arr].reset_index(drop=True)
 
     # FUNCTION: THE NEXT REFIT MOMENT AFTER THIS ONE
     def get_next_refit_ts(self, refit_ts_in):
@@ -743,11 +957,10 @@ class MinuteLoop:
         # THE RUNNER CHOOSES THE SCORING WINDOW
         next_refit_ts = self.get_next_refit_ts(refit_ts_in)
         refit_ts = get_ny_timestamp(refit_ts_in)
-        block_pdf = self.row_pdf[self.row_pdf["decision_ts"].map(get_ny_timestamp) >= refit_ts]
+        block_mask_arr = self.row_decision_ns_arr >= int(refit_ts.value)
         if next_refit_ts is not None:
-            next_ts = get_ny_timestamp(next_refit_ts)
-            block_pdf = block_pdf[block_pdf["decision_ts"].map(get_ny_timestamp) < next_ts]
-        block_pdf = block_pdf.reset_index(drop=True)
+            block_mask_arr &= self.row_decision_ns_arr < int(get_ny_timestamp(next_refit_ts).value)
+        block_pdf = self.row_pdf.loc[block_mask_arr].reset_index(drop=True)
         decision_list = get_shuffled_signal_list(block_pdf, model_in, self.signal_func, self.design_name_str,
                                                  self.feature_col_list)
         self.score_log_list.append({"refit_ts": refit_ts, "next_refit_ts": next_refit_ts,
@@ -776,17 +989,19 @@ class MinuteLoop:
             if self.current_model is not None and get_ny_timestamp(self.current_refit_ts) == get_ny_timestamp(refit_ts):
                 self.score_refit_block(refit_ts, self.current_model)
             return
-        train_pdf = get_minute_train_pdf(self.row_pdf, self.data_context, self.design_module, refit_ts,
-                                         self.train_window_str)
+        train_pdf = self.get_refit_train_pdf(refit_ts)
         self.train_log_list.append({"refit_ts": refit_ts, "row_count": int(len(train_pdf)),
                                     "label_known_ts_list": list(train_pdf["label_known_ts"]) if "label_known_ts" in train_pdf.columns else []})
         self.fitted_refit_list.append(refit_ts)
         self.current_refit_ts = refit_ts
         if self.fit_func is not None:
-            if len(train_pdf) == 0:
-                self.current_model = None
-                return
-            self.current_model = self.fit_func(train_pdf)
+            # AN EMPTY TRAINING SET IS PASSED TO THE DESIGN, WHICH DECIDES WHAT IT MEANS (USUALLY: NO MODEL, NO ENTRY)
+            if callable(getattr(self.design, "fit_shared", None)) and getattr(self.design, "FIT_KEY_STR", None):
+                # CANDIDATES WITH THE SAME FIT KEY SHARE ONE FIT OF THE SAME ROWS (ONE RUN, ONE CODE VERSION)
+                shared_model = get_shared_fit(str(self.design.FIT_KEY_STR), train_pdf, self.design.fit_shared)
+                self.current_model = self.design.finish_fit(shared_model)
+            else:
+                self.current_model = self.fit_func(train_pdf)
         self.score_refit_block(refit_ts, self.current_model)
 
     # FUNCTION: APPLY THIS SESSION'S FILLS AND EXITS
@@ -806,7 +1021,10 @@ class MinuteLoop:
         is_last_session = int(session_pos_in) == len(self.window_session_idx_arr) - 1
         last_bar_idx = len(self.close_arr) - 1
         fill_idx_list = []
-        for bar_idx, recorded_dict in self.block_decision_dict.items():
+        for bar_idx in self.session_bar_dict.get(session_idx, []):
+            if bar_idx not in self.block_decision_dict:
+                continue
+            recorded_dict = self.block_decision_dict[bar_idx]
             if int(bar_idx) < start_idx or int(bar_idx) > end_idx:
                 continue
             fill_idx = int(bar_idx) + int(config.DECISION_TO_ENTRY_BAR_OFFSET)
@@ -841,9 +1059,7 @@ class MinuteLoop:
             self.target_weight_list.append(np.nan)
         else:
             self.target_weight_list.append(1.0 if state_dict["in_position"] else 0.0)
-        session_row_pdf = self.row_pdf[self.row_pdf["session_idx"] == session_idx]
-        for _, row in session_row_pdf.iterrows():
-            bar_idx = int(row["bar_idx"])
+        for bar_idx in self.session_bar_dict.get(session_idx, []):
             if bar_idx not in self.block_decision_dict:
                 continue
             self.decision_dict_list.append(dict(self.block_decision_dict[bar_idx]))

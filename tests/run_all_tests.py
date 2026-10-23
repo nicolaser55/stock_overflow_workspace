@@ -13,9 +13,9 @@ Each suite runs in its own interpreter (plain asserts; a failing suite stops wit
 Each suite gets its own empty temporary SO_DATA_PATH. If SO_DATA_PATH was already set, the trial log under that
 folder must keep the same size and modification time.
 
-    tests/test_shared_and_exp01.py   shared pipeline code (execution, targets, features, schedule, bad ticks) and exp01
+    tests/test_pipeline_shared.py    shared pipeline code (execution, barrier targets, features, costs, bad ticks)
     tests/test_daily_shared.py       shared daily code: daily features and label, exit/re-entry simulator, schedule, evaluation, trial log
-    tests/test_experiments.py        the daily experiment designs on the runner (exp02-exp07, exp12, exp13), view histories, look-ahead
+    tests/test_experiments.py        the experiment designs on the runner (exp01 model; exp02-exp07, exp12, exp13 streams), view histories, look-ahead
     tests/test_continuous_replay.py  continuous replay, episode scorecard, log-excess bootstrap, fractional exposure (Step 0)
     tests/test_vix_features.py       VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, no look-ahead, formulas)
     tests/test_holdout.py            rolling holdout (window, roll, guards, ledger, causal replay; synthetic data only)
@@ -37,7 +37,7 @@ folder must keep the same size and modification time.
 """
 
 # DEFINE THE SUITES
-SUITE_LIST = ["test_shared_and_exp01.py", "test_daily_shared.py", "test_experiments.py", "test_continuous_replay.py", "test_vix_features.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py", "test_runner_engines.py", "test_runner_minute.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_holdout_baselines.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
+SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_experiments.py", "test_continuous_replay.py", "test_vix_features.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py", "test_runner_engines.py", "test_runner_minute.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_holdout_baselines.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 

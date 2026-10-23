@@ -345,6 +345,10 @@ def run_lookahead_job_dict(job_dict_in):
         set_runs_root_str(job_dict_in["runs_root_str"])
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
+    # THE SAME RUN'S FIT CACHE: A REFIT ON UNCHANGED ROWS (BEFORE THE CUT) IS NOT FITTED AGAIN
+    from so.runner.checkpoint import get_run_folder_str
+    from so.runner.minute import set_fit_cache_folder_str
+    set_fit_cache_folder_str(os.path.join(get_run_folder_str(job_dict_in["run_id_str"]), "fit_cache"))
     candidate = job_dict_in["candidate"]
     cut_date = get_date(job_dict_in["cut_date"])
     kind_str = str(job_dict_in["kind_str"])
@@ -360,7 +364,8 @@ def run_lookahead_job_dict(job_dict_in):
     elif kind_str == KIND_PERTURBATION_STR:
         check_ohlcv_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict, cut_date)
         check_context = get_lookahead_perturbed_context(data_context, ohlcv_array_dict, cut_date, check_ohlcv_dict)
-        check_date2 = date2
+        # ONLY DECISIONS THROUGH THE CUT ARE COMPARED: STOP AT THE SESSION AFTER IT (THE CUT STILL HAS ITS DECISION)
+        check_date2 = get_date(get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict, cut_date)["session_date_list"][-1])
     else:
         raise ValueError(f"unknown look-ahead kind {kind_str!r}")
     result_dict = run_lookahead_stream_dict(design_module, candidate, check_ohlcv_dict, date1, check_date2,
