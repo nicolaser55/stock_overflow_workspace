@@ -367,6 +367,40 @@ def test_replay_matches_stream_varying_stop():
            f"({int(stream_dict['metric_dict']['stop_count'])} stop-outs)")
 
 
+
+# FUNCTION: READING THE RESULT MID-STREAM DOES NOT CHANGE THE STREAM
+def test_result_read_is_pure():
+    """
+    The runner reads get_result_dict at every period end. A trailing-stop stream read after every session must give
+    the same trades and equity as one read at the end (an open cash episode stays open in the engine).
+
+    Returns:
+        None
+    """
+    # IMPORT THE LOOP HERE
+    from so.runner.loop import DailyLoop
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2012-01-03", "2012-12-31", seed_in=17))
+    session_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_list[0], session_list[-1]
+    result_list = []
+    for read_every_bool in (False, True):
+        engine = TrailingStopEngine(trail_design.MAX_CASH_SESSIONS)
+        loop = DailyLoop(trail_design.DelayedTrailDesign(), ohlcv_array_dict, date1, date2, engine_in=engine,
+                         initial_weight_in=1.0, design_file_path_str_in=trail_design.__file__)
+        if read_every_bool:
+            for session_date in session_list:
+                loop.run_through_date(session_date)
+                loop.get_result_dict()
+        else:
+            loop.run_through_date(date2)
+        result_list.append(loop.get_result_dict())
+    once_dict, every_dict = result_list
+    assert int(once_dict["metric_dict"]["stop_count"]) > 2 and len(once_dict["trade_pdf"]) == len(every_dict["trade_pdf"])
+    assert once_dict["trade_pdf"]["buy_idx"].tolist() == every_dict["trade_pdf"]["buy_idx"].tolist()
+    assert np.allclose(once_dict["daily_equity_pdf"]["equity"], every_dict["daily_equity_pdf"]["equity"], atol=1e-9)
+    passed(f"reading the trailing engine result after every session changes nothing ({len(once_dict['trade_pdf'])} trades)")
+
+
 # FUNCTION: BARRIER ENGINE MATCHES THE OLD SIMULATOR ON RANDOM STREAMS
 def test_barrier_parity_random_streams():
     """
@@ -691,6 +725,7 @@ if __name__ == "__main__":
         test_trailing_parity_random_streams()
         test_trailing_daily_loop_constant_k()
         test_replay_matches_stream_varying_stop()
+        test_result_read_is_pure()
         test_barrier_parity_random_streams()
         test_barrier_same_bar_sl_wins()
         test_barrier_half_day_exit()

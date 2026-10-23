@@ -813,15 +813,16 @@ class TrailingStopEngine(Engine):
         Returns:
             dict: trade_pdf, episode_pdf, daily_equity_pdf, metric_dict
         """
-        # AN OPEN CASH EPISODE IS CLOSED AS WINDOW_END (SAME AS THE OLD SIMULATOR)
+        # AN OPEN CASH EPISODE IS REPORTED AS WINDOW_END (SAME AS THE OLD SIMULATOR). READ-ONLY: THE RUNNER CALLS THIS
+        # AT EVERY PERIOD END OF A STREAM, SO THE OPEN EPISODE MUST STAY OPEN IN THE ENGINE
+        episode_dict_list = list(self.episode_dict_list)
         if self.episode_dict is not None:
-            self.episode_dict.update({"reentry_ts": self._window_end_ts,
-                                      "reentry_fill_price": self._window_end_close_float,
+            open_episode_dict = dict(self.episode_dict)
+            open_episode_dict.update({"reentry_ts": self._window_end_ts, "reentry_fill_price": self._window_end_close_float,
                                       "reentry_reason": "window_end"})
-            self.episode_dict_list.append(self.episode_dict)
-            self.episode_dict = None
+            episode_dict_list.append(open_episode_dict)
         trade_pdf = pd.DataFrame(self.transaction_dict_list)
-        episode_pdf = pd.DataFrame(self.episode_dict_list)
+        episode_pdf = pd.DataFrame(episode_dict_list)
         daily_equity_pdf = pd.DataFrame(self.equity_dict_list)
         if not episode_pdf.empty and "exit_fill_price" in episode_pdf.columns and "reentry_fill_price" in episode_pdf.columns:
             episode_pdf["share_gain_pct"] = episode_pdf["exit_fill_price"] / episode_pdf["reentry_fill_price"] - 1

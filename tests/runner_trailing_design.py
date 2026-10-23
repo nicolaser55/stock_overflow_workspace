@@ -113,6 +113,26 @@ class VaryingTrailDesign(TrailDesign):
         return {"target_weight": target_weight, "flatten_bool": False, "trail_multiple": self.trail_multiple_float,
                 "volatility": volatility_float, "reentry_reason": "delay"}
 
+
+# CLASS: A DESIGN THAT STAYS IN CASH FOR 3 DECISIONS AFTER EACH STOP-OUT
+class DelayedTrailDesign(TrailDesign):
+    """Re-enters on the 3rd cash decision, so cash spans several sessions."""
+
+    # FUNCTION: RE-ENTER AFTER 3 CASH DECISIONS
+    def decide(self, view_in):
+        """
+        Args:
+            view_in (DecisionView): View at this moment
+
+        Returns:
+            dict: target_weight, trail_multiple, volatility
+        """
+        # THE SNAPSHOT COUNTS THIS DECISION
+        state_dict = view_in.get_engine_state_dict()
+        target_weight = 1.0 if (not state_dict["in_position"] and state_dict["cash_session_count"] >= 3) else float("nan")
+        return {"target_weight": target_weight, "flatten_bool": False, "trail_multiple": self.trail_multiple_float,
+                "volatility": self.volatility_float, "reentry_reason": "delay"}
+
 # FUNCTION: A FRESH DESIGN OBJECT FOR ONE CANDIDATE
 def get_candidate_design(candidate_in):
     """
