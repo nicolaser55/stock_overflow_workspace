@@ -428,7 +428,7 @@ def add_tsday_fwd_label_known_ts_pdf(label_pdf_in):
     for column_str in label_column_list:
         cell_series = stamped_pdf[column_str]
         if cell_series.dtype == object:
-            cell_series = cell_series.replace("", np.nan)
+            cell_series = cell_series.replace("", np.nan).infer_objects(copy=False)
         stamped_pdf[column_str] = pd.to_numeric(cell_series, errors="coerce")
     # AN UNFINISHED ROW HAS NO CLOCK AND MUST NOT ENTER THE FEED
     keep_mask = [pd.notna(label_ts) for label_ts in stamped_pdf["label_known_ts"]]
@@ -731,6 +731,10 @@ def get_perturbed_feature_pdf(feature_pdf_in, decision_ts_in, seed_int_in, sourc
             rng.shuffle(shuffled_arr)
             perturbed_pdf.loc[late_idx, column_str] = shuffled_arr
             continue
+        # AN INTEGER COLUMN (VOLUME, COUNTS) BECOMES FLOAT FIRST: PANDAS DID THIS SILENTLY BEFORE AND WARNS NOW
+        if pd.api.types.is_integer_dtype(column_series):
+            perturbed_pdf[column_str] = column_series.astype(float)
+            column_series = perturbed_pdf[column_str]
         noise_arr = rng.normal(0.0, 0.01, len(late_idx))
         perturbed_pdf.loc[late_idx, column_str] = column_series.loc[late_idx].to_numpy(dtype=float) * 1.25 + noise_arr
     # KEEP A BAR'S HIGH AND LOW CONSISTENT WITH ITS OPEN AND CLOSE
@@ -1024,6 +1028,10 @@ class DataContext:
         child_dict["SPY_1MIN"] = get_spy_frame_pdf(spy_array_dict_in)
         return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list, self.declared_name_list)
 
+# TSDAY COLUMNS COMPUTED FROM BARS AFTER THE DECISION BAR (NOT SERVED ON THE FEATURE PATH; THEY STAY ON TSDAY_FWD ROWS,
+# WHICH ARE ONLY SERVED 20 SESSIONS LATER)
+TSDAY_AFTER_DECISION_COLUMN_LIST = ["fill_open", "session_high", "session_low", "session_close"]
+
 # FUNCTION: DROP TSDAY COLUMNS THAT LOOK FORWARD
 def get_feature_column_pdf(source_name_str_in, feature_pdf_in, columns_in):
     """
@@ -1041,9 +1049,11 @@ def get_feature_column_pdf(source_name_str_in, feature_pdf_in, columns_in):
     if source_name_str_in != "TSDAY":
         return feature_pdf_in
     label_column_list = [column_str for column_str in feature_pdf_in.columns if column_str.startswith("fwd_") or column_str.startswith("y_fwd")]
-    if columns_in is not None and any(column_str in label_column_list for column_str in columns_in):
-        raise ValueError("TSDAY forward-return columns are labels and are not served through get.")
-    return feature_pdf_in.drop(columns=label_column_list)
+    # COLUMNS OF THE SAME ROW THAT ARE ONLY KNOWN AFTER THE DECISION BAR (THE 15:59 FILL OPEN, THE COMPLETE SESSION)
+    late_column_list = [column_str for column_str in TSDAY_AFTER_DECISION_COLUMN_LIST if column_str in feature_pdf_in.columns]
+    if columns_in is not None and any(column_str in label_column_list + late_column_list for column_str in columns_in):
+        raise ValueError("TSDAY forward-return and after-decision columns are not served through get.")
+    return feature_pdf_in.drop(columns=label_column_list + late_column_list)
 
 # FUNCTION: BUILD THE RUNNER'S CONTEXT FROM ARRAYS AND ANY EXTRA FRAMES
 def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_limit_ts_in=None, declared_name_list_in=None):

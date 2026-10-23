@@ -112,8 +112,8 @@ def get_test_trial_log_path_str(file_name_str_in):
     return os.path.join(folder_str, file_name_str_in)
 
 
-# THE OLD SIMULATOR'S SESSION TIMING LIVES IN so.runner.calibration (SHARED WITH THE PORT CALIBRATIONS)
-from so.runner.calibration import run_trailing_session_timing_dict as run_trailing_parity_dict
+# THE OLD SIMULATOR'S SESSION TIMING (TEST REFERENCE)
+from trailing_timing_reference import run_trailing_session_timing_dict as run_trailing_parity_dict
 
 
 # FUNCTION: ASSERT TRAILING ENGINE MATCHES THE OLD SIMULATOR

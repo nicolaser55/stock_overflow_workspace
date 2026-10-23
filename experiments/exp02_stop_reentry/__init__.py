@@ -1,1 +1,3 @@
-"""exp02_stop_reentry_v2: volatility trailing stop and a weekly logistic re-entry, re-run under the current rules, not new evidence."""
+"""
+exp02_stop_reentry: volatility trailing stop, re-entry when a weekly logistic model says so. Protocol: experiments/exp02_stop_reentry/PROTOCOL.md.
+"""

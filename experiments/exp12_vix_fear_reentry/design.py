@@ -1,507 +1,147 @@
 import numpy as np
-import pandas as pd
-# IMPORT THE SHARED CONFIGURATION AND THE EXPERIMENT CONFIGURATION
-from so import config
+# IMPORT THE EXPERIMENT CONFIGURATION, THE SHARED RULE DESIGN AND THE VIX HISTORY
 from experiments.exp12_vix_fear_reentry import config as exp_config
-from experiments.exp12_vix_fear_reentry.rules import get_rule_builder_func, get_rule_candidate_list, get_unmodified_candidate_list
+from so.features.rule_design import RuleDesign, get_value_float, get_light_count_int
+from so.features.view_history import VixPrevHistory
 
 """
-Holdout Design: exp12_vix_fear_reentry_v2
+Runner Design: exp12_vix_fear_reentry
 
-Re-run of protocol 1.0 under the current rules, not new evidence. Six fixed VIX modifications of E1 and E2. A
-candidate's period score is the slice of one continuous path. VIX features use the previous session's daily close,
-read through the point-in-time context.
+Two exits, each with three VIX modifications (6 candidates). Invested by default; trailing-stop engine without a stop;
+no forced buy-back.
+    E1  exit when the 15:58 close is below the 200-session average; original re-entry when it is back above
+    E2  exit when at least 4 of exp07's 5 lights are on; original re-entry when fewer than 3 are on
+    M1  also re-enter when vix_level_prev <= 0.85 x its maximum from the exit decision through today
+    M2  also re-enter when vix_term_prev < 1 after it was >= 1 on some decision since the exit decision
+    M3  ignore the exit while vix_term_prev >= 1 or vix_pct250_prev >= 0.9 (a missing value does not suppress)
+After an M1 or M2 re-entry a new exit needs a fresh signal (off at least once). VIX values are the previous date's
+close (VIX_DAILY, VIX3M_DAILY), at most 3 sessions old.
 """
 
-# THE 6 RULES AND THE 2 UNMODIFIED EXITS
-_RULE_LIST = get_rule_candidate_list()
-_UNMODIFIED_LIST = get_unmodified_candidate_list()
+# THE 6 CANDIDATES: E1M1, E1M2, E1M3, E2M1, E2M2, E2M3
+CANDIDATE_LIST = [f"{exit_str}{modification_str}" for exit_str in exp_config.EXIT_RULE_STR_LIST for modification_str in exp_config.MODIFICATION_STR_LIST]
 
-# FUNCTION: THE CANDIDATE NAME
-def get_candidate_name_str(candidate_dict_in):
-    """
-    Names one rule.
-
-    Args:
-        candidate_dict_in (dict): One element of get_rule_candidate_list
-
-    Returns:
-        str: Name
-    """
-    # RETURN THE NAME
-    return str(candidate_dict_in["candidate_name"])
-
-# FUNCTION: PARSE A CANDIDATE NAME
-def parse_candidate_dict(candidate_str_in):
-    """
-    Recovers the rule dictionary from its name, including the unmodified exits.
-
-    Args:
-        candidate_str_in (str): Name
-
-    Returns:
-        dict: The rule
-    """
-    # MATCH THE NAME
-    for candidate_dict in _RULE_LIST + _UNMODIFIED_LIST:
-        if get_candidate_name_str(candidate_dict) == str(candidate_str_in):
-            return candidate_dict
-    raise ValueError(f"unknown candidate '{candidate_str_in}'.")
-
-# DEFINE HOW CANDIDATE PERIODS ARE FORMED
-PERIOD_RULE = {"embargo_sessions": exp_config.EMBARGO_TRADING_DAYS, "train_years": [exp_config.FIXED_TRAIN_WINDOW_YEARS]}
-# DEFINE THE 6 CANDIDATES
-CANDIDATE_LIST = [get_candidate_name_str(candidate_dict) for candidate_dict in _RULE_LIST]
-# DEFINE THE SELECTION RULE (MEAN OF THE LAST 4 QUARTERS; TIES: THE FIXED RANK, 0 FIRST)
-SELECTION_RULE = {"pooled_periods": exp_config.SELECTION_POOLED_QUARTER_COUNT, "tie_break": [("tie_order", True)]}
-# DEFINE THE TIE COLUMN THE RUNNER ATTACHES
-CANDIDATE_TIE_VALUE_DICT = {"tie_order": {get_candidate_name_str(candidate_dict): int(candidate_dict["tie_order"]) for candidate_dict in _RULE_LIST}}
-# THE UNMODIFIED EXITS, E2 FIRST, FOR THE INFORMATION-TEST BASELINE
-UNMODIFIED_CANDIDATE_LIST = ["E2none", "E1none"]
-UNMODIFIED_SELECTION_RULE = {"pooled_periods": exp_config.SELECTION_POOLED_QUARTER_COUNT, "tie_break": [("tie_order", True)]}
-UNMODIFIED_TIE_VALUE_DICT = {"tie_order": {"E2none": 0, "E1none": 1}}
-# COPY THE NAME AND THE PROTOCOL VERSION
+# THE RUNNER INTERFACE
 EXPERIMENT_NAME = exp_config.EXPERIMENT_NAME
 PROTOCOL_VERSION = exp_config.PROTOCOL_VERSION
-# SPY BARS AND THE TWO DAILY VIX SERIES. THE _prev FEATURES USE ONLY THE PREVIOUS SESSION'S CLOSE.
-DATA_SOURCE_LIST = ["SPY_1MIN", "VIX_DAILY", "VIX3M_DAILY"]
-# CACHES LIVE FOR ONE REPLAY
-_cache_dict = {}
+PERIOD_RULE = {"embargo_sessions": exp_config.EMBARGO_TRADING_DAYS, "train_years": [exp_config.FIXED_TRAIN_WINDOW_YEARS]}
+SELECTION_RULE = {"pooled_periods": exp_config.SELECTION_POOLED_QUARTER_COUNT, "tie_break": [("tie_order", True)]}
+CANDIDATE_TIE_VALUE_DICT = {"tie_order": {name: int(exp_config.TIE_ORDER_DICT[name]) for name in CANDIDATE_LIST}}
+DATA_SOURCE_LIST = ["SPY_1MIN", "TSDAY", "VIX_DAILY", "VIX3M_DAILY"]
+ENGINE_NAME = "trailing_stop"
+INITIAL_WEIGHT = 1.0
+MAX_CASH_SESSIONS = exp_config.MAX_CASH_SESSIONS
 
-# FUNCTION: A CHEAP KEY FOR ONE BAR ARRAY
-def get_bar_key_tuple(ohlcv_array_dict_in):
+
+# FUNCTION: A FRESH DESIGN OBJECT FOR ONE CANDIDATE
+def get_candidate_design(candidate_in):
     """
-    Identifies a bar array so a later call on the same bars reuses the path.
-
     Args:
-        ohlcv_array_dict_in (dict): Bars
+        candidate_in (str): Candidate name, e.g. "E1M1"
 
     Returns:
-        tuple: Length, first close, last close, close sum
+        Design: Fresh object
     """
-    # THE CLOSE SUM MOVES WHEN A LATER BAR IS PERTURBED
-    close_arr = np.asarray(ohlcv_array_dict_in["close_arr"], dtype=float)
-    return (int(len(close_arr)), round(float(close_arr[0]), 8), round(float(close_arr[-1]), 8), round(float(close_arr.sum()), 4))
+    # UNKNOWN NAMES ARE A DESIGN ERROR
+    if str(candidate_in) not in CANDIDATE_LIST:
+        raise ValueError(f"unknown candidate {candidate_in!r}")
+    return Design(str(candidate_in), {"exit_rule": str(candidate_in)[:2], "modification": str(candidate_in)[2:]})
 
-# FUNCTION: THE DAILY TABLE, CACHED PER BAR ARRAY
-def get_cached_daily_pdf(ohlcv_array_dict_in):
-    """
-    Builds the daily features once per bar array.
 
-    Args:
-        ohlcv_array_dict_in (dict): Bars
+# CLASS: ONE EXIT AND ONE MODIFICATION
+class Design(RuleDesign):
+    """E1 / E2 with M1 / M2 / M3."""
 
-    Returns:
-        pd.DataFrame: Daily features
-    """
-    # REUSE THE TABLE WHEN THE BARS HAVE NOT CHANGED
-    from so.features.daily_features import get_daily_feature_pdf
-    cache_key = (get_bar_key_tuple(ohlcv_array_dict_in), "daily")
-    if cache_key not in _cache_dict:
-        _cache_dict[cache_key] = get_daily_feature_pdf(ohlcv_array_dict_in)
-    return _cache_dict[cache_key]
+    DATA_SOURCE_LIST = DATA_SOURCE_LIST
+    ENGINE_NAME = ENGINE_NAME
+    COLUMN_LIST = sorted({exp_config.E1_MA_DIST_COL_STR} | {feature_str for feature_str, _comparison, _threshold in exp_config.E2_LIGHT_DICT.values()})
 
-# FUNCTION: THE LAST DECISION MOMENT OF THESE BARS
-def get_last_decision_ts(ohlcv_array_dict_in):
-    """
-    The decision timestamp of the last session.
+    # FUNCTION: ADD THE VIX HISTORY
+    def __init__(self, candidate_str_in, candidate_dict_in):
+        """
+        Args:
+            candidate_str_in (str): Candidate name
+            candidate_dict_in (dict): exit_rule, modification
+        """
+        # THE RULE STATE AND THE VIX STATE
+        super().__init__(candidate_str_in, candidate_dict_in)
+        self.vix_history = VixPrevHistory()
+        self.vix_dict = {"vix_level_prev": np.nan, "vix_term_prev": np.nan, "vix_pct250_prev": np.nan}
 
-    Args:
-        ohlcv_array_dict_in (dict): Bars
+    # FUNCTION: TODAY'S VIX FEATURES (EVERY DECISION, SO THE HISTORY IS COMPLETE)
+    def update_extra(self, view_in):
+        """
+        Args:
+            view_in: DecisionView
 
-    Returns:
-        pd.Timestamp: Decision time
-    """
-    # THE LAST SESSION'S DECISION BAR
-    from so.core.point_in_time import get_decision_ts
-    from so.features.daily_features import get_session_decision_idx_dict
-    decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][-1])
-    return get_decision_ts(ohlcv_array_dict_in["timestamp_index"][decision_idx])
+        Returns:
+            None
+        """
+        # THE PREVIOUS DATE'S CLOSES
+        self.vix_dict = self.vix_history.update(view_in)
 
-# FUNCTION: VIX _prev FEATURES, FROM THE CONTEXT OR ALL MISSING
-def get_cached_vix_feature_pdf(ohlcv_array_dict_in, daily_pdf_in, data_context_in):
-    """
-    Builds vix_level_prev, vix_term_prev and vix_pct250_prev from the context's daily bars. Without a context every
-    value is missing, so M1 and M2 never fire and M3 never suppresses.
+    # FUNCTION: THE BASE EXIT AND ITS ORIGINAL RE-ENTRY
+    def get_base_tuple(self, row_in):
+        """
+        Args:
+            row_in (dict): Today's row
 
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        daily_pdf_in (pd.DataFrame): Daily features
-        data_context_in (DataContext | None): Point-in-time context
+        Returns:
+            tuple: (exit_bool, original_reentry_bool)
+        """
+        # E1 ON THE AVERAGE; E2 ON THE LIGHTS
+        if self.candidate_dict["exit_rule"] == "E1":
+            dist_float = get_value_float(row_in, exp_config.E1_MA_DIST_COL_STR, 0.0)
+            return dist_float < 0, dist_float > 0
+        light_count = get_light_count_int(row_in, exp_config.E2_LIGHT_DICT)
+        return light_count >= int(exp_config.E2_LIGHT_K), light_count < int(exp_config.E2_LIGHT_K) - 1
 
-    Returns:
-        pd.DataFrame: session_idx, date and the three _prev columns
-    """
-    # REUSE THE FEATURES OF THIS BAR ARRAY AND THIS CONTEXT
-    cache_key = (get_bar_key_tuple(ohlcv_array_dict_in), "vix", id(data_context_in))
-    if cache_key in _cache_dict:
-        return _cache_dict[cache_key]
-    feature_pdf = pd.DataFrame({"session_idx": daily_pdf_in["session_idx"].to_numpy(), "date": list(daily_pdf_in["date"]),
-                                "vix_level_prev": np.nan, "vix_term_prev": np.nan, "vix_pct250_prev": np.nan})
-    if data_context_in is not None and data_context_in.has_source_bool("VIX_DAILY") and data_context_in.has_source_bool("VIX3M_DAILY"):
-        from so.features.vix_features import get_vix_feature_pdf, get_vix_table_pdf
-        decision_ts = get_last_decision_ts(ohlcv_array_dict_in)
-        data_context_in.set_decision_ts(decision_ts)
-        vix_pdf = data_context_in.get("VIX_DAILY", decision_ts, columns_in=["date", "close", "available_ts"])
-        vix3m_pdf = data_context_in.get("VIX3M_DAILY", decision_ts, columns_in=["date", "close", "available_ts"])
-        data_context_in.set_decision_ts(None)
-        table_pdf = get_vix_table_pdf(daily_pdf_in, {"vix": vix_pdf, "vix3m": vix3m_pdf})
-        feature_pdf = pd.concat([table_pdf[["session_idx", "date"]].copy(),
-                                 get_vix_feature_pdf(table_pdf, daily_pdf_in["daily_volatility"].to_numpy(), "prev")], axis=1)
-    _cache_dict[cache_key] = feature_pdf
-    return feature_pdf
+    # FUNCTION: THE EXIT, SUPPRESSED UNDER M3
+    def get_exit_bool(self, row_in, view_in):
+        """
+        Args:
+            row_in (dict): Today's row
+            view_in: DecisionView
 
-# FUNCTION: READ SPY AND VIX THROUGH THE CONTEXT
-def read_context_inputs(ohlcv_array_dict_in, data_context_in):
-    """
-    Reads the declared sources as of the last decision in this bar set.
+        Returns:
+            bool: Exit signal
+        """
+        # M3 IGNORES THE EXIT IN FEAR (NaN COMPARISONS ARE FALSE)
+        exit_bool = self.get_base_tuple(row_in)[0]
+        if self.candidate_dict["modification"] == "M3":
+            term_float, pct_float = self.vix_dict["vix_term_prev"], self.vix_dict["vix_pct250_prev"]
+            suppress_bool = (np.isfinite(term_float) and term_float >= exp_config.M3_TERM_THRESHOLD) or \
+                            (np.isfinite(pct_float) and pct_float >= exp_config.M3_PCT250_THRESHOLD)
+            exit_bool = exit_bool and not suppress_bool
+        return bool(exit_bool)
 
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        data_context_in (DataContext | None): Point-in-time context
+    # FUNCTION: ORIGINAL RE-ENTRY, THEN M1 / M2
+    def get_reentry_dict(self, row_in, view_in, state_dict_in):
+        """
+        Args:
+            row_in (dict): Today's row
+            view_in: DecisionView
+            state_dict_in (dict): Engine snapshot
 
-    Returns:
-        None
-    """
-    # SPY THROUGH THE CONTEXT, AS OF THE LAST DECISION MOMENT
-    if data_context_in is None or not len(ohlcv_array_dict_in["session_date_list"]):
-        return
-    if data_context_in.has_source_bool("SPY_1MIN"):
-        decision_ts = get_last_decision_ts(ohlcv_array_dict_in)
-        data_context_in.set_decision_ts(decision_ts)
-        data_context_in.get("SPY_1MIN", decision_ts, columns_in=["timestamp", "close", "available_ts"])
-        data_context_in.set_decision_ts(None)
-    get_cached_vix_feature_pdf(ohlcv_array_dict_in, get_cached_daily_pdf(ohlcv_array_dict_in), data_context_in)
-
-# FUNCTION: DEVELOPMENT PERIODS ON THESE BARS
-def get_bar_period_pdf(ohlcv_array_dict_in):
-    """
-    The replay periods of these bars. Bars that end before the holdout start use the development schedule. Bars that
-    reach the window use the runner's period builder, so a holdout replay slices the same continuous path.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-
-    Returns:
-        pd.DataFrame: Periods
-    """
-    # IMPORT THE SCHEDULE HERE
-    from so.core.holdout import get_active_holdout_window_dict, get_date, get_holdout_period_pdf
-    from so.core.development_span import get_development_period_pdf
-    cache_key = (get_bar_key_tuple(ohlcv_array_dict_in), "periods")
-    if cache_key in _cache_dict:
-        return _cache_dict[cache_key]
-    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
-    window_dict = get_active_holdout_window_dict()
-    window_start = get_date(window_dict["start"])
-    if session_date_list[-1] >= window_start:
-        period_rule = type("PeriodRule", (), {"PERIOD_RULE": PERIOD_RULE})
-        period_pdf = get_holdout_period_pdf(period_rule, session_date_list, window_dict)
-    else:
-        anchor_list = session_date_list + [window_start]
-        period_pdf, _fold_pdf = get_development_period_pdf(anchor_list, ohlcv_array_dict_in, exp_config.EMBARGO_TRADING_DAYS, exp_config.FIXED_TRAIN_WINDOW_YEARS)
-    if period_pdf is None or len(period_pdf) == 0:
-        raise ValueError("these bars have no replay period.")
-    _cache_dict[cache_key] = period_pdf
-    return period_pdf
-
-# FUNCTION: ROUND-TRIP ROWS AS THE TRADE TABLE THE RUNNER COUNTS
-def get_trade_pdf(transaction_pdf_in):
-    """
-    One buy row and one sell row per round trip.
-
-    Args:
-        transaction_pdf_in (pd.DataFrame): Simulator transactions
-
-    Returns:
-        pd.DataFrame: trade_ts, delta_share_count, reason
-    """
-    # AN EMPTY PATH HAS NO TRADES
-    if transaction_pdf_in is None or len(transaction_pdf_in) == 0:
-        return pd.DataFrame(columns=["trade_ts", "delta_share_count", "reason"])
-    row_dict_list = []
-    for _, row in transaction_pdf_in.iterrows():
-        row_dict_list.append({"trade_ts": row["buy_ts"], "delta_share_count": float(row["share_count"]), "reason": row["entry_reason"]})
-        row_dict_list.append({"trade_ts": row["sell_ts"], "delta_share_count": -float(row["share_count"]), "reason": row["exit_reason"]})
-    return pd.DataFrame(row_dict_list)
-
-# FUNCTION: ATTACH A 0/1 WEIGHT AND THE TRADES
-def attach_path_columns(simulation_dict_in):
-    """
-    Weight is 1 while the session ends invested and 0 in cash.
-
-    Args:
-        simulation_dict_in (dict): Simulator output
-
-    Returns:
-        dict: The same dict, with weight and trade_pdf
-    """
-    # COPY THE EQUITY AND MARK THE POSITION
-    equity_pdf = simulation_dict_in["daily_equity_pdf"].copy()
-    equity_pdf["weight"] = equity_pdf["in_position"].astype(float)
-    simulation_dict_in["daily_equity_pdf"] = equity_pdf
-    simulation_dict_in["trade_pdf"] = get_trade_pdf(simulation_dict_in["transaction_pdf"])
-    return simulation_dict_in
-
-# FUNCTION: SIMULATE ONE FIXED RULE OVER A SPAN
-def simulate_fixed_rule_dict(ohlcv_array_dict_in, daily_pdf_in, vix_feature_pdf_in, date1_in, date2_in, candidate_dict_in):
-    """
-    One rule, no stop, no forced buy-back.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        daily_pdf_in (pd.DataFrame): Daily features
-        vix_feature_pdf_in (pd.DataFrame): VIX _prev features
-        date1_in, date2_in: Span
-        candidate_dict_in (dict): Rule
-
-    Returns:
-        dict: Simulator output
-    """
-    # IMPORT THE SIMULATOR HERE
-    from so.core.reentry_simulation import simulate_stop_reentry_dict
-    exit_arr, reentry_func, reason_str = get_rule_builder_func(daily_pdf_in, vix_feature_pdf_in)(candidate_dict_in)
-    return simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(len(daily_pdf_in), np.nan), None, reentry_func, reason_str,
-                                      exit_signal_arr_in=exit_arr, max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-
-# FUNCTION: ONE CONTINUOUS PATH OF ONE CANDIDATE, CACHED
-def get_continuous_candidate_dict(ohlcv_array_dict_in, candidate_str_in, data_context_in):
-    """
-    Replays one candidate from the first development period through the last. Later period calls reuse it.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars through the development end
-        candidate_str_in (str): Candidate name
-        data_context_in (DataContext | None): Point-in-time context
-
-    Returns:
-        dict: simulation, period_pdf, period_return_pdf
-    """
-    # REUSE THE PATH
-    cache_key = (get_bar_key_tuple(ohlcv_array_dict_in), "path", str(candidate_str_in), id(data_context_in))
-    if cache_key in _cache_dict:
-        return _cache_dict[cache_key]
-    from so.core.continuous_replay import get_period_return_pdf
-    daily_pdf = get_cached_daily_pdf(ohlcv_array_dict_in)
-    vix_feature_pdf = get_cached_vix_feature_pdf(ohlcv_array_dict_in, daily_pdf, data_context_in)
-    period_pdf = get_bar_period_pdf(ohlcv_array_dict_in)
-    date1, date2 = period_pdf["period_start"].iloc[0], period_pdf["period_end"].iloc[-1]
-    simulation_dict = attach_path_columns(simulate_fixed_rule_dict(ohlcv_array_dict_in, daily_pdf, vix_feature_pdf, date1, date2, parse_candidate_dict(candidate_str_in)))
-    period_return_pdf = get_period_return_pdf(simulation_dict["daily_equity_pdf"], period_pdf)
-    result_dict = {"simulation_dict": simulation_dict, "period_pdf": period_pdf, "period_return_pdf": period_return_pdf}
-    _cache_dict[cache_key] = result_dict
-    return result_dict
-
-# FUNCTION: A DAILY EQUITY WHOSE TOTAL RETURN EQUALS A CONTINUOUS SLICE
-def get_rebased_slice_pdf(daily_equity_pdf_in, date1_in, date2_in, period_return_float_in):
-    """
-    Keeps the slice's weights and sets the equity so the runner's last/initial formula equals the slice return.
-
-    Args:
-        daily_equity_pdf_in (pd.DataFrame): Continuous daily equity
-        date1_in, date2_in: Period bounds
-        period_return_float_in (float): Continuous period return
-
-    Returns:
-        pd.DataFrame: Daily equity of the period
-    """
-    # KEEP THE SLICE AND SET THE LAST EQUITY TO THE CONTINUOUS PERIOD RETURN
-    start_date, end_date = pd.Timestamp(date1_in).date(), pd.Timestamp(date2_in).date()
-    equity_pdf = daily_equity_pdf_in.copy()
-    equity_pdf["date"] = [pd.Timestamp(day).date() for day in equity_pdf["date"]]
-    slice_pdf = equity_pdf[(equity_pdf["date"] >= start_date) & (equity_pdf["date"] <= end_date)].copy().reset_index(drop=True)
-    slice_pdf["equity"] = float(config.INITIAL_CAPITAL)
-    slice_pdf.loc[slice_pdf.index[-1], "equity"] = float(config.INITIAL_CAPITAL) * (1.0 + float(period_return_float_in))
-    slice_pdf["weight"] = slice_pdf["in_position"].astype(float)
-    return slice_pdf
-
-# FUNCTION: REPLAY ONE CANDIDATE OVER ONE PERIOD
-def run_candidate_replay_dict(ohlcv_array_dict_in, date1_in, date2_in, candidate_in, data_context_in=None):
-    """
-    The period return of one continuous path when the dates are a development period. Any other span is a fresh window.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        date1_in, date2_in: Period bounds
-        candidate_in (str): Candidate name
-        data_context_in (DataContext | None): Point-in-time context
-
-    Returns:
-        dict: daily_equity_pdf, trade_pdf, metric_dict
-    """
-    # READ SPY AND VIX
-    read_context_inputs(ohlcv_array_dict_in, data_context_in)
-    start_date, end_date = pd.Timestamp(date1_in).date(), pd.Timestamp(date2_in).date()
-    try:
-        continuous_dict = get_continuous_candidate_dict(ohlcv_array_dict_in, str(candidate_in), data_context_in)
-    except ValueError:
-        continuous_dict = None
-    if continuous_dict is not None:
-        period_pdf = continuous_dict["period_pdf"]
-        match_pdf = period_pdf[(period_pdf["period_start"].map(lambda value: pd.Timestamp(value).date()) == start_date)
-                               & (period_pdf["period_end"].map(lambda value: pd.Timestamp(value).date()) == end_date)]
-        if len(match_pdf) == 1:
-            period_id = int(match_pdf["period_id"].iloc[0])
-            period_return = float(continuous_dict["period_return_pdf"].loc[continuous_dict["period_return_pdf"]["period_id"] == period_id, "total_return"].iloc[0])
-            slice_pdf = get_rebased_slice_pdf(continuous_dict["simulation_dict"]["daily_equity_pdf"], start_date, end_date, period_return)
-            return {"daily_equity_pdf": slice_pdf, "trade_pdf": continuous_dict["simulation_dict"]["trade_pdf"],
-                    "metric_dict": {"total_return": period_return}}
-    # A SPAN THAT IS NOT A DEVELOPMENT PERIOD (A TEST WINDOW) IS A FRESH SIMULATION
-    daily_pdf = get_cached_daily_pdf(ohlcv_array_dict_in)
-    vix_feature_pdf = get_cached_vix_feature_pdf(ohlcv_array_dict_in, daily_pdf, data_context_in)
-    return attach_path_columns(simulate_fixed_rule_dict(ohlcv_array_dict_in, daily_pdf, vix_feature_pdf, date1_in, date2_in, parse_candidate_dict(candidate_in)))
-
-# FUNCTION: THE CANDIDATE IN FORCE ON ONE SESSION
-def get_session_candidate_str(session_date_in, period_pdf_in, selection_pdf_in):
-    """
-    The governing candidate of the period that contains the session.
-
-    Args:
-        session_date_in (datetime.date): Session
-        period_pdf_in (pd.DataFrame): Periods
-        selection_pdf_in (pd.DataFrame): Candidate in force
-
-    Returns:
-        str | None: Candidate
-    """
-    # THE PERIOD THAT COVERS THE SESSION
-    session_day = pd.Timestamp(session_date_in).date()
-    cover_pdf = period_pdf_in[(period_pdf_in["period_start"].map(lambda value: pd.Timestamp(value).date()) <= session_day)
-                              & (period_pdf_in["period_end"].map(lambda value: pd.Timestamp(value).date()) >= session_day)]
-    if cover_pdf.empty:
-        return None
-    period_id = int(cover_pdf["period_id"].iloc[-1])
-    return selection_pdf_in.loc[selection_pdf_in["period_id"] == period_id, "candidate"].iloc[0]
-
-# FUNCTION: REPLAY THE CONTINUOUS PRIOR-ONLY PATH
-def run_prior_only_path_dict(ohlcv_array_dict_in, period_pdf_in, selection_pdf_in, data_context_in=None):
-    """
-    One path from the first period through the last. Each session uses the exit and the re-entry rule in force.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        period_pdf_in (pd.DataFrame): Periods
-        selection_pdf_in (pd.DataFrame): Candidate in force per period
-        data_context_in (DataContext | None): Point-in-time context
-
-    Returns:
-        dict: daily_equity_pdf, trade_pdf, target_weight_arr, signal_arr, decision_session_list
-    """
-    # READ SPY AND VIX AND BUILD THE SWITCHING SIGNALS
-    from so.core.reentry_simulation import simulate_stop_reentry_dict
-    read_context_inputs(ohlcv_array_dict_in, data_context_in)
-    daily_pdf = get_cached_daily_pdf(ohlcv_array_dict_in)
-    vix_feature_pdf = get_cached_vix_feature_pdf(ohlcv_array_dict_in, daily_pdf, data_context_in)
-    date1, date2 = period_pdf_in["period_start"].iloc[0], period_pdf_in["period_end"].iloc[-1]
-    session_count = len(daily_pdf)
-    exit_arr = np.zeros(session_count, dtype=bool)
-    signal_arr = np.full(session_count, np.nan)
-    # ONE EXIT ARRAY AND ONE RE-ENTRY RULE PER CANDIDATE. THE RE-ENTRY READS THE OPEN EPISODE.
-    builder_func = get_rule_builder_func(daily_pdf, vix_feature_pdf)
-    signal_cache_dict = {}
-    for session_idx, session_date in enumerate(ohlcv_array_dict_in["session_date_list"]):
-        candidate_str = get_session_candidate_str(session_date, period_pdf_in, selection_pdf_in)
-        if candidate_str is None:
-            continue
-        if candidate_str not in signal_cache_dict:
-            exit_signal_arr, candidate_reentry_func, _reason_str = builder_func(parse_candidate_dict(candidate_str))
-            signal_cache_dict[candidate_str] = (exit_signal_arr, candidate_reentry_func)
-        exit_bool = bool(signal_cache_dict[candidate_str][0][session_idx])
-        exit_arr[session_idx] = exit_bool
-        signal_arr[session_idx] = 1.0 if exit_bool else 0.0
-    # THE RE-ENTRY OF THE CANDIDATE IN FORCE, INCLUDING ITS FRESH-SIGNAL FLAG
-    def reentry_func(session_idx, cash_session_count, episode_dict):
-        candidate_str = get_session_candidate_str(ohlcv_array_dict_in["session_date_list"][session_idx], period_pdf_in, selection_pdf_in)
-        if candidate_str is None:
-            return False
-        return bool(signal_cache_dict[candidate_str][1](session_idx, cash_session_count, episode_dict))
-    simulation_dict = attach_path_columns(simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, np.full(session_count, np.nan), None,
-                                                                    reentry_func, "rule", exit_signal_arr_in=exit_arr, max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS))
-    # THE ARRAYS THE LOOK-AHEAD CHECK COMPARES, ON THE PATH SESSIONS ONLY
-    start_date, end_date = pd.Timestamp(date1).date(), pd.Timestamp(date2).date()
-    session_date_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
-    path_idx_list = [idx for idx, session_date in enumerate(session_date_list) if start_date <= session_date <= end_date]
-    weight_arr = simulation_dict["daily_equity_pdf"]["weight"].to_numpy(dtype=float)
-    if len(weight_arr) != len(path_idx_list):
-        raise ValueError("the path equity and the path sessions have different lengths.")
-    simulation_dict["target_weight_arr"] = weight_arr
-    simulation_dict["signal_arr"] = signal_arr[path_idx_list]
-    simulation_dict["exit_signal_arr"] = exit_arr
-    simulation_dict["reentry_func"] = reentry_func
-    simulation_dict["vix_feature_pdf"] = vix_feature_pdf
-    simulation_dict["decision_session_list"] = [session_date_list[idx] for idx in path_idx_list]
-    return simulation_dict
-
-# THE RETURNS THE DEVELOPMENT REPORT PASSES TO THE SUCCESS CRITERIA
-BASELINE_COMPARISON_KEY_LIST = ["unmodified", "random_exit_median", "random_reentry_median"]
-
-# FUNCTION: MATCHED RANDOM FAMILIES AND, WHEN PERIODS ARE PASSED, THE UNMODIFIED PATH
-def get_baseline_return_dict(ohlcv_array_dict_in, date1_in, date2_in, data_context_in=None, path_dict_in=None, period_pdf_in=None):
-    """
-    Twenty random exits keep the path's re-entry. Twenty random re-entries keep the path's exit signal. When the path
-    never exits, every random run equals the path. Exit run i uses so.config.RANDOM_SEED + RANDOM_EXIT_SEED_OFFSET + i.
-    Re-entry run i uses so.config.RANDOM_SEED + i. When period_pdf_in is passed, the unmodified {E1, E2} prior-only
-    return is included. The same function is the development report.
-
-    Args:
-        ohlcv_array_dict_in (dict): Bars
-        date1_in, date2_in: Span
-        data_context_in (DataContext | None): Point-in-time context
-        path_dict_in (dict | None): Prior-only path
-        period_pdf_in (pd.DataFrame | None): Periods, required for the unmodified path
-
-    Returns:
-        dict: Both random families and, with periods, the unmodified return
-    """
-    # IMPORT THE RANDOM RULES AND THE SPAN CUT HERE
-    from so.core.reentry_simulation import simulate_stop_reentry_dict, get_random_reentry_func
-    from experiments.exp03_ath_exit.rules import get_random_baseline_probability_dict, get_random_exit_signal_arr
-    from so.core.baseline_report import get_random_family_stat_dict, get_span_path_dict
-    # SPY THROUGH THE CONTEXT, THEN THE PATH ON THIS SPAN
-    read_context_inputs(ohlcv_array_dict_in, data_context_in)
-    path_dict = get_span_path_dict(path_dict_in, ohlcv_array_dict_in, date1_in, date2_in)
-    probability_dict = get_random_baseline_probability_dict(path_dict)
-    path_return = path_dict["metric_dict"]["total_return"]
-    session_count = len(path_dict["exit_signal_arr"])
-    never_bool = not np.isfinite(probability_dict["exit_probability"]) or not np.isfinite(probability_dict["buyback_probability"])
-    exit_list, reentry_list = [], []
-    if never_bool:
-        exit_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-        reentry_list = [path_return] * exp_config.RANDOM_RUN_COUNT
-    else:
-        reentry_func = path_dict["reentry_func"]
-        for run_idx in range(exp_config.RANDOM_RUN_COUNT):
-            exit_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None, reentry_func, "random",
-                                                  exit_signal_arr_in=get_random_exit_signal_arr(session_count, probability_dict["exit_probability"], config.RANDOM_SEED + exp_config.RANDOM_EXIT_SEED_OFFSET + run_idx),
-                                                  max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            reentry_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(session_count, np.nan), None,
-                                                     get_random_reentry_func(probability_dict["buyback_probability"], config.RANDOM_SEED + run_idx), "random",
-                                                     exit_signal_arr_in=path_dict["exit_signal_arr"], max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-            exit_list.append(exit_dict["metric_dict"]["total_return"])
-            reentry_list.append(reentry_dict["metric_dict"]["total_return"])
-    return_dict = {**get_random_family_stat_dict("random_exit", exit_list, path_return),
-                   **get_random_family_stat_dict("random_reentry", reentry_list, path_return),
-                   "random_exit_list": exit_list, "random_reentry_list": reentry_list}
-    # THE UNMODIFIED PATH IS A SECOND REPLAY. THE DEVELOPMENT REPORT ASKS FOR IT WITH THE PERIODS
-    if period_pdf_in is not None:
-        from experiments.exp12_vix_fear_reentry.report import get_unmodified_path_dict
-        return_dict["unmodified"] = get_unmodified_path_dict(ohlcv_array_dict_in, period_pdf_in, data_context_in)["total_return"]
-    return return_dict
-
-# FUNCTION: LOAD DECLARED SOURCES FOR A DEVELOPMENT REPLAY
-def get_development_data_context(session_date_list_in):
-    """
-    Loads DATA_SOURCE_LIST through the development end and returns a development DataContext.
-
-    Args:
-        session_date_list_in (list): Session dates that include the window start
-
-    Returns:
-        DataContext: Development context
-    """
-    # THE DEVELOPMENT END IS BEFORE THE WINDOW
-    from so.core.holdout import get_development_end_date
-    from so.core.point_in_time import DataContext, load_source_frame_dict
-    end_date = get_development_end_date(int(PERIOD_RULE["embargo_sessions"]), session_date_list_in)
-    frame_dict = load_source_frame_dict(list(DATA_SOURCE_LIST), end_date)
-    return DataContext("development", frame_dict_in=frame_dict, declared_name_list_in=list(DATA_SOURCE_LIST))
+        Returns:
+            dict: reentry_bool, require_fresh_exit, reentry_reason
+        """
+        # THE BASE RULE FIRST
+        if self.get_base_tuple(row_in)[1]:
+            return {"reentry_bool": True, "reentry_reason": "original"}
+        modification_str = self.candidate_dict["modification"]
+        exit_session = state_dict_in["last_exit_session"]
+        if modification_str == "M1":
+            level_arr = self.vix_history.level_since_arr(exit_session)
+            level_now = float(self.vix_dict["vix_level_prev"])
+            finite_arr = level_arr[np.isfinite(level_arr)]
+            if np.isfinite(level_now) and len(finite_arr) and level_now <= exp_config.M1_FADE_RATIO * float(finite_arr.max()):
+                return {"reentry_bool": True, "require_fresh_exit": True, "reentry_reason": "M1"}
+        if modification_str == "M2":
+            term_arr = self.vix_history.term_since_arr(exit_session)
+            term_now = float(self.vix_dict["vix_term_prev"])
+            with np.errstate(invalid="ignore"):
+                seen_bool = bool((term_arr >= exp_config.M2_TERM_THRESHOLD).any())
+            if np.isfinite(term_now) and term_now < exp_config.M2_TERM_THRESHOLD and seen_bool:
+                return {"reentry_bool": True, "require_fresh_exit": True, "reentry_reason": "M2"}
+        return {"reentry_bool": False}

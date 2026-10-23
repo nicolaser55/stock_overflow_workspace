@@ -1,3 +1,3 @@
 """
-exp12_vix_fear_reentry_v2: VIX-timed re-entry, re-run under the current rules. Protocol: experiments/exp12_vix_fear_reentry/PROTOCOL.md version 2.0.
+exp12_vix_fear_reentry: two exits (E1, E2) with three VIX modifications of the re-entry or the exit. Protocol: experiments/exp12_vix_fear_reentry/PROTOCOL.md.
 """

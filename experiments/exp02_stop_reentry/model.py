@@ -7,11 +7,8 @@ from sklearn.linear_model import LogisticRegression
 from experiments.exp02_stop_reentry import config as exp_config
 
 """
-Re-entry model of exp02 (the logistic regression of protocol 1.0, kept for version 2.0)
-
-The model is P(the net 20-session forward return is positive). A weekly refit uses the same estimator. A window with
-one class returns that class's rate: the fit is defined, and it is not a different training window. The diagnostic
-LightGBM of protocol 1.0 never placed a trade; version 2.0 does not refit it.
+Re-entry model of exp02: P(the net 20-session forward return is positive), a standardized L2 logistic regression.
+A training window with one class returns that class's rate.
 """
 
 # FUNCTION: FIT THE RE-ENTRY MODEL
@@ -62,28 +59,6 @@ def predict_reentry_proba_arr(model_in, feature_pdf_in, feature_col_list_in):
     if class_idx is None:
         return np.zeros(len(feature_pdf_in))
     return proba_arr[:, class_idx]
-
-# FUNCTION: RE-ENTER WHEN THE SESSION PROBABILITY CLEARS THAT SESSION'S THRESHOLD
-def get_session_threshold_reentry_func(proba_arr_in, threshold_arr_in):
-    """
-    The protocol rule P >= p*, with p* allowed to change by session because each weekly refit has its own training
-    base rate. A missing probability or threshold never re-enters. A constant threshold is the same rule as
-    so.core.reentry_simulation.get_model_reentry_func.
-
-    Args:
-        proba_arr_in (np.ndarray): Probability per session position
-        threshold_arr_in (np.ndarray): p* per session position
-
-    Returns:
-        function: Re-entry rule
-    """
-    # RETURN THE RULE
-    def reentry_func(session_idx, cash_session_count, episode_dict):
-        proba_float, threshold_float = proba_arr_in[session_idx], threshold_arr_in[session_idx]
-        if not np.isfinite(proba_float) or not np.isfinite(threshold_float):
-            return False
-        return bool(proba_float >= threshold_float)
-    return reentry_func
 
 # FUNCTION: THE CANDIDATE NAME THE RUNNER STORES AS ONE FIELD
 def get_candidate_name_str(train_window_str_in, stop_k_in, offset_float_in):

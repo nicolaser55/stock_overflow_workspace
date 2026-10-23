@@ -44,7 +44,7 @@ before the cutoff. `check_feature_available_ts` raises when a feature row's `ava
 | `TSIND` | feature | end of the snapshot bar; a swing stored on its own bar waits `PA_EXTREMA_ORDER` bars (3) | not revised (cache recomputed from the bars) |
 | `TSSEG` | feature | same; the snapshot shows a swing only after it is confirmed | not revised |
 | `TSCTX` | feature | end of bar t; the row uses only bars `<= t` | not revised |
-| `TSDAY` | feature | end of the decision bar. Forward-return columns are not served on this path | not revised |
+| `TSDAY` | feature | end of the decision bar. Forward-return columns and the after-decision columns (`fill_open`, `session_high`, `session_low`, `session_close`) are not served on this path | not revised |
 | `TSDAY_FWD` | label | same TSDAY files; `label_known_ts` is the decision of session i + `LABEL_HORIZON_SESSIONS`; unfinished rows dropped | not revised |
 | `TSBAR` | label | `label_known_ts` is the end of the bar where TP or SL was hit, or the end of the horizon | not revised |
 

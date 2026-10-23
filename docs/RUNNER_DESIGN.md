@@ -27,9 +27,16 @@ Engines, each ported from the existing simulator and required to reproduce it ex
 | Trailing stop and re-entry | `so.core.reentry_simulation` | exp02 | 4b-2a (`TrailingStopEngine`; daily mode with a minute-checked stop) |
 
 The view carries a read-only copy of the engine state as of the decision moment (`in_position`, `share_count`,
-`last_exit_session`, `last_exit_reason`, `cash_session_count`). A design learns of a stop-out only at its next
+`last_exit_session`, `last_exit_reason`, `last_exit_fill_price`, `cash_session_count`). A design learns of a stop-out only at its next
 decision. The engine never shows the design anything after that moment. A design module names its engine with
 `ENGINE_NAME` (`fractional`, `trailing_stop`, `barrier`).
+
+**Shared design helpers (2026-10-23).** `so.features.view_history.DailyHistory` keeps the `TSDAY` rows a design has
+received (one `get_new` per call); `VixPrevHistory` computes `vix_level_prev`, `vix_term_prev` and `vix_pct250_prev`
+from `VIX_DAILY` / `VIX3M_DAILY` rows with the definitions of `so.features.vix_features`. `so.features.rule_design.
+RuleDesign` is the decide of an exit / re-entry rule on the trailing-stop engine without a stop: a subclass writes the
+exit signal and the re-entry rule only. `TSDAY` no longer serves `fill_open` and the complete-session high, low and
+close on the feature path: they are computed from bars after the decision bar.
 
 **Stop parameters (2026-10-22).** The `trail_multiple` and `volatility` of a decision take effect at that decision's
 fill and stay in force until the next decision's fill, including the next session's morning. The last session of a
@@ -39,7 +46,7 @@ decisions (`run_engine_decisions_dict`, used for the prior-only path) follow the
 reproduces that candidate's stream. Until 2026-10-22 the replay applied a session's recorded parameters to its own
 morning as well (the old simulator's timing); that was inconsistent with the stream and, for a design whose
 parameters use intraday data, would apply them to bars before the decision. The old simulator's timing survives only
-in `so.runner.calibration.run_trailing_session_timing_dict`, for engine tests and port calibrations.
+in `tests/trailing_timing_reference.py`, for the engine parity tests.
 
 An idea that needs new stateful logic gets a new engine (an infrastructure change, reviewed like any other) or runs
 in the slow strict daily mode.

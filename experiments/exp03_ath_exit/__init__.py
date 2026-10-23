@@ -1,3 +1,3 @@
 """
-exp03_ath_exit_v2: "sell at strength", re-run under the current rules. Protocol: experiments/exp03_ath_exit/PROTOCOL.md version 2.0.
+exp03_ath_exit: sell near the all-time high, buy back after a delay or a dip. Protocol: experiments/exp03_ath_exit/PROTOCOL.md.
 """

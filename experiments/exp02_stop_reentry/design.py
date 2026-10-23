@@ -7,9 +7,9 @@ from experiments.exp02_stop_reentry.model import (fit_reentry_model_dict, predic
                                                   get_candidate_name_str, parse_candidate_dict)
 
 """
-Runner Design: exp02_stop_reentry_v2_1
+Runner Design: exp02_stop_reentry
 
-Runner port of protocol 2.0 (rules of protocol 1.0). Invested by default. A volatility trailing stop exits (the
+Invested by default. A volatility trailing stop exits (the
 trailing-stop engine checks it minute by minute). A logistic model of the 20-session forward return buys back when its
 probability clears the refit's training base rate plus the candidate's offset. The model is refit weekly on the
 candidate's window (10 years, or all history) through the label door; an unfinished label never reaches the fit.
@@ -22,12 +22,12 @@ Inputs, all through the view:
     TSDAY      today's 16 daily features (available at the decision moment), including daily_volatility
     TSDAY_FWD  training rows: the same features plus y_fwd_positive, served once label_known_ts is before the moment
 
-Refit schedule (as protocol 2.0): the first session of each ISO week on which today's features are finite, and the
+Refit schedule: the first session of each ISO week on which today's features are finite, and the
 first such session of the stream.
 """
 
 # DEFINE HOW CANDIDATE PERIODS ARE FORMED
-PERIOD_RULE = {"embargo_sessions": exp_config.EMBARGO_TRADING_DAYS, "train_years": [exp_config.FOLD_TRAIN_WINDOW_YEARS]}
+PERIOD_RULE = {"embargo_sessions": exp_config.EMBARGO_TRADING_DAYS, "train_years": [exp_config.FIXED_TRAIN_WINDOW_YEARS]}
 # DEFINE THE 18 CANDIDATES IN THE PROTOCOL ORDER (WINDOW, THEN k, THEN OFFSET)
 CANDIDATE_LIST = [get_candidate_name_str(window_str, stop_k, offset)
                   for window_str in exp_config.TRAIN_WINDOW_CANDIDATE_LIST
@@ -189,7 +189,7 @@ class Design:
         if int(keep_mask_arr.sum()) < int(MIN_TRAIN_ROW_COUNT):
             raise ValueError(f"refit on {view_in.session_date} ({self.train_window_str}) has {int(keep_mask_arr.sum())} "
                              f"training rows, below the minimum {int(MIN_TRAIN_ROW_COUNT)}.")
-        # THE SAME ESTIMATOR, COLUMNS AND SEED AS PROTOCOL 2.0
+        # THE PROTOCOL'S ESTIMATOR, COLUMNS AND SEED
         train_pdf = pd.DataFrame(feature_arr[keep_mask_arr], columns=FEATURE_COL_LIST)
         train_pdf[LABEL_COL_STR] = label_arr[keep_mask_arr]
         self.model = fit_reentry_model_dict(train_pdf, FEATURE_COL_LIST, LABEL_COL_STR, int(exp_config.MODEL_SEED))

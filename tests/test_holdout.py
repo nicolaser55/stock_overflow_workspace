@@ -414,8 +414,6 @@ def test_pipeline_holdout_flag():
                 call_text = notebook_text[found_int:end_int + 1]
                 assert "enforce_holdout_bool_in=False" in call_text, f"{notebook_path} {call_name_str}"
                 search_from_int = end_int + 1
-    # THE RENAME CHECK IS A DATA CHECK AND READS EVERY RAW SESSION
-    assert "enforce_holdout_bool_in=False" in open(os.path.join(WORKSPACE_PATH_STR, "scripts", "check_spy_rename.py"), encoding="utf-8").read()
     # WITH THE WINDOW OPEN, THE UNGUARDED LOADER STILL SEES THE LAST RAW SESSION
     raw_path_str = write_raw_csv(os.path.join(TEMP_ROOT_STR, "raw_pipeline"), ["2025-10-09", "2025-10-10", "2026-08-13"])
     tsday_path_str = os.path.join(TEMP_ROOT_STR, "TSDAY_pipeline.csv")

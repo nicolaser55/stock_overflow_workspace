@@ -4,27 +4,19 @@ from so import config
 """
 Experiment Configuration: exp07_warning_lights_exit (PROTOCOL.md of this folder)
 
-Every constant specific to this experiment. Shared constants (daily features, execution, costs, statistics, walk-forward
-conventions, exploration period) are READ from so.config, never copied. The trial-log configuration hash covers both
-files (so.core.trial_log.get_config_hash_str).
-
-Rule: once the first validation run of step 02 exists, any change to a constant below is a new protocol version with a
-new EXPERIMENT_NAME, recorded in PROTOCOL.md.
-"""
-
-"""
-Experiment
+Every constant specific to this experiment. Shared constants are read from so.config. A change after a development run
+is a new PROTOCOL_VERSION, recorded in PROTOCOL.md.
 """
 
 # DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
-EXPERIMENT_NAME = "exp07_warning_lights_exit_v2"
-PROTOCOL_VERSION = "2.0"
+EXPERIMENT_NAME = "exp07_warning_lights_exit"
+PROTOCOL_VERSION = "1.0"
 
 """
-Warning Lights (PROTOCOL.md §5; thresholds fixed by the roadmap, never fitted)
+Rules
 """
 
-# DEFINE THE LIGHTS: NAME -> (DAILY FEATURE, COMPARISON, THRESHOLD); A MISSING FEATURE IS AN OFF LIGHT
+# DEFINE THE FIVE WARNING LIGHTS (FEATURE, COMPARISON, THRESHOLD; A MISSING FEATURE IS AN OFF LIGHT)
 LIGHT_DICT = {
     "below_ma200": ("ma200_dist_pct", "<", 0.0),
     "return_250d_negative": ("return_250d", "<", 0.0),
@@ -34,32 +26,15 @@ LIGHT_DICT = {
 }
 # DEFINE THE EXIT THRESHOLDS k (EXIT WHEN AT LEAST k LIGHTS ARE ON; BUY BACK WHEN FEWER THAN k - 1 ARE ON)
 LIGHT_K_LIST = [3, 4, 5]
-# DEFINE THE MAXIMUM NUMBER OF CASH DECISIONS BEFORE A FORCED RE-ENTRY (None = NEVER: THE RULE ALONE DECIDES)
+# NO FORCED BUY-BACK
 MAX_CASH_SESSIONS = None
 
 """
-Replay (step 02): one continuous path over the validation quarters of the exp02-exp06 schedule
+Schedule And Selection (shared conventions)
 """
 
-# DEFINE THE EMBARGO AND THE FIXED TRAINING WINDOW USED TO BUILD THE SCHEDULE (NO MODEL; SAME 44 QUARTERS AS exp02-exp06)
+# DEFINE THE EMBARGO AND THE FOLD TRAINING LENGTH THAT FORM THE CANDIDATE PERIODS (VALIDATION QUARTERS)
 EMBARGO_TRADING_DAYS = 20
 FIXED_TRAIN_WINDOW_YEARS = 10
-# DEFINE THE NUMBER OF PERIODS POOLED FOR THE SELECTION (CURRENT PERIOD + PREVIOUS PERIODS)
-SELECTION_POOLED_QUARTER_COUNT = 4
-
-"""
-Baselines And Statistics (PROTOCOL.md §7, §8)
-"""
-
-# DEFINE THE NUMBER OF RUNS PER RANDOM FAMILY AND THE SEED OFFSET OF THE RANDOM EXITS
-RANDOM_RUN_COUNT = 20
-RANDOM_EXIT_SEED_OFFSET = 1000
-# DEFINE THE MONTHS PER BLOCK OF THE PRIMARY LOG-EXCESS BOOTSTRAP (THE 1-MONTH VERSION IS PRINTED ALONGSIDE)
-BOOTSTRAP_BLOCK_MONTH_COUNT = 6
-
-"""
-Trial budget (protocol 1.0 validation grid: 3 candidates x 44 quarters, plus one summary row)
-"""
-
-# DEFINE THE TRIAL BUDGET OF THIS VERSION
-TRIAL_BUDGET = 3 * 44 + 1
+# DEFINE HOW MANY COMPLETED PERIODS ARE POOLED WHEN A CANDIDATE IS CHOSEN
+SELECTION_POOLED_QUARTER_COUNT = config.CANDIDATE_SELECTION_POOLED_QUARTERS_DEFAULT

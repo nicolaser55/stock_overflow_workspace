@@ -108,11 +108,11 @@ def get_empty_engine_state_dict():
         None
 
     Returns:
-        dict: in_position, share_count, last_exit_session, last_exit_reason, cash_session_count
+        dict: in_position, share_count, last_exit_session, last_exit_reason, last_exit_fill_price, cash_session_count
     """
     # NOTHING IS OPEN
     return {"in_position": False, "share_count": 0, "last_exit_session": None, "last_exit_reason": None,
-            "cash_session_count": 0}
+            "last_exit_fill_price": None, "cash_session_count": 0}
 
 
 # FUNCTION: ENGINE BASE (4B ENGINES SUBCLASS THIS)
@@ -229,7 +229,7 @@ class Engine:
             None
 
         Returns:
-            dict: in_position, share_count, last_exit_session, last_exit_reason, cash_session_count
+            dict: in_position, share_count, last_exit_session, last_exit_reason, last_exit_fill_price, cash_session_count
         """
         # DEFAULT: NOTHING OPEN
         return get_empty_engine_state_dict()
@@ -431,11 +431,12 @@ class FractionalWeightEngine(Engine):
             None
 
         Returns:
-            dict: in_position, share_count, last_exit_session, last_exit_reason, cash_session_count
+            dict: in_position, share_count, last_exit_session, last_exit_reason, last_exit_fill_price, cash_session_count
         """
         # FRACTIONAL HAS NO CASH-SESSION COUNTER
         return {"in_position": self.share_count_int > 0, "share_count": int(self.share_count_int),
-                "last_exit_session": None, "last_exit_reason": None, "cash_session_count": 0}
+                "last_exit_session": None, "last_exit_reason": None, "last_exit_fill_price": None,
+                "cash_session_count": 0}
 
     # FUNCTION: TRADES, MARKS AND METRICS
     def get_result_dict(self):
@@ -527,6 +528,7 @@ class TrailingStopEngine(Engine):
         self.fresh_exit_pending_bool = False
         self.last_exit_session = None
         self.last_exit_reason_str = None
+        self.last_exit_fill_price = None
         self._buy_ts = pd.NaT
         self._window_end_ts = pd.NaT
         self._window_end_close_float = np.nan
@@ -642,6 +644,7 @@ class TrailingStopEngine(Engine):
         if session_date_in is not None:
             self.last_exit_session = session_date_in
         self.last_exit_reason_str = str(reason_str_in)
+        self.last_exit_fill_price = float(fill_price)
         if reason_str_in != "END":
             self.episode_dict = {"exit_ts": timestamp_in, "exit_reason": str(reason_str_in),
                                  "exit_fill_price": fill_price, "first_cash_session_idx": None, "cash_session_count": 0}
@@ -790,7 +793,7 @@ class TrailingStopEngine(Engine):
             None
 
         Returns:
-            dict: in_position, share_count, last_exit_session, last_exit_reason, cash_session_count
+            dict: in_position, share_count, last_exit_session, last_exit_reason, last_exit_fill_price, cash_session_count
         """
         # PREVIEW THE INCREMENT THE CASH DECISION WILL APPLY
         cash_session_count = int(self.cash_session_count_int)
@@ -798,6 +801,7 @@ class TrailingStopEngine(Engine):
             cash_session_count += 1
         return {"in_position": bool(self.invested_bool), "share_count": int(self.share_count_int),
                 "last_exit_session": self.last_exit_session, "last_exit_reason": self.last_exit_reason_str,
+                "last_exit_fill_price": getattr(self, "last_exit_fill_price", None),
                 "cash_session_count": int(cash_session_count)}
 
     # FUNCTION: TRADES, EPISODES, MARKS AND METRICS
@@ -1132,12 +1136,12 @@ class BarrierEngine(Engine):
             None
 
         Returns:
-            dict: in_position, share_count, last_exit_session, last_exit_reason, cash_session_count
+            dict: in_position, share_count, last_exit_session, last_exit_reason, last_exit_fill_price, cash_session_count
         """
         # BARRIER HAS NO CASH-SESSION COUNTER
         return {"in_position": bool(self.invested_bool), "share_count": int(self.share_count_int),
                 "last_exit_session": self.last_exit_session, "last_exit_reason": self.last_exit_reason_str,
-                "cash_session_count": 0}
+                "last_exit_fill_price": None, "cash_session_count": 0}
 
     # FUNCTION: TRADES, MARKS AND METRICS
     def get_result_dict(self):

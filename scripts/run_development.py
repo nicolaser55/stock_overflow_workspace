@@ -1,4 +1,5 @@
 import argparse
+import datetime
 import importlib.util
 import os
 import sys
@@ -51,6 +52,37 @@ def load_design_module(design_folder_str_in):
     return design_module
 
 
+# THE RESULTS LOG EVERY DEVELOPMENT RUN APPENDS TO
+RESULTS_LOG_PATH_STR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "RESULTS_LOG.md")
+
+
+# FUNCTION: ONE RESULTS-LOG ROW FROM THE RUN
+def append_results_row(result_dict_in, note_str_in):
+    """
+    Appends one table row to docs/RESULTS_LOG.md (after the header). The row is the run's own report: date, experiment,
+    protocol, run id, verdict, prior-only and buy-and-hold total return, failed parts, look-ahead, note.
+
+    Args:
+        result_dict_in (dict): Output of run_development_dict
+        note_str_in (str): The --note text
+
+    Returns:
+        str: The row
+    """
+    # THE NUMBERS THE VERDICT USED
+    verdict_dict = result_dict_in["verdict_dict"]
+    return_dict = verdict_dict.get("return_dict", {})
+    report_dict = result_dict_in.get("report_dict", {})
+    look_ahead_str = str(verdict_dict.get("look_ahead_dict", {}).get("status_str", verdict_dict.get("look_ahead_dict", {}).get("status", "")))
+    row_str = (f"| {datetime.date.today().isoformat()} | {report_dict.get('experiment_name_str', '')} | "
+               f"{report_dict.get('protocol_version_str', '')} | {result_dict_in['run_id_str']} | {verdict_dict['label_str']} | "
+               f"{float(return_dict.get('strategy_total_return', float('nan'))):+.2%} vs {float(return_dict.get('buy_hold_total_return', float('nan'))):+.2%} | "
+               f"{', '.join(verdict_dict['failed_list']) or 'none'} | {look_ahead_str} | {note_str_in} |")
+    with open(RESULTS_LOG_PATH_STR, "a", encoding="utf-8") as file_obj:
+        file_obj.write(row_str + "\n")
+    return row_str
+
+
 # PARSE THE COMMAND
 if __name__ == "__main__":
     # DEFINE THE ARGUMENTS
@@ -86,4 +118,5 @@ if __name__ == "__main__":
     print(f"verdict {verdict_dict['label_str']}")
     print(f"email_worthy {bool(verdict_dict['email_worthy_bool'])}")
     print(f"failed {list(verdict_dict['failed_list'])}")
+    print(f"results_row {append_results_row(result_dict, arg_dict.note)}")
     print(f"saved {report_md_str}")

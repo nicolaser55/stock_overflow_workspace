@@ -1,3 +1,3 @@
 """
-exp06_capped_regret_reentry_v2: capped-regret re-entry, re-run under the current rules. Protocol: experiments/exp06_capped_regret_reentry/PROTOCOL.md version 2.0.
+exp06_capped_regret_reentry: trend or near-ATH exit, buy-stop or recovery re-entry with a cooling-off. Protocol: experiments/exp06_capped_regret_reentry/PROTOCOL.md.
 """
