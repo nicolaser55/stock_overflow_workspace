@@ -7,7 +7,7 @@ from so import config
 # IMPORT THE DIRECT-READ FLAG AND THE POINT-IN-TIME HELPERS
 from so.core.point_in_time import (set_direct_read_blocked_bool, get_source_spec_dict, add_available_ts_pdf,
                                    get_feature_column_pdf, get_spy_frame_pdf, get_perturbed_feature_pdf,
-                                   get_cut_clock_dict, DataContext)
+                                   get_cut_clock_dict, get_minute_bar_available_ts, get_ny_timestamp, DataContext)
 # IMPORT THE EXISTING CUT, TRUNCATION AND BAR-PERTURBATION HELPERS
 from so.core.holdout import get_date, get_truncated_ohlcv_dict, get_perturbed_ohlcv_dict
 # IMPORT THE DAILY LOOP AND THE DECISION SHAPE
@@ -233,15 +233,18 @@ def get_recorded_session_date(decision_dict_in, session_date_in=None):
 
 # FUNCTION: THE FIRST SESSION WHOSE DECISION DIFFERS, THROUGH THE CUT
 def get_first_decision_difference_dict(full_decision_list_in, full_session_list_in, check_decision_list_in,
-                                       check_session_list_in, cut_date_in):
+                                       check_session_list_in, cut_date_in, cut_ts_in=None):
     """
-    Walks the full run in order. Minute decisions are matched by _decision_ts within sessions on or before the cut.
-    Daily decisions are matched by session date. None when every decision on or before the cut matches.
+    Walks the full run in order. Minute decisions are matched by _decision_ts within sessions on or before the cut,
+    and, when cut_ts_in is given, only those decided (end of the minute) at or before it: a perturbation changes the
+    bars after the cut session's decision bar, so a minute decided after that moment may differ. Daily decisions are
+    matched by session date. None when every compared decision matches.
 
     Args:
         full_decision_list_in, check_decision_list_in (list[dict]): Decisions
         full_session_list_in, check_session_list_in (list): Session dates aligned with the decisions (daily)
         cut_date_in (datetime.date): Last session compared (inclusive)
+        cut_ts_in (datetime-like | None): Last minute-mode decision moment compared (None = the whole cut session)
 
     Returns:
         dict | None: session_date, full_decision, check_decision
@@ -264,6 +267,8 @@ def get_first_decision_difference_dict(full_decision_list_in, full_session_list_
             if session_day is None:
                 continue
             if session_day > cut_day:
+                continue
+            if cut_ts_in is not None and get_minute_bar_available_ts(decision_dict.get("_decision_ts")) > get_ny_timestamp(cut_ts_in):
                 continue
             full_dict = get_decision_dict(decision_dict)
             ts_key_str = str(decision_dict.get("_decision_ts"))
@@ -357,6 +362,7 @@ def run_lookahead_job_dict(job_dict_in):
                     if get_file_exists_bool(job_dict_in["context_path_str"]) else None)
     date1 = get_date(job_dict_in["date1"])
     date2 = get_date(job_dict_in["date2"])
+    cut_ts = None
     if kind_str == KIND_TRUNCATION_STR:
         check_ohlcv_dict = get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict, cut_date)
         check_context = get_lookahead_truncated_context(data_context, ohlcv_array_dict, cut_date, check_ohlcv_dict)
@@ -366,6 +372,8 @@ def run_lookahead_job_dict(job_dict_in):
         check_context = get_lookahead_perturbed_context(data_context, ohlcv_array_dict, cut_date, check_ohlcv_dict)
         # ONLY DECISIONS THROUGH THE CUT ARE COMPARED: STOP AT THE SESSION AFTER IT (THE CUT STILL HAS ITS DECISION)
         check_date2 = get_date(get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict, cut_date)["session_date_list"][-1])
+        # MINUTE MODE: THE CUT SESSION'S MINUTES AFTER ITS DECISION BAR SEE PERTURBED BARS AND ARE NOT COMPARED
+        cut_ts = get_cut_clock_dict(ohlcv_array_dict, cut_date)["decision_ts"]
     else:
         raise ValueError(f"unknown look-ahead kind {kind_str!r}")
     result_dict = run_lookahead_stream_dict(design_module, candidate, check_ohlcv_dict, date1, check_date2,
@@ -382,7 +390,7 @@ def run_lookahead_job_dict(job_dict_in):
         full_session_list = [decision_dict.get("_session_date") for decision_dict in full_decision_list]
     first_fail_dict = get_first_decision_difference_dict(full_decision_list, full_session_list,
                                                          result_dict["decision_dict_list"],
-                                                         result_dict["decision_session_list"], cut_date)
+                                                         result_dict["decision_session_list"], cut_date, cut_ts)
     pass_bool = first_fail_dict is None
     return {"candidate": candidate, "cut_date": cut_date, "kind_str": kind_str, "pass_bool": bool(pass_bool),
             "first_fail_dict": first_fail_dict, "seed_int": get_perturbation_seed_int(cut_date)}

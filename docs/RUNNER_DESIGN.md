@@ -126,7 +126,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   drawn with a fixed seed from each third of the development span. For each cut and each candidate the stream is
   re-run on bars and sources truncated after the cut, and again with bars after the cut's decision bar perturbed
   (`get_perturbed_ohlcv_dict`) and declared feature / label rows after the cut perturbed (`get_perturbed_feature_pdf`).
-  Every decision up to and including the cut must match the full run. Jobs use the same spawn pool as the candidate
+  Every decision up to and including the cut must match the full run (minute mode, perturbation: every decision made
+  at or before the end of the cut session's decision bar; the minute after it already sees perturbed bars, corrected
+  2026-10-24 after exp01's first run). Jobs use the same spawn pool as the candidate
   streams. A failure fails the verdict. The re-runs write no trial-log rows. Results go to `lookahead.json`.
 
 ## Holdout evaluation uses the same runner (agreed 2026-10-21)

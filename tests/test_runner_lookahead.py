@@ -460,6 +460,32 @@ def test_label_buffer_leak_fails():
 
 
 # FUNCTION: PARALLEL LOOK-AHEAD JOBS MATCH THE IN-PROCESS RESULT
+def test_minute_cut_moment():
+    """
+    Minute mode: with the cut moment given, a decision after it on the cut session is not compared; one at or before
+    it still fails.
+
+    Returns:
+        None
+    """
+    # THREE MINUTES OF THE CUT SESSION: 15:57 AND 15:58 ARE DECIDED BY 15:59, 15:59 IS DECIDED AT 16:00
+    from so.runner.lookahead import get_first_decision_difference_dict
+    cut_date = pd.Timestamp("2015-05-26").date()
+    cut_ts = pd.Timestamp("2015-05-26 15:59", tz="America/New_York")
+    bar_ts_list = [pd.Timestamp(f"2015-05-26 15:{minute}", tz="America/New_York") for minute in (57, 58, 59)]
+    def get_list(delta_list_in):
+        return [{"target_weight": 1.0 if delta is not None else 0.0, "delta": delta, "_decision_ts": bar_ts,
+                 "_session_date": cut_date, "_bar_idx": idx} for idx, (bar_ts, delta) in enumerate(zip(bar_ts_list, delta_list_in))]
+    full_list = get_list([None, None, None])
+    late_list = get_list([None, None, 0.0028])
+    early_list = get_list([None, 0.0028, None])
+    assert get_first_decision_difference_dict(full_list, None, late_list, None, cut_date, cut_ts) is None
+    assert get_first_decision_difference_dict(full_list, None, late_list, None, cut_date) is not None
+    fail_dict = get_first_decision_difference_dict(full_list, None, early_list, None, cut_date, cut_ts)
+    assert fail_dict is not None and fail_dict["decision_ts"] == str(bar_ts_list[1])
+    passed("minute mode: a decision after the cut moment is not compared; one before it still fails")
+
+
 def test_parallel_lookahead_matches_in_process():
     """
     n_jobs=2 and n_jobs=1 agree on a clean design.
@@ -494,6 +520,7 @@ if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
     try:
         test_cut_dates_one_per_third()
+        test_minute_cut_moment()
         test_clean_design_passes()
         test_view_read_design_passes_without_patch()
         test_bar_buffer_leak_fails()
