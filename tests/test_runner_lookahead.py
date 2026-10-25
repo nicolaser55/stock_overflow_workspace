@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import shutil
+import numpy as np
 import pandas as pd
 
 # FORCE UTF-8 SO THE PASS MARK PRINTS ON A WINDOWS CONSOLE
@@ -515,6 +516,71 @@ def test_parallel_lookahead_matches_in_process():
     passed("n_jobs=2 look-ahead matches the in-process pass")
 
 
+# FUNCTION: A SPARSE SIGN LEAK ONE SESSION EARLY FAILS AT EVERY SEED (AUDIT B3)
+def test_sparse_sign_leak_fails_every_seed():
+    """
+    Before audit B3 a one-day feed leak of a rare sign feature passed the check in about half of the synthetic years
+    (three random cuts; a x1.25 perturbation keeps signs). With decision-change cuts, a flat extra session and a
+    permuting perturbation it must fail at every seed, and the same design without the leak must pass.
+
+    Returns:
+        None
+    """
+    # REGISTER THE SPARSE SOURCE ONCE
+    import runner_sparse_leak_design as sparse_design
+    if sparse_design.SPARSE_FEAT_STR not in SOURCE_SPEC_DICT:
+        register_source_dict(sparse_design.SPARSE_FEAT_STR, {
+            "loader": "test", "time_zone": "America/New_York", "timestamp_convention": "planted available_ts",
+            "availability_func": lambda pdf_in: pdf_in.copy(), "revision_policy": "not revised",
+            "revision_reason": "test frame", "role": "feature", "holdout": "test"})
+    original_advance = SourceFeed.advance_to_ts
+
+    def leaking_advance(self, moment_ts_in):
+        if self.source_name_str != sparse_design.SPARSE_FEAT_STR:
+            return original_advance(self, moment_ts_in)
+        return original_advance(self, get_ny_timestamp(moment_ts_in) + pd.Timedelta(days=1))
+
+    def run_seed_dict(seed_int_in, leak_bool_in):
+        ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-01-04", "2010-12-31", seed_in=seed_int_in))
+        decision_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict)["decision_idx_arr"]
+        session_list = ohlcv_array_dict["session_date_list"]
+        close_arr = ohlcv_array_dict["close_arr"]
+        return_arr = np.array([0.0] + [close_arr[int(decision_idx_arr[idx])] / close_arr[int(decision_idx_arr[idx - 1])] - 1
+                                       for idx in range(1, len(session_list))])
+        feat_pdf = pd.DataFrame({"value": np.where(return_arr <= np.quantile(return_arr, 0.08), -1.0, 1.0),
+                                 "available_ts": [get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][int(idx)])
+                                                  for idx in decision_idx_arr],
+                                 "date": session_list})
+        data_context = get_runner_context(ohlcv_array_dict, source_frame_dict_in={sparse_design.SPARSE_FEAT_STR: feat_pdf},
+                                          declared_name_list_in=list(sparse_design.DATA_SOURCE_LIST))
+        count = len(session_list)
+        bound_list = [(0, count // 4), (count // 4 + 1, count // 2), (count // 2 + 1, 3 * count // 4), (3 * count // 4 + 1, count - 1)]
+        period_pdf = pd.DataFrame([{"period_id": idx, "period_start": session_list[start_idx], "period_end": session_list[end_idx],
+                                    "session_count": end_idx - start_idx + 1, "valid_start": session_list[start_idx],
+                                    "valid_end": session_list[end_idx]} for idx, (start_idx, end_idx) in enumerate(bound_list)])
+        if leak_bool_in:
+            SourceFeed.advance_to_ts = leaking_advance
+        try:
+            return run_development_dict(sparse_design, ohlcv_array_dict, data_context_in=data_context,
+                                        run_id_str_in=f"lookahead_sparse_{seed_int_in}_{int(leak_bool_in)}", n_jobs_int_in=1,
+                                        period_pdf_in=period_pdf, trial_log_path_str_in=get_test_trial_log_path_str(f"sparse_{seed_int_in}.csv"),
+                                        commit_str_in="testcommit", code_hash_str_in="testhash", check_clean_tree_bool_in=False,
+                                        check_view_bool_in=False, baseline_seed_count_int_in=2)
+        finally:
+            SourceFeed.advance_to_ts = original_advance
+
+    try:
+        for seed_int in [0, 2, 3, 4]:
+            leak_dict = run_seed_dict(seed_int, True)
+            assert leak_dict["lookahead_dict"]["pass_bool"] is False, f"sparse leak passed the check at seed {seed_int}"
+        clean_dict = run_seed_dict(0, False)
+        assert clean_dict["lookahead_dict"]["pass_bool"] is True, clean_dict["lookahead_dict"]["first_fail_dict"]
+    finally:
+        if sparse_design.SPARSE_FEAT_STR in SOURCE_SPEC_DICT:
+            unregister_source(sparse_design.SPARSE_FEAT_STR)
+    passed("a rare sign feature read one day early fails the check at seeds 0, 2, 3, 4 (all passed before B3); without the leak it passes")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
@@ -527,6 +593,7 @@ if __name__ == "__main__":
         test_source_buffer_leak_fails()
         test_label_buffer_leak_fails()
         test_parallel_lookahead_matches_in_process()
+        test_sparse_sign_leak_fails_every_seed()
         print("\nAll runner look-ahead tests passed ✅")
     finally:
         unregister_lookahead_test_sources()

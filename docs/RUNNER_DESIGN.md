@@ -88,9 +88,8 @@ minute is too slow. It keeps the rule structural:
 - **Fill.** A signal at the end of minute t fills at the open of minute t + 1 (same session). The last minute of a
   session has no next-bar fill.
 - **Engines** turn the signals into trades. Their loops are compiled (numba, added to the locked package list). A 4-year
-  synthetic minute run with a small LightGBM, 12 candidates, weekly refits and `n_jobs=8` took 412 s; linearly that is
-  about 36 minutes for 2005-2025. Real exp01 rows are denser (TSIND/TSSEG/TSCTX, not only SPY close), so the real
-  projection is a lower bound on wall time, not a claim about the old replay.
+  synthetic minute run with a small LightGBM, 12 candidates, weekly refits and `n_jobs=8` took 412 s. The real exp01
+  run takes 11-14 hours (denser rows, 21 models per refit); Nicolas accepted that on 2026-10-25.
 
 Intraday stops driven by daily decisions (exp02) use daily mode with the trailing-stop engine.
 
@@ -99,19 +98,20 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Candidates and selection:** each candidate is its own stream; periods, pooled prior-only selection and the
   carried position are done once in shared code (no copies per experiment). Candidate-period scores are slices of
   each candidate's continuous stream (result over the period's dates, including any position carried in), minus
-  buy-and-hold sliced the same way. Saved v2 **strategy** period scores are fresh windows for every listed port:
-  exp01–exp03 and the old holdout scorer by protocol 1.0; exp04, exp05, exp06, exp07, exp12 and exp13 because
-  `run_candidate_replay_dict` fell through to a new simulation when `get_bar_period_pdf` (truncated bars plus the
-  holdout start, embargo counted on that gapped calendar) did not match the report's periods. Those reports' buy-and-hold
-  column is a continuous slice. Runner ports of exp01–exp07, exp12 and exp13 therefore change the strategy scoring
-  method from fresh windows to continuous slices and are protocol amendments, not pure re-runs. None of those ports
-  keeps the saved scoring method. (Decided 2026-10-21; scoring-method list corrected 2026-10-22 from the exp04
-  calibration.)
+  buy-and-hold sliced the same way.
 - **Run guards:** a run refuses uncommitted changes in the code it uses, a missing or stale `VIEW.json`, and the
   quarantine root; a resume refuses a checkpoint from a different commit or code hash. (Decided 2026-10-21.)
+- **Design-code guard (audit B2, 2026-10-25):** every call into design code (module import, `get_candidate_design`,
+  `decide`, `fit`, `fit_shared`, `finish_fit`, `signal`) runs behind `so.runner.guard`: an audit hook refuses any
+  open, listing, rename or delete under the data root, the quarantine or the holdout folder, and any subprocess or
+  network connection; a snapshot of every `so.*` module (functions by identity, UPPERCASE constants by value) is
+  compared after the import, after each period and at the end of each stream. The preflight also refuses writes into
+  imported names (`config.X = ...`) and `setattr`.
 - **Baselines:** buy-and-hold, constant exposure at the same average weight (daily rebalanced), and random timing
   that places the path's non-base spells at random (same time at each weight; switch count may differ from the
-  path only at the two window edges). Random timing uses 100 fixed seeds; to count as ahead of it, a design must
+  path only at the two window edges). The exposure is the decision target for the fractional engine and the position
+  actually held at each close for the trailing-stop and barrier engines, whose exits happen inside the engine (audit
+  B1, 2026-10-25: the targets hid every stop and exit). Random timing uses 100 fixed seeds; to count as ahead of it, a design must
   beat at least 95% of the draws. Placing switches independently does not preserve exposure; shuffling run lengths
   in place does not move a one-exit path. Neither is the baseline.
 - **Trial log:** rows are written as each candidate-period is scored, before any summary is shown. Trial ids are
@@ -122,14 +122,19 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
-- **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) cut dates, one
-  drawn with a fixed seed from each third of the development span. For each cut and each candidate the stream is
-  re-run on bars and sources truncated after the cut, and again with bars after the cut's decision bar perturbed
-  (`get_perturbed_ohlcv_dict`) and declared feature / label rows after the cut perturbed (`get_perturbed_feature_pdf`).
-  Every decision up to and including the cut must match the full run (minute mode, perturbation: every decision made
-  at or before the end of the cut session's decision bar; the minute after it already sees perturbed bars, corrected
-  2026-10-24 after exp01's first run). Jobs use the same spawn pool as the candidate
-  streams. A failure fails the verdict. The re-runs write no trial-log rows. Results go to `lookahead.json`.
+- **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) random cut dates
+  (one from each third of the span, fixed seed), plus, for each candidate, up to `RUNNER_LOOKAHEAD_CHANGE_CUT_MAX` (10)
+  sessions where its own decision changed (`RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE`, 2, in minute mode), spread
+  evenly. For each cut the stream is re-run on bars and sources truncated after the cut (the one extra session that
+  gives the cut its call is flat at the cut's last close), and again with every bar after the cut's decision bar
+  rebuilt from shuffled returns starting 3% higher (`get_perturbed_ohlcv_dict`) and the declared feature / label rows
+  after the cut permuted among themselves and rescaled (`get_perturbed_feature_pdf`). Every decision up to and
+  including the cut must match the full run (minute mode, perturbation: every decision made at or before the end of
+  the cut session's decision bar). A failure fails the verdict. The re-runs write no trial-log rows. Results go to
+  `lookahead.json`. Audit B3 (2026-10-25): with three random cuts and a x1.25 level shift, a one-day leak of a rare
+  sign feature passed in 7 of 13 synthetic years; with these cuts and perturbations it fails in 13 of 13
+  (`tests/test_runner_lookahead.py`). The check cannot see a future value baked into a cached row or a read around
+  the view: the cache audit and the design-code guard cover those.
 
 ## Holdout evaluation uses the same runner (agreed 2026-10-21)
 
@@ -148,18 +153,3 @@ come from one code path.
 `PROTOCOL.md`, `config.py`, and one `design.py` with: the candidate list, the declared sources, the engine and its
 parameters, and the decision function (daily) or row-local signal function (minute), plus fit, for a model. No copied
 replay, selection, baseline or report code.
-
-## Build order
-
-- 4a: the view and the daily streaming loop, the engine interface with the fractional engine, tests that a design
-  reading ahead cannot.
-- 4b, part 1: candidates, selection, baselines, trial logging, checkpoints, parallel runs, report, verdict, manifest,
-  look-ahead, and the holdout evaluation through the runner (`run_holdout_dict`; replay fallback until 4c).
-- 4b, part 2a (done 2026-10-21): the barrier and trailing-stop engines, each matching its existing simulator exactly on
-  tests. Numba session loops. Engine-state snapshot on the view. Daily mode drives both; the 4b-1 stream, checkpoint,
-  look-ahead and verdict machinery is unchanged.
-- 4b, part 2b (this branch, 2026-10-22): minute mode (row checks, row-local signal with the shuffle check, model
-  scoring windows), calling the same barrier engine with minute-level decisions. Same streams, checkpoints,
-  look-ahead (cuts at session ends) and verdict.
-- 4c: the template rewritten on it; exp04 (daily) ported as a calibration against its saved v2 results, then exp02
-  (trailing-stop engine); differences explained before anything else is ported.

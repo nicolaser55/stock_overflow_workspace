@@ -605,6 +605,53 @@ def test_dirty_sibling_experiment_folder_is_refused():
     passed("a design importing a dirty sibling experiment folder is refused")
 
 
+# FUNCTION: TRAILING-STOP BASELINES READ THE POSITION ACTUALLY HELD (AUDIT B1)
+def test_trailing_baselines_use_realized_position():
+    """
+    A trailing-stop path whose decision targets never show its stop-outs. Constant exposure must use the share of
+    sessions actually in position, and the random draws must keep that time in the market (not collapse to
+    buy-and-hold).
+
+    Returns:
+        None
+    """
+    # A STOP AND A FIVE-DECISION DELAYED RE-ENTRY: REAL CASH SPELLS THE TARGETS DO NOT SHOW
+    from so.runner import run_daily_dict, TrailingStopEngine
+    from so.runner.baselines import get_exposure_weight_arr, get_filled_target_weight_arr
+    import runner_trailing_design as trail_design
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2011-01-03", "2011-12-30", seed_in=11))
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    class DelayedTrailDesign(trail_design.TrailDesign):
+        def decide(self, view_in):
+            state_dict = view_in.get_engine_state_dict()
+            reenter_bool = (not state_dict["in_position"]) and state_dict["cash_session_count"] >= 5
+            return {"target_weight": 1.0 if reenter_bool else float("nan"), "flatten_bool": False,
+                    "trail_multiple": 2.0, "volatility": 0.006, "reentry_reason": "delay"}
+    path_dict = run_daily_dict(DelayedTrailDesign(), ohlcv_array_dict, date1, date2,
+                               engine_in=TrailingStopEngine(None), initial_weight_in=1.0)
+    held_arr = path_dict["daily_equity_pdf"]["in_position"].astype(bool).to_numpy()[:-1].astype(float)
+    assert 0.05 < held_arr.mean() < 0.95, held_arr.mean()
+    # THE OLD BEHAVIOUR: NO mean_weight ON A TRAILING RESULT, SO THE DECISION-TARGET PATH IS REFUSED
+    refused_bool = False
+    try:
+        get_runner_baseline_dict(ohlcv_array_dict, date1, date2, path_dict, seed_count_int_in=4)
+    except ValueError:
+        refused_bool = True
+    assert refused_bool, "a trailing result without mean_weight was accepted as a fractional path"
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, path_dict, seed_count_int_in=8,
+                                             realized_exposure_bool_in=True)
+    assert baseline_dict["exposure_source_str"] == "realized_position"
+    assert np.isclose(baseline_dict["constant_exposure_weight"], held_arr.mean(), atol=1e-12)
+    random_list = baseline_dict["random_timing_return_list"]
+    assert len(set(np.round(random_list, 10))) > 1, "random draws collapsed to one path"
+    assert not np.allclose(random_list, baseline_dict["buy_hold_total_return"]), "random draws equal buy-and-hold"
+    exposure_arr = get_exposure_weight_arr(path_dict, True)
+    from so.runner.baselines import get_random_timing_weight_arr
+    draw_arr = get_random_timing_weight_arr(exposure_arr, 42)
+    assert get_weight_time_dict(draw_arr) == get_weight_time_dict(get_filled_target_weight_arr(exposure_arr))
+    passed(f"trailing-stop baselines use the realized position ({held_arr.mean():.0%} in position) and keep its time in the market")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
@@ -620,6 +667,7 @@ if __name__ == "__main__":
         test_random_timing_preserves_ninety_four_percent_invested()
         test_crashed_run_leaves_no_manifest()
         test_dirty_sibling_experiment_folder_is_refused()
+        test_trailing_baselines_use_realized_position()
         print("\nAll runner verdict tests passed ✅")
     finally:
         paths.HOLDOUT_WINDOWS_FILE_PATH_STR = REAL_WINDOWS_PATH_STR

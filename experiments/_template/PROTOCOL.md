@@ -31,7 +31,7 @@ A source that is not in this table is not used. When the evidence for a clock is
 | Source | Convention | Availability | Revision | Role |
 |---|---|---|---|---|
 | `SPY_1MIN` | bar start | label + 1 minute | not revised (stored IBKR bars) | feature |
-| `TSDAY_FWD` | decision of session i + 20 | `label_known_ts` at that later decision; unfinished rows dropped | not revised | label |
+| `TSDAY_FWD` | close of session i + 20 | `label_known_ts` at the end of that later session; unfinished rows dropped | not revised | label |
 
 The two features are `intraday_return_pct` (decision close over the session open) and `prev_day_return_pct` (the previous session's close-to-close return). Both are computed from the view's SPY bars at the decision moment, the end of the 15:58 bar. The same session's close, the 15:59 bar, is not a feature.
 
@@ -52,7 +52,7 @@ Pre-registered (Nicolas, 2026-10-11). Changing any line here after a result is a
 
 - **Training-window candidates:** `6M`, `2Y`, `10Y` (`so.config.TRAIN_WINDOW_CANDIDATE_LIST_DEFAULT`). A row is inside a window when its date is on or after (retrain day − the window) and on or before the retrain day.
 - **Retraining frequency:** weekly, the first session of each calendar week (`so.config.RETRAIN_FREQUENCY_DEFAULT_STR`). A Monday holiday is a Tuesday refit. The first decision of a stream always refits. `RETRAIN_FREQUENCY_COMPARISON_STR` is empty: this template does not pre-register the optional weekly-versus-quarterly comparison. A protocol that does pre-register it may name one comparison, and no other.
-- **Label:** `y_fwd_positive` on `TSDAY_FWD`, 1 when the net return from the fill to the close 20 sessions later is positive (`so.config.LABEL_HORIZON_SESSIONS`). `label_known_ts` is the decision moment of that later session. The last 20 sessions have no clock and are dropped. A redacted blank cell is a missing label, never filled with 0.
+- **Label:** `y_fwd_positive` on `TSDAY_FWD`, 1 when the net return from the fill to the close 20 sessions later is positive (`so.config.LABEL_HORIZON_SESSIONS`). `label_known_ts` is the end of that later session (its close is the exit). The last 20 sessions have no clock and are dropped. A redacted blank cell is a missing label, never filled with 0.
 - **Purge:** a training row must have `label_known_ts` strictly before the retraining decision (`view.get_labels`). Rows that fail are dropped and counted as purged. They are never filled with 0 or any other value.
 - **Feature known times:** both features are read from the SPY bars in the view. There is no second clock.
 - **Minimum training rows:** 20. A refit with fewer rows raises. There is no fallback window. A one-class window returns that class's rate; that is the model's defined behaviour, not a different window.

@@ -695,9 +695,9 @@ def test_holdout_flag_scan():
     # FAIL WHEN THE ARGUMENT APPEARS ANYWHERE ELSE
     assert offender_list == []
     # THE QUARANTINE ROOT MAY BE NAMED ONLY IN THE PATHS MODULE, THE EVALUATION LOADER, THE EVALUATION SCRIPT, TESTS,
-    # THE AGENT ACCESS CHECK (WHICH REQUIRES IT UNSET) AND THE DOCUMENTS THAT FORBID IT
+    # THE AGENT ACCESS CHECK (WHICH REQUIRES IT UNSET), THE DESIGN-CODE GUARD (WHICH CLOSES IT) AND THE DOCUMENTS THAT FORBID IT
     quarantine_allowed_set = {"so/paths.py", "so/core/holdout.py", "so/runner/run.py", "scripts/holdout_evaluate.py",
-                              "scripts/refresh_development_view.py", "scripts/check_agent_access.py", "README.md",
+                              "scripts/refresh_development_view.py", "scripts/check_agent_access.py", "so/runner/guard.py", "README.md",
                               ".cursor/rules/research-integrity.mdc"}
     quarantine_offender_list = []
     for root_str, dir_list, file_list in os.walk(WORKSPACE_PATH_STR):

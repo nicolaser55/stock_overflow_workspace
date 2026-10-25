@@ -22,6 +22,27 @@ so/core/local_file_management.py
 so/core/trial_log.py
 so/core/csv_append.py
 so/features/vix_features.py
+so/__init__.py
+so/core/__init__.py
+so/features/__init__.py
+
+# Shared code the runner and the guards import (audit B4, 2026-10-25; scripts/check_protected_paths.py --closure)
+so/core/backtest_simulation.py
+so/core/baseline_report.py
+so/core/continuous_replay.py
+so/core/data_quality.py
+so/core/datetime_utils.py
+so/core/evaluation.py
+so/core/performance_metrics.py
+so/core/reentry_simulation.py
+so/core/rolling_retrain.py
+so/core/schedule.py
+so/core/trade_execution.py
+so/features/daily_features.py
+so/features/ohlcv_data_utils.py
+# Raw-data correction (rewrites store01 when run by an account that may)
+so/core/bad_ticks.py
+scripts/fix_raw_bad_ticks.py
 
 # The runner (view, engines, look-ahead check, verdict, baselines, selection)
 so/runner/**
@@ -47,6 +68,11 @@ tests/test_refresh_development_view.py
 tests/test_trial_log_append.py
 tests/test_runner*.py
 tests/test_tools.py
+tests/runner_*_design.py
+tests/synthetic_data.py
+
+# CI and review rules
+.github/**
 
 # Environment
 requirements/**

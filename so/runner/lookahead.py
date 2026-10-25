@@ -24,10 +24,17 @@ RUNNER_LOOKAHEAD_CUT_COUNT cut dates (one in each third of the development span,
 candidate and every cut it re-runs the stream twice:
 
     truncation    bars and declared sources stop after the cut. One extra session is kept in the bar arrays so the
-                  cut is not the last window session (the last session has no design call).
-    perturbation  every bar after the cut's decision bar is overwritten (get_perturbed_ohlcv_dict). Declared feature
-                  rows with available_ts after the cut, and label rows with label_known_ts after the cut, are
-                  overwritten (get_perturbed_feature_pdf). Session structure is unchanged.
+                  cut is not the last window session (the last session has no design call); its bars are flat at the
+                  cut session's last close, so they carry no future information.
+    perturbation  every bar after the cut's decision bar is rebuilt from shuffled returns (get_perturbed_ohlcv_dict).
+                  Declared feature rows with available_ts after the cut, and label rows with label_known_ts after the
+                  cut, are permuted among themselves and rescaled (get_perturbed_feature_pdf). Session structure is
+                  unchanged.
+
+Cuts (audit B3, 2026-10-25): RUNNER_LOOKAHEAD_CUT_COUNT random cuts shared by every candidate (one per third of the
+span), plus, for each candidate, up to RUNNER_LOOKAHEAD_CHANGE_CUT_MAX sessions where its own decision changed
+(RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE in minute mode), spread evenly over those sessions. A leak that earns money has
+to change decisions, so those sessions are where a leak shows.
 
 Every decision up to and including the cut must equal the full run's decision. A first mismatch fails that candidate
 and fails the verdict. Jobs run in the same spawn pool as the candidate streams. These re-runs never write a trial-log
@@ -78,6 +85,54 @@ def get_lookahead_cut_date_list(session_date_list_in, count_int_in=None, seed_in
     return cut_list
 
 
+# FUNCTION: SESSIONS WHERE A CANDIDATE'S OWN DECISION CHANGED
+def get_decision_change_cut_list(decision_list_in, session_list_in, last_session_in, minute_bool_in, max_count_int_in):
+    """
+    Daily: a session whose decision differs from the previous session's (get_decision_equal_bool). Minute: a session
+    where "any entry asked" differs from the previous session. The last window session (no design call) is never a
+    cut. More sessions than max_count_int_in: an evenly spread subset.
+
+    Args:
+        decision_list_in (list[dict]): The candidate's recorded decisions
+        session_list_in (list): Session of each decision (daily: parallel list; minute: read from _session_date)
+        last_session_in: Last window session
+        minute_bool_in (bool): Minute decisions
+        max_count_int_in (int): Cap
+
+    Returns:
+        list[datetime.date]: Cut sessions, oldest first
+    """
+    # ONE FINGERPRINT PER SESSION, IN ORDER
+    from so.runner.engine import get_barrier_buy_bool
+    last_day = get_date(last_session_in)
+    session_value_list = []
+    if minute_bool_in:
+        buy_dict = {}
+        for decision_dict in decision_list_in:
+            session_day = get_recorded_session_date(decision_dict, None)
+            if session_day is None:
+                continue
+            buy_dict[session_day] = buy_dict.get(session_day, False) or bool(get_barrier_buy_bool(get_decision_dict(decision_dict)))
+        session_value_list = sorted(buy_dict.items())
+    else:
+        session_value_list = [(get_date(session_date), get_decision_dict(decision_dict))
+                              for session_date, decision_dict in zip(session_list_in, decision_list_in)]
+    change_list = []
+    for idx in range(1, len(session_value_list)):
+        session_day, value = session_value_list[idx]
+        previous_value = session_value_list[idx - 1][1]
+        changed_bool = (value != previous_value) if minute_bool_in else (not get_decision_equal_bool(previous_value, value))
+        if changed_bool and session_day < last_day:
+            change_list.append(session_day)
+    max_count_int = int(max_count_int_in)
+    if max_count_int <= 0 or not change_list:
+        return []
+    if len(change_list) <= max_count_int:
+        return change_list
+    pick_idx_list = sorted(set(int(round(value)) for value in np.linspace(0, len(change_list) - 1, max_count_int)))
+    return [change_list[idx] for idx in pick_idx_list]
+
+
 # FUNCTION: YYYYMMDD SEED OF ONE CUT
 def get_perturbation_seed_int(cut_date_in):
     """
@@ -111,7 +166,18 @@ def get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     cut_day = get_date(cut_date_in)
     cut_idx = max(idx for idx, session_day in enumerate(session_date_list) if session_day <= cut_day)
     keep_idx = min(cut_idx + 1, len(session_date_list) - 1)
-    return get_truncated_ohlcv_dict(ohlcv_array_dict_in, session_date_list[keep_idx])
+    truncated_dict = get_truncated_ohlcv_dict(ohlcv_array_dict_in, session_date_list[keep_idx])
+    if keep_idx == cut_idx:
+        return truncated_dict
+    # THE EXTRA SESSION IS FLAT AT THE CUT SESSION'S LAST CLOSE: IT EXISTS ONLY SO THE CUT HAS ITS CALL, AND A DESIGN
+    # THAT READS ONE SESSION AHEAD MUST NOT FIND THE REAL BARS THERE (AUDIT B3, 2026-10-25). COPIES, NOT VIEWS.
+    first_extra_idx = int(truncated_dict["session_start_idx_arr"][keep_idx])
+    last_close_float = float(truncated_dict["close_arr"][first_extra_idx - 1])
+    for key_str in ["open_arr", "high_arr", "low_arr", "close_arr"]:
+        price_arr = np.array(truncated_dict[key_str], dtype=float, copy=True)
+        price_arr[first_extra_idx:] = last_close_float
+        truncated_dict[key_str] = price_arr
+    return truncated_dict
 
 
 # FUNCTION: A CONTEXT WHOSE ROWS STOP AT THE CUT SESSION END
@@ -315,7 +381,8 @@ def run_lookahead_stream_dict(design_module_in, candidate_in, ohlcv_array_dict_i
     """
     # A FRESH DESIGN AND ENGINE; THE FULL RUN'S CHECKPOINT IS NOT TOUCHED
     from so.runner.run import get_candidate_engine
-    design = design_module_in.get_candidate_design(candidate_in)
+    from so.runner.guard import call_design_func
+    design = call_design_func(design_module_in.get_candidate_design, candidate_in)
     engine = get_candidate_engine(design_module_in)
     dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
     default_weight = 0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0
@@ -348,6 +415,8 @@ def run_lookahead_job_dict(job_dict_in):
     from so.runner.preflight import check_design_file
     if job_dict_in.get("runs_root_str"):
         set_runs_root_str(job_dict_in["runs_root_str"])
+    from so.runner.guard import get_module_snapshot_dict, check_module_snapshot
+    module_snapshot_dict = get_module_snapshot_dict()
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
     # THE SAME RUN'S FIT CACHE: A REFIT ON UNCHANGED ROWS (BEFORE THE CUT) IS NOT FITTED AGAIN
@@ -378,6 +447,7 @@ def run_lookahead_job_dict(job_dict_in):
         raise ValueError(f"unknown look-ahead kind {kind_str!r}")
     result_dict = run_lookahead_stream_dict(design_module, candidate, check_ohlcv_dict, date1, check_date2,
                                             check_context, job_dict_in["design_file_path_str"])
+    check_module_snapshot(module_snapshot_dict, f"during the look-ahead stream of {candidate!r}")
     candidate_token_str = get_candidate_token_str(candidate)
     full_decision_list = read_decisions_list(job_dict_in["run_id_str"], candidate_token_str)
     if full_decision_list is None:
@@ -485,16 +555,25 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
         dict: pass_bool, status_str, cut_date_list, seed_int, candidate_dict, first_fail_dict, elapsed_seconds,
               path_str
     """
-    # CUTS ARE A PROPERTY OF THE SPAN, NOT OF A CANDIDATE
-    _ = design_module_in
+    # THE RANDOM CUTS ARE A PROPERTY OF THE SPAN; THE DECISION-CHANGE CUTS BELONG TO EACH CANDIDATE
     start_time = time.perf_counter()
     cut_date_list = get_lookahead_cut_date_list(window_session_date_list_in)
     seed_int = int(config.RUNNER_LOOKAHEAD_CUT_SEED)
     perturbation_seed_dict = {str(cut_date): get_perturbation_seed_int(cut_date) for cut_date in cut_date_list}
     session_str_list = [str(get_date(session_date)) for session_date in window_session_date_list_in]
+    # EACH CANDIDATE: THE SHARED RANDOM CUTS PLUS ITS OWN DECISION-CHANGE SESSIONS
+    from so.runner.run import get_candidate_token_str
+    minute_bool = get_design_mode_str(design_module_in) == MODE_MINUTE_STR
+    change_max_int = int(config.RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE if minute_bool else config.RUNNER_LOOKAHEAD_CHANGE_CUT_MAX)
+    candidate_cut_dict = {}
+    for candidate in candidate_list_in:
+        recorded_list = read_decisions_list(run_id_str_in, get_candidate_token_str(candidate)) or []
+        change_list = get_decision_change_cut_list(recorded_list, window_session_date_list_in,
+                                                   window_session_date_list_in[-1], minute_bool, change_max_int)
+        candidate_cut_dict[candidate] = sorted(set(cut_date_list) | set(change_list))
     job_dict_list = []
     for candidate in candidate_list_in:
-        for cut_date in cut_date_list:
+        for cut_date in candidate_cut_dict[candidate]:
             for kind_str in KIND_STR_LIST:
                 job_dict_list.append({
                     "candidate": candidate, "cut_date": str(cut_date), "kind_str": kind_str,
@@ -513,7 +592,7 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
         check_list = []
         candidate_pass_bool = True
         candidate_fail_dict = None
-        for cut_date in cut_date_list:
+        for cut_date in candidate_cut_dict[candidate]:
             for kind_str in KIND_STR_LIST:
                 row_dict = result_key_dict[(candidate, str(cut_date), kind_str)]
                 row_fail_dict = None
@@ -530,7 +609,8 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
                                    "seed_int": int(row_dict["seed_int"]),
                                    "first_fail_dict": row_fail_dict})
         candidate_dict[str(candidate)] = {"pass_bool": bool(candidate_pass_bool), "check_list": check_list,
-                                          "first_fail_dict": candidate_fail_dict}
+                                          "first_fail_dict": candidate_fail_dict,
+                                          "cut_date_list": [str(cut_date) for cut_date in candidate_cut_dict[candidate]]}
     elapsed_seconds = float(time.perf_counter() - start_time)
     status_str = LOOK_AHEAD_PASS_STR if overall_pass_bool else LOOK_AHEAD_FAIL_STR
     payload_dict = {"cut_date_list": [str(cut_date) for cut_date in cut_date_list],

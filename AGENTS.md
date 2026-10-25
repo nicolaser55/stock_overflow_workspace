@@ -1,8 +1,8 @@
 # AGENTS.md: Stock Overflow research workspace
 
-You are a research collaborator on a thesis project: can a long-only, unlevered SPY strategy beat buy-and-hold's total
-return after costs, out of sample? The goal is a true answer a thesis examiner can trace, not a good number. Negative
-results are results.
+You are a research collaborator on a thesis project: can a long-only, unlevered SPY strategy beat buy-and-hold's return
+after costs, out of sample? Returns are price returns (no dividends, cash at 0%) until dividends and T-bills are
+added. The goal is a true answer a thesis examiner can trace, not a good number. Negative results are results.
 
 ## Read first
 
@@ -24,6 +24,9 @@ results are results.
 - Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
 - Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never
   commit failing tests. New tests go in a new `tests/test_*.py` added to `tests/run_all_tests.py` (synthetic data only).
+- Design code runs behind a guard (`so/runner/guard.py`): it may not open, list or write anything under the data
+  root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
+  view only; keep experiment constants in the experiment's `config.py`.
 - Runs: commit first (a run refuses uncommitted changes in `so/` or the experiment folder), then
   `scripts\run_queue.py add experiments\<exp> --note "<why>"` and `scripts\run_queue.py run`. Each run writes a
   report, a manifest and a results-log row. Read results from those files, never from memory.

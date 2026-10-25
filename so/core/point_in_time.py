@@ -36,7 +36,7 @@ config.PA_EXTREMA_ORDER bars later (add_minima_col needs `order` bars on each si
 once those bars exist). A swing stored on its own bar is therefore knowable only at the end of the confirmation bar.
 TSCTX states that the row of bar t uses only bars <= t. TSDAY features are the decision bar of the session; the
 forward-return columns on that row are labels and are not served on the feature path. TSDAY_FWD is those same files
-as a label: label_known_ts is the decision moment of the session LABEL_HORIZON_SESSIONS later; unfinished rows (no
+as a label: label_known_ts is the end of the session LABEL_HORIZON_SESSIONS later (its close is the exit); unfinished rows (no
 horizon session) are dropped; a redacted blank y_fwd stays as a missing label. TSBAR is a label: label_known_ts
 is the end of the bar where TP or SL was hit, or the end of the horizon. The files store that bar as exit_bar_count
 on each distance cell (minute bars from entry_ts). The row clock is the latest of those bars. An unresolved cell,
@@ -392,7 +392,7 @@ def add_tsbar_label_known_ts_pdf(label_pdf_in, timestamp_index_in=None):
 # FUNCTION: ADD label_known_ts TO THE FIXED-HORIZON TSDAY LABEL
 def add_tsday_fwd_label_known_ts_pdf(label_pdf_in):
     """
-    Copies a TSDAY frame as a label. label_known_ts is the decision moment of the session LABEL_HORIZON_SESSIONS
+    Copies a TSDAY frame as a label. label_known_ts is the end of the session LABEL_HORIZON_SESSIONS
     later. The last horizon sessions have no clock and are dropped. A redacted blank y_fwd / fwd_ cell becomes a
     missing label; the row stays if it has a clock.
 
@@ -420,7 +420,9 @@ def add_tsday_fwd_label_known_ts_pdf(label_pdf_in):
     horizon_int = int(config.LABEL_HORIZON_SESSIONS)
     known_list = [pd.NaT] * len(decision_list)
     for row_idx in range(max(0, len(decision_list) - horizon_int)):
-        known_list[row_idx] = decision_list[row_idx + horizon_int]
+        # THE LABEL SELLS AT THE CLOSE OF SESSION i + HORIZON: KNOWN AT THE END OF ITS LAST BAR, ONE MINUTE AFTER THAT
+        # SESSION'S DECISION MOMENT (THE DECISION BAR IS ALWAYS THE SECOND-TO-LAST BAR; AUDIT S10, 2026-10-25)
+        known_list[row_idx] = decision_list[row_idx + horizon_int] + MINUTE_BAR_TIMEDELTA
     stamped_pdf["label_known_ts"] = known_list
     stamped_pdf["available_ts"] = known_list
     # A REDACTED BLANK FORWARD COLUMN IS A MISSING LABEL, NOT A ZERO
@@ -500,7 +502,7 @@ SOURCE_SPEC_DICT = {
               "revision_reason": "The daily table is recomputed from the bars. Forward-return columns are labels and are not served here.",
               "role": "feature", "holdout": "development boundary; runner window end"},
     "TSDAY_FWD": {"loader": "so.core.local_file_management.read_csv_files_from_path", "time_zone": NY_TZ_STR,
-                  "timestamp_convention": "label_known_ts is the decision of session i + LABEL_HORIZON_SESSIONS",
+                  "timestamp_convention": "label_known_ts is the end of session i + LABEL_HORIZON_SESSIONS (its close is the label's exit)",
                   "availability_func": add_tsday_fwd_label_known_ts_pdf, "revision_policy": "not revised",
                   "revision_reason": "The 20-session sign is a function of the bars. It is not a revised print.",
                   "role": "label", "holdout": "development boundary; runner window end"},
@@ -695,9 +697,11 @@ Perturbation Of Feature Values
 # FUNCTION: REPLACE FEATURE VALUES THAT WERE NOT YET KNOWABLE
 def get_perturbed_feature_pdf(feature_pdf_in, decision_ts_in, seed_int_in, source_name_str_in):
     """
-    Copies the frame. Every value with available_ts after the cut session's decision is replaced: numeric columns
-    become value x 1.25 plus seeded noise, and high/low stay consistent with open/close when those columns exist.
-    Other columns are a seeded shuffle. Row timestamps and the row count stay. Labels are not passed here.
+    Copies the frame. Every value with available_ts after the cut session's decision is replaced: each column's late
+    values are permuted among the late rows (seeded; a value moves to another row), and numeric columns are then
+    multiplied by 1.25. A row read one step early therefore shows another row's value, so a sign or a rank changes,
+    not only the level (audit B3, 2026-10-25). High and low stay consistent with open and close when those columns
+    exist. Row timestamps and the row count stay.
 
     Args:
         feature_pdf_in (pd.DataFrame): Feature rows with available_ts
@@ -721,22 +725,24 @@ def get_perturbed_feature_pdf(feature_pdf_in, decision_ts_in, seed_int_in, sourc
     seed_int = int(seed_int_in) + (sum(source_name_str_in.encode("utf-8")) % 10000)
     rng = np.random.default_rng(seed_int)
     late_idx = perturbed_pdf.index[late_mask]
+    late_count = len(late_idx)
+    # A DERANGEMENT-LIKE ORDER: A ROTATED PERMUTATION SO NO LATE ROW KEEPS ITS OWN VALUE WHEN THERE ARE TWO OR MORE
+    order_arr = rng.permutation(late_count)
+    if late_count >= 2:
+        order_arr = np.roll(order_arr, 1)[np.argsort(order_arr)]
     # REWRITE EACH VALUE COLUMN
     for column_str in perturbed_pdf.columns:
         if column_str in PROTECTED_COLUMN_SET:
             continue
         column_series = perturbed_pdf[column_str]
+        late_value_arr = column_series.loc[late_idx].to_numpy().copy()[order_arr]
         if pd.api.types.is_bool_dtype(column_series) or not pd.api.types.is_numeric_dtype(column_series):
-            shuffled_arr = column_series.loc[late_idx].to_numpy().copy()
-            rng.shuffle(shuffled_arr)
-            perturbed_pdf.loc[late_idx, column_str] = shuffled_arr
+            perturbed_pdf.loc[late_idx, column_str] = late_value_arr
             continue
         # AN INTEGER COLUMN (VOLUME, COUNTS) BECOMES FLOAT FIRST: PANDAS DID THIS SILENTLY BEFORE AND WARNS NOW
         if pd.api.types.is_integer_dtype(column_series):
             perturbed_pdf[column_str] = column_series.astype(float)
-            column_series = perturbed_pdf[column_str]
-        noise_arr = rng.normal(0.0, 0.01, len(late_idx))
-        perturbed_pdf.loc[late_idx, column_str] = column_series.loc[late_idx].to_numpy(dtype=float) * 1.25 + noise_arr
+        perturbed_pdf.loc[late_idx, column_str] = late_value_arr.astype(float) * 1.25
     # KEEP A BAR'S HIGH AND LOW CONSISTENT WITH ITS OPEN AND CLOSE
     if {"open", "high", "low", "close"}.issubset(perturbed_pdf.columns):
         open_arr = perturbed_pdf.loc[late_idx, "open"].to_numpy(dtype=float)

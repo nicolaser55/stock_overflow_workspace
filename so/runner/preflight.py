@@ -14,11 +14,14 @@ helper sitting next to the design file. The runner itself may use these names; a
 BANNED_ATTR_SET = {"base", "__closure__", "__self__", "__globals__", "__dict__", "_getframe", "load", "fromfile",
                    "loadtxt", "genfromtxt"}
 # BARE NAMES THAT LOAD ESCAPE HATCHES OR OPEN FILES
-BANNED_NAME_SET = {"gc", "inspect", "ctypes", "open", "eval", "exec", "__import__", "vars"}
+BANNED_NAME_SET = {"gc", "inspect", "ctypes", "open", "eval", "exec", "__import__", "vars", "setattr", "delattr",
+                   "globals", "compile", "breakpoint"}
 # MODULES A DESIGN MUST NOT IMPORT
 BANNED_MODULE_SET = {"so.runner", "so.core.point_in_time", "so.core.holdout", "os", "pathlib", "glob", "shutil", "io",
                      "pickle", "joblib", "importlib", "so.paths", "so.core.local_file_management", "so.core.raw_data",
-                     "pandas.io", "pd.io"}
+                     "pandas.io", "pd.io", "sys", "subprocess", "socket", "builtins", "urllib", "http", "requests",
+                     "multiprocessing", "threading", "signal", "tempfile", "sqlite3", "shelve", "dbm", "zipfile",
+                     "tarfile", "mmap"}
 # NAMES THAT ARE PANDAS WHEN FOLLOWED BY .io
 PANDAS_IO_NAME_SET = {"pd", "pandas"}
 # GETATTR / SETATTR NAMES THAT ARE THE SAME ESCAPE HATCHES
@@ -274,6 +277,81 @@ def get_getattr_literal_str(node_in):
     return None
 
 
+# FUNCTION: NAMES A FILE BINDS BY IMPORT
+def get_imported_alias_set(tree_in):
+    """
+    Every name an import statement binds in the file (import a.b binds a; import a as x binds x; from a import b binds
+    b).
+
+    Args:
+        tree_in (ast.AST): Parsed module
+
+    Returns:
+        set[str]: Bound names
+    """
+    # THE FIRST PART OF A DOTTED import, OR THE ALIAS
+    alias_set = set()
+    for node in ast.walk(tree_in):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                alias_set.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    alias_set.add(alias.asname or alias.name)
+    return alias_set
+
+
+# FUNCTION: THE NAME AT THE ROOT OF AN ATTRIBUTE CHAIN
+def get_attribute_root_name_str(node_in):
+    """
+    Args:
+        node_in (ast.AST): An Attribute or Subscript target
+
+    Returns:
+        str | None: The Name at its root (config for config.X or config.D["k"]), or None
+    """
+    # WALK DOWN .value UNTIL A NAME
+    current = node_in
+    while isinstance(current, (ast.Attribute, ast.Subscript)):
+        current = current.value
+    return current.id if isinstance(current, ast.Name) else None
+
+
+# FUNCTION: REFUSE A WRITE INTO AN IMPORTED MODULE OR OBJECT
+def check_import_write_tree(tree_in, file_path_str_in):
+    """
+    An assignment, augmented assignment or delete whose target is an attribute or item of an imported name
+    (so_config.LABEL_HORIZON_SESSIONS = 5, trade_execution.calculate_side_fee = f, config.LIST[0] = 1) changes shared
+    code for every run in the process. Refused (audit B2). The runtime module guard stands behind this.
+
+    Args:
+        tree_in (ast.AST): Parsed module
+        file_path_str_in (str): File being checked
+
+    Returns:
+        None
+    """
+    # TARGETS OF EVERY WRITE STATEMENT
+    alias_set = get_imported_alias_set(tree_in)
+    for node in ast.walk(tree_in):
+        target_list = []
+        if isinstance(node, ast.Assign):
+            target_list = list(node.targets)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            target_list = [node.target]
+        elif isinstance(node, ast.Delete):
+            target_list = list(node.targets)
+        expanded_list = []
+        for target in target_list:
+            expanded_list.extend(target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target])
+        for target in expanded_list:
+            if isinstance(target, (ast.Attribute, ast.Subscript)):
+                root_str = get_attribute_root_name_str(target)
+                if root_str in alias_set:
+                    raise ValueError(f"design file writes into imported name {root_str}: {file_path_str_in}")
+
+
 # FUNCTION: REFUSE ONE FILE'S AST
 def check_design_tree_node(node_in, file_path_str_in):
     """
@@ -393,6 +471,7 @@ def check_design_file(file_path_str_in):
         source_str = open(path_str, "r", encoding="utf-8").read()
         tree = ast.parse(source_str, filename=path_str)
         check_minute_signal_tree(tree, path_str)
+        check_import_write_tree(tree, path_str)
         for node in ast.walk(tree):
             check_design_tree_node(node, path_str)
 

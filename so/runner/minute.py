@@ -13,6 +13,7 @@ from so.core.reentry_simulation import get_window_session_idx_arr
 # IMPORT THE REFIT CALENDAR AND THE TRAINING MASK
 from so.core.rolling_retrain import get_retrain_session_list, TRAIN_WINDOW_ALLOWED_LIST
 # IMPORT THE ENGINE DECISION SHAPE
+from so.runner.guard import call_design_func
 from so.runner.engine import (BarrierEngine, get_decision_dict, get_barrier_buy_bool, DECISION_KEY_LIST,
                               FLOAT_DECISION_KEY_LIST)
 # IMPORT THE SHARED BAR EVENTS
@@ -523,7 +524,8 @@ def get_shuffled_signal_list(row_pdf_in, model_in, signal_func_in, design_name_s
     restored_list = []
     for perm_arr in (perm_one_arr, perm_two_arr):
         shuffled_pdf = get_signal_frame_pdf(row_pdf_in.iloc[list(perm_arr)], feature_col_list)
-        output_list = get_signal_decision_list(signal_func_in(shuffled_pdf, model_in), row_count_int)
+        from so.runner.guard import call_design_func
+        output_list = get_signal_decision_list(call_design_func(signal_func_in, shuffled_pdf, model_in), row_count_int)
         restored_row_list = [None] * row_count_int
         for shuffled_idx, original_idx in enumerate(perm_arr):
             restored_row_list[int(original_idx)] = output_list[int(shuffled_idx)]
@@ -612,12 +614,13 @@ def get_shared_fit(fit_key_str_in, train_pdf_in, fit_func_in):
     Returns:
         object: Shared model
     """
-    # IMPORT HERE (RUNNER-ONLY FILE WORK)
+    # IMPORT HERE (RUNNER-ONLY FILE WORK; THE FIT ITSELF IS DESIGN CODE AND RUNS BEHIND THE GUARD)
     import os
     import pickle
     import time
+    from so.runner.guard import call_design_func
     if _FIT_CACHE_FOLDER_STR is None:
-        return fit_func_in(train_pdf_in)
+        return call_design_func(fit_func_in, train_pdf_in)
     os.makedirs(_FIT_CACHE_FOLDER_STR, exist_ok=True)
     stem_str = f"{fit_key_str_in}_{get_train_rows_hash_str(train_pdf_in)}"
     model_path_str = os.path.join(_FIT_CACHE_FOLDER_STR, stem_str + ".pkl")
@@ -636,9 +639,9 @@ def get_shared_fit(fit_key_str_in, train_pdf_in, fit_func_in):
                 with open(model_path_str, "rb") as file_obj:
                     return pickle.load(file_obj)
             time.sleep(1.0)
-        return fit_func_in(train_pdf_in)
+        return call_design_func(fit_func_in, train_pdf_in)
     os.close(lock_fd)
-    shared_model = fit_func_in(train_pdf_in)
+    shared_model = call_design_func(fit_func_in, train_pdf_in)
     temp_path_str = model_path_str + f".{os.getpid()}.tmp"
     with open(temp_path_str, "wb") as file_obj:
         pickle.dump(shared_model, file_obj)
@@ -962,9 +965,9 @@ class MinuteLoop:
             if callable(getattr(self.design, "fit_shared", None)) and getattr(self.design, "FIT_KEY_STR", None):
                 # CANDIDATES WITH THE SAME FIT KEY SHARE ONE FIT OF THE SAME ROWS (ONE RUN, ONE CODE VERSION)
                 shared_model = get_shared_fit(str(self.design.FIT_KEY_STR), train_pdf, self.design.fit_shared)
-                self.current_model = self.design.finish_fit(shared_model)
+                self.current_model = call_design_func(self.design.finish_fit, shared_model)
             else:
-                self.current_model = self.fit_func(train_pdf)
+                self.current_model = call_design_func(self.fit_func, train_pdf)
         self.score_refit_block(refit_ts, self.current_model)
 
     # FUNCTION: APPLY THIS SESSION'S FILLS AND EXITS

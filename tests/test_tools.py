@@ -202,21 +202,41 @@ def test_protected_paths():
                      "AGENTS.md", ".cursor/rules/research-integrity.mdc", "scripts/holdout_evaluate.py", "tests/test_runner_minute.py",
                      "requirements/venv_main_lock.txt", "protected_paths.txt"]:
         assert get_protected_bool(path_str, protected_dict["glob_list"]), path_str
+    for path_str in ["so/core/evaluation.py", "so/core/trade_execution.py", "so/runner/guard.py", "tests/runner_guard_design.py",
+                     ".github/workflows/ci.yml"]:
+        assert get_protected_bool(path_str, protected_dict["glob_list"]), path_str
     for path_str in ["experiments/exp99_new/design.py", "so/features/rule_design.py", "tests/test_experiments.py", "docs/notes.md"]:
         assert not get_protected_bool(path_str, protected_dict["glob_list"]), path_str
     assert "docs/RESULTS_LOG.md" in protected_dict["append_list"]
     assert get_append_only_bool("--- a/x\n+++ b/x\n@@ -10,0 +11 @@\n+| new row |")
     assert not get_append_only_bool("--- a/x\n+++ b/x\n@@ -3 +3 @@\n-| old |\n+| edited |")
     # A BRANCH THAT CHANGES A GUARD, AN EXPERIMENT AND APPENDS A RESULT ROW
+    base_list_str = Path(WORKSPACE_PATH_STR, "protected_paths.txt").read_text(encoding="utf-8")
     output_dict = {"merge-base": "abc\n", "--name-only": "so/core/holdout.py\nexperiments/exp99_new/design.py\ndocs/RESULTS_LOG.md\n",
-                   "ls-files": "records/new.csv\n", "-U0": "@@ -5,0 +6 @@\n+| row |\n"}
+                   "ls-files": "records/new.csv\n", "-U0": "@@ -5,0 +6 @@\n+| row |\n", "show": base_list_str}
     def git_func(arg_list_in):
         for key_str, output_str in output_dict.items():
             if key_str in arg_list_in:
                 return output_str
         raise AssertionError(arg_list_in)
     assert get_violation_list("main", git_func) == ["records/new.csv: protected", "so/core/holdout.py: protected"]
-    passed("protected paths (guards covered, experiments free, RESULTS_LOG append-only)")
+    # THE LIST COMES FROM THE BASE: A BRANCH THAT DROPS so/core/evaluation.py FROM ITS OWN COPY IS STILL CAUGHT
+    output_dict["--name-only"] = "protected_paths.txt\nso/core/evaluation.py\n"
+    output_dict["ls-files"] = ""
+    violation_list = get_violation_list("main", git_func)
+    assert "so/core/evaluation.py: protected" in violation_list and "protected_paths.txt: protected" in violation_list, violation_list
+    # EVERY so/ MODULE THAT PROTECTED CODE IMPORTS IS PROTECTED (AUDIT B4)
+    from check_protected_paths import get_unprotected_closure_list
+    assert get_unprotected_closure_list() == [], get_unprotected_closure_list()
+    reduced_glob_list = [glob_str for glob_str in protected_dict["glob_list"] if glob_str != "so/core/evaluation.py"]
+    assert "so/core/evaluation.py" in get_unprotected_closure_list(reduced_glob_list)
+    # CODEOWNERS NAMES EVERY PROTECTED GLOB, SO A PROTECTED CHANGE NEEDS NICOLAS'S REVIEW ON GITHUB
+    owner_text_str = Path(WORKSPACE_PATH_STR, ".github", "CODEOWNERS").read_text(encoding="utf-8")
+    owner_pattern_set = {line_str.split()[0] for line_str in owner_text_str.splitlines() if line_str.strip() and not line_str.startswith("#")}
+    for glob_str in protected_dict["glob_list"]:
+        pattern_str = "/" + (glob_str[:-2] if glob_str.endswith("/**") else glob_str)
+        assert pattern_str in owner_pattern_set, f"CODEOWNERS misses {glob_str}"
+    passed("protected paths (guards covered, list read from the base, import closure protected, CODEOWNERS in sync, RESULTS_LOG append-only)")
 
 
 # FUNCTION: TEST THE PACKAGE LOCK CHECK
@@ -260,11 +280,34 @@ def test_ledger_outside_repository():
     passed("holdout ledger only under SO_HOLDOUT_PATH (none in records/, unreachable without the variable)")
 
 
+# FUNCTION: COMMITTED NOTEBOOKS CARRY NO OUTPUTS (AUDIT S6)
+def test_notebooks_without_outputs():
+    """
+    Executed notebooks hold data (step 00 once showed raw bars inside the holdout window). The repository keeps the
+    code only; executed copies live under the quarantine (scripts/refresh_development_view.py).
+
+    Returns:
+        None
+    """
+    # EVERY .ipynb UNDER THE WORKSPACE
+    import json
+    notebook_list = sorted(Path(WORKSPACE_PATH_STR).rglob("*.ipynb"))
+    assert notebook_list, "no notebook found"
+    for notebook_path in notebook_list:
+        if ".ipynb_checkpoints" in notebook_path.parts:
+            continue
+        notebook_dict = json.loads(notebook_path.read_text(encoding="utf-8"))
+        for cell_dict in notebook_dict.get("cells", []):
+            assert not cell_dict.get("outputs"), f"{notebook_path.name} has committed outputs; clear them before committing"
+    passed(f"committed notebooks carry no outputs ({len(notebook_list)} checked)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
     test_email_outbox_and_smtp()
     test_protected_paths()
+    test_notebooks_without_outputs()
     test_environment_lock()
     test_ledger_outside_repository()
     print("\nAll tool tests passed ✅")

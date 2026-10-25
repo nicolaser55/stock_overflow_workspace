@@ -36,17 +36,24 @@ def load_design_module(design_folder_str_in):
     Returns:
         module: The design
     """
-    # LOAD design.py
+    # THE PREFLIGHT RUNS BEFORE ANY DESIGN CODE; THE IMPORT RUNS BEHIND THE FILE GUARD AND MAY NOT CHANGE so.*
+    from so.runner.preflight import check_design_file
+    from so.runner.guard import design_code_guard, get_module_snapshot_dict, check_module_snapshot
     design_path_str = os.path.join(design_folder_str_in, "design.py")
+    check_design_file(design_path_str)
+    module_snapshot_dict = get_module_snapshot_dict()
     design_spec = importlib.util.spec_from_file_location("development_design", design_path_str)
     design_module = importlib.util.module_from_spec(design_spec)
-    design_spec.loader.exec_module(design_module)
+    with design_code_guard():
+        design_spec.loader.exec_module(design_module)
     # COPY MISSING CONSTANTS FROM config.py
     config_path_str = os.path.join(design_folder_str_in, "config.py")
     if os.path.isfile(config_path_str):
         config_spec = importlib.util.spec_from_file_location("development_design_config", config_path_str)
         config_module = importlib.util.module_from_spec(config_spec)
-        config_spec.loader.exec_module(config_module)
+        with design_code_guard():
+            config_spec.loader.exec_module(config_module)
+    check_module_snapshot(module_snapshot_dict, f"while importing {design_folder_str_in}")
         for key_str, value in vars(config_module).items():
             if key_str.isupper() and not hasattr(design_module, key_str):
                 setattr(design_module, key_str, value)

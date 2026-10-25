@@ -109,9 +109,10 @@ def get_design_decision_dict(design_in, view_in):
         dict: Output of get_decision_dict
     """
     # PREFER AN EXPLICIT DECIDE METHOD
+    from so.runner.guard import call_design_func
     if hasattr(design_in, "decide"):
-        return get_decision_dict(design_in.decide(view_in))
-    return get_decision_dict(design_in(view_in))
+        return get_decision_dict(call_design_func(design_in.decide, view_in))
+    return get_decision_dict(call_design_func(design_in, view_in))
 
 
 # FUNCTION: THE EMPTY RESULT OF A WINDOW WITH NO SESSIONS
@@ -437,6 +438,8 @@ def run_daily_dict(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_cont
     """
     # REFUSE A DESIGN FILE THAT CAN REACH AROUND THE VIEW
     check_design_source(design_in, design_file_path_str_in)
+    from so.runner.guard import get_module_snapshot_dict, check_module_snapshot
+    module_snapshot_dict = get_module_snapshot_dict()
     loop = DailyLoop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine_in, initial_weight_in,
                      dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in, design_file_path_str_in,
                      check_source_bool_in=False)
@@ -448,6 +451,7 @@ def run_daily_dict(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_cont
         loop.run_through_date(date2_in)
     finally:
         set_direct_read_blocked_bool(False)
+    check_module_snapshot(module_snapshot_dict, "during the daily run")
     return loop.get_result_dict()
 
 

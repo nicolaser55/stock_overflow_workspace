@@ -982,10 +982,12 @@ def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
 # FUNCTION: PERTURB EVERY BAR AFTER A DECISION BAR
 def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     """
-    A copy of the bars. Every open, high, low and close strictly after the cut session's decision bar (from its fill
-    bar through the end of the data) is replaced by price x 1.25 plus seeded noise. High stays at least the larger of
-    open and close; low stays at most the smaller. Timestamps, session bounds and bar indexes are unchanged, so the
-    decision bar stays the decision bar.
+    A copy of the bars. Every bar strictly after the cut session's decision bar (from its fill bar through the end of
+    the data) is rebuilt: the path restarts 3% above the last unperturbed close and then follows the real
+    close-to-close log returns of those bars in a seeded random order; each bar keeps the open, high and low of its
+    source bar relative to that bar's close. Signs and ratios of future returns change, not only their level (audit
+    B3, 2026-10-25: the earlier x 1.25 shift kept every sign and ratio, so a sign-based leak passed). Timestamps,
+    session bounds and bar indexes are unchanged, so the decision bar stays the decision bar.
 
     Args:
         ohlcv_array_dict_in (dict): Bars
@@ -1005,12 +1007,20 @@ def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     perturbed_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"].copy()
     perturbed_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"])
     perturbed_dict["date_session_idx_dict"] = dict(ohlcv_array_dict_in["date_session_idx_dict"])
-    # OVERWRITE THE BARS AFTER THE DECISION BAR
+    # REBUILD THE BARS AFTER THE DECISION BAR FROM SHUFFLED RETURNS
     bar_count = len(perturbed_dict["close_arr"]) - start_idx
-    if bar_count > 0:
-        noise_arr = np.random.default_rng(int(get_date(cut_date_in).strftime("%Y%m%d"))).normal(0.0, 0.01, bar_count)
-        for key_str in ["open_arr", "high_arr", "low_arr", "close_arr"]:
-            perturbed_dict[key_str][start_idx:] = perturbed_dict[key_str][start_idx:] * 1.25 + noise_arr
+    if bar_count > 0 and start_idx > 0:
+        rng = np.random.default_rng(int(get_date(cut_date_in).strftime("%Y%m%d")))
+        close_arr = np.asarray(ohlcv_array_dict_in["close_arr"], dtype=float)
+        tail_close_arr = close_arr[start_idx - 1:]
+        log_return_arr = np.diff(np.log(tail_close_arr))
+        order_arr = rng.permutation(bar_count)
+        new_close_arr = float(close_arr[start_idx - 1]) * 1.03 * np.exp(np.cumsum(log_return_arr[order_arr]))
+        source_idx_arr = start_idx + order_arr
+        for key_str in ["open_arr", "high_arr", "low_arr"]:
+            ratio_arr = np.asarray(ohlcv_array_dict_in[key_str], dtype=float)[source_idx_arr] / close_arr[source_idx_arr]
+            perturbed_dict[key_str][start_idx:] = new_close_arr * ratio_arr
+        perturbed_dict["close_arr"][start_idx:] = new_close_arr
         body_max_arr = np.maximum(perturbed_dict["open_arr"][start_idx:], perturbed_dict["close_arr"][start_idx:])
         body_min_arr = np.minimum(perturbed_dict["open_arr"][start_idx:], perturbed_dict["close_arr"][start_idx:])
         perturbed_dict["high_arr"][start_idx:] = np.maximum(perturbed_dict["high_arr"][start_idx:], body_max_arr)

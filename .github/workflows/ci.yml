@@ -1,0 +1,63 @@
+# Continuous integration (audit B4 / S12, 2026-10-25). Required by branch protection on main.
+#   tests             the fast test set on synthetic data (no real data, no holdout variables)
+#   protected-paths   main's copy of the protected-path check, with main's list: reports protected changes
+#                     (CODEOWNERS then requires Nicolas's review) and fails on an edited row of docs/RESULTS_LOG.md
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/ci_requirements.txt
+      - name: Install the test packages and the workspace
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/ci_requirements.txt
+          python -m pip install -e . --no-deps
+          python -m ipykernel install --user --name venv-main
+      - name: Fast test set
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tests/run_all_tests.py --fast
+      - name: Every module protected code imports is protected
+        run: python scripts/check_protected_paths.py --closure
+
+  protected-paths:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run main's copy of the check against main's list
+        run: |
+          git show "origin/${{ github.base_ref }}:scripts/check_protected_paths.py" > scripts/_ci_base_check_protected_paths.py
+          set +e
+          python scripts/_ci_base_check_protected_paths.py --base "origin/${{ github.base_ref }}" | tee protected_report.txt
+          set -e
+          if grep -q "append-only" protected_report.txt; then
+            echo "docs/RESULTS_LOG.md may only grow at its end"
+            exit 1
+          fi
+          if grep -q ": protected" protected_report.txt; then
+            echo "::warning::This pull request changes protected paths; Nicolas's code-owner review is required."
+          fi

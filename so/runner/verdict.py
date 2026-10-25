@@ -222,7 +222,8 @@ def get_baseline_verdict_dict(strategy_total_return_in, baseline_dict_in, beat_s
             "random_timing_min_share": min_share, "random_pass_bool": random_pass_bool,
             "random_timing_switch_count": int(baseline_dict_in.get("random_timing_switch_count", 0)),
             "random_timing_seed_list": list(baseline_dict_in.get("random_timing_seed_list") or []),
-            "buy_hold_total_return": float(baseline_dict_in.get("buy_hold_total_return", np.nan))}
+            "buy_hold_total_return": float(baseline_dict_in.get("buy_hold_total_return", np.nan)),
+            "exposure_source_str": str(baseline_dict_in.get("exposure_source_str", "decision_target"))}
 
 
 # FUNCTION: THE LOOK-AHEAD PART OF THE VERDICT
@@ -364,6 +365,7 @@ def get_report_markdown_str(report_dict_in):
     )
     line_list.extend(["", "### Baselines", ""])
     line_list.append(
+        f"Exposure read from the {str(baseline_dict.get('exposure_source_str', 'decision_target')).replace('_', ' ')}. "
         f"Constant exposure (weight {get_report_float_str(baseline_dict['constant_exposure_weight'])}, "
         f"daily rebalanced): {get_report_float_str(baseline_dict['constant_exposure_total_return'])}. "
         f"Path is above: {'pass' if baseline_dict['constant_pass_bool'] else 'fail'}."

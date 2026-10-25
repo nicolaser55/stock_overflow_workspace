@@ -186,7 +186,8 @@ def test_labels():
 # FUNCTION: TEST THE TSDAY_FWD HORIZON CLOCK AND REDACTION
 def test_tsday_fwd_clock():
     """
-    label_known_ts is the decision of session i + LABEL_HORIZON_SESSIONS. The last horizon rows are dropped. A blank
+    label_known_ts is the end of session i + LABEL_HORIZON_SESSIONS (one minute after its decision moment: the label
+    sells at that session's close; audit S10). The last horizon rows are dropped. A blank
     y_fwd becomes a missing label.
 
     Returns:
@@ -204,8 +205,9 @@ def test_tsday_fwd_clock():
     })
     stamped_pdf = add_tsday_fwd_label_known_ts_pdf(label_pdf)
     assert len(stamped_pdf) == session_count - int(config.LABEL_HORIZON_SESSIONS)
-    first_known = get_decision_ts(decision_list[int(config.LABEL_HORIZON_SESSIONS)])
+    first_known = get_decision_ts(decision_list[int(config.LABEL_HORIZON_SESSIONS)]) + pd.Timedelta(minutes=1)
     assert pd.Timestamp(stamped_pdf["label_known_ts"].iloc[0]) == first_known
+    assert pd.Timestamp(first_known).hour == 16 and pd.Timestamp(first_known).minute == 0
     assert "TSDAY_FWD" in SOURCE_SPEC_DICT and SOURCE_SPEC_DICT["TSDAY_FWD"]["role"] == "label"
     context = DataContext("development", frame_dict_in={"TSDAY_FWD": stamped_pdf})
     try:

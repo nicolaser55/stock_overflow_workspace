@@ -17,3 +17,4 @@ result is whatever its current code produces when run. The run folder (`store04_
 | 2026-10-23 | exp13_e1m1_robustness | 1.0 | exp13_e1m1_robustness_20261023164503182503 | not email-worthy | +273.85% vs +199.04% | consistency | pass | protocol 1.0 first run |
 | 2026-10-24 | exp01_minute_entry | 1.0 | exp01_minute_entry_20261023182310533311 | not email-worthy | +101.73% vs +217.35% | return, consistency, baselines, look-ahead | fail | protocol 1.0 first run |
 | 2026-10-25 | exp01_minute_entry | 1.0 | exp01_minute_entry_20261024153137940592 | not email-worthy | +101.73% vs +217.35% | return, consistency, baselines | pass | protocol 1.0, look-ahead cut-moment fix |
+| 2026-10-25 | all rows above | 1.0 | n/a | withdrawn | n/a | n/a | n/a | audit 2026-10-25 (claude/AUDIT_2026-10-25_foundation.md): baselines wrong for the trailing-stop rows (B1), look-ahead check weaker than reported (B3), consistency counted tied windows (S1); every experiment reruns after the fixes |

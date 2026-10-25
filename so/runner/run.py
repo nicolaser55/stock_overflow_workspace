@@ -35,6 +35,7 @@ from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict
+from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
                                write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, get_json_value,
                                LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_FAIL_STR, REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR,
@@ -328,7 +329,11 @@ def get_file_design_module(file_path_str_in):
     spec = importlib.util.spec_from_file_location(module_name_str, abs_path_str)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name_str] = module
-    spec.loader.exec_module(module)
+    # THE MODULE'S TOP-LEVEL CODE IS DESIGN CODE; IT MAY NOT CHANGE SHARED MODULES
+    module_snapshot_dict = get_module_snapshot_dict()
+    with design_code_guard():
+        spec.loader.exec_module(module)
+    check_module_snapshot(module_snapshot_dict, f"while importing {abs_path_str}")
     return module
 
 
@@ -385,6 +390,22 @@ def get_candidate_engine(design_module_in):
     return FractionalWeightEngine(dead_band, initial_capital, entry_slippage, market_exit_slippage)
 
 
+# FUNCTION: WHETHER THE BASELINES USE THE REALIZED POSITION
+def get_realized_exposure_bool(design_module_in):
+    """
+    True for the all-or-nothing engines (trailing stop, barrier), whose exits happen inside the engine. The
+    fractional engine's decision targets are its exposure.
+
+    Args:
+        design_module_in (module): Design
+
+    Returns:
+        bool: True when the baselines must read the realized position
+    """
+    # THE SAME ENGINE THE CANDIDATE STREAMS USE
+    return not isinstance(get_candidate_engine(design_module_in), FractionalWeightEngine)
+
+
 # FUNCTION: APPEND ONE CANDIDATE-PERIOD TRIAL
 def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_in, period_row_in, score_dict_in,
                                     commit_str_in, design_folder_hash_str_in, trial_log_path_str_in, note_str_in=""):
@@ -436,6 +457,7 @@ def run_candidate_job_dict(job_dict_in):
     # LOAD THE DESIGN FILE FIRST SO A PICKLED CLASS CAN BE FOUND
     if job_dict_in.get("runs_root_str"):
         set_runs_root_str(job_dict_in["runs_root_str"])
+    module_snapshot_dict = get_module_snapshot_dict()
     design_module = get_file_design_module(job_dict_in["design_file_path_str"])
     check_design_file(job_dict_in["design_file_path_str"])
     # MINUTE DESIGNS WITH A FIT KEY SHARE FITS THROUGH THE RUN FOLDER
@@ -464,7 +486,7 @@ def run_candidate_job_dict(job_dict_in):
         return {"candidate": candidate, "score_row_list": read_score_row_list(run_id_str, candidate_token_str),
                 "decision_count": len(read_decisions_list(run_id_str, candidate_token_str) or [])}
     if checkpoint_dict is None:
-        design = design_module.get_candidate_design(candidate)
+        design = call_design_func(design_module.get_candidate_design, candidate)
         engine = get_candidate_engine(design_module)
         loop = get_stream_loop(design, ohlcv_array_dict, date1, date2, data_context, engine, initial_weight, dead_band,
                                config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE, config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
@@ -519,6 +541,7 @@ def run_candidate_job_dict(job_dict_in):
             write_checkpoint_dict(run_id_str, candidate_token_str, checkpoint_payload_dict)
             write_decisions_list(run_id_str, candidate_token_str, loop.decision_dict_list)
             write_score_row_list(run_id_str, candidate_token_str, score_row_list)
+            check_module_snapshot(module_snapshot_dict, f"during candidate {candidate!r} period {period_id}")
             if crash_after_period_id is not None and int(period_id) == int(crash_after_period_id):
                 raise RuntimeError(f"runner crash after period {period_id} checkpoint")
     finally:
@@ -703,7 +726,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
     """
     # LOOK-AHEAD WALKS THE FULL STREAM; BASELINES AND THE VERDICT SEE THE REPORTED PATH
     baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
-                                             seed_count_int_in=baseline_seed_count_int_in)
+                                             seed_count_int_in=baseline_seed_count_int_in,
+                                             realized_exposure_bool_in=get_realized_exposure_bool(design_module_in))
     lookahead_dict = None
     look_ahead_status_str = look_ahead_status_str_in
     if run_lookahead_bool_in:

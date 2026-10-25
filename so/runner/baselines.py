@@ -376,35 +376,76 @@ def run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, weight_arr_in,
                                      entry_slippage_in, market_exit_slippage_in)
 
 
+# FUNCTION: THE EXPOSURE PATH THE BASELINES REPRODUCE
+def get_exposure_weight_arr(prior_only_dict_in, realized_bool_in):
+    """
+    One weight per window session. realized_bool_in True (all-or-nothing engines: trailing stop, barrier): the
+    position actually held at each session close (daily_equity_pdf in_position, 1 or 0), because exits and stops
+    happen inside the engine and the decision targets do not show them. The last session is NaN (the engine sells at
+    its close). realized_bool_in False (fractional engine): the decision targets, which set the weight directly.
+
+    Args:
+        prior_only_dict_in (dict): Engine result of the prior-only path
+        realized_bool_in (bool): Use the realized position instead of the decision targets
+
+    Returns:
+        np.ndarray: Exposure path (NaN = keep)
+    """
+    # THE FRACTIONAL ENGINE: THE TARGETS ARE THE EXPOSURE
+    if not realized_bool_in:
+        if "target_weight_arr" not in prior_only_dict_in:
+            raise ValueError("the baselines need the prior-only path's target_weight_arr.")
+        return np.asarray(prior_only_dict_in["target_weight_arr"], dtype=float)
+    # ALL-OR-NOTHING ENGINES: THE POSITION AT EACH CLOSE
+    equity_pdf = prior_only_dict_in.get("daily_equity_pdf")
+    if equity_pdf is None or len(equity_pdf) == 0 or "in_position" not in equity_pdf.columns:
+        raise ValueError("the baselines need the prior-only path's daily in_position column.")
+    exposure_arr = equity_pdf["in_position"].astype(bool).to_numpy().astype(float)
+    exposure_arr[-1] = np.nan
+    return exposure_arr
+
+
 # FUNCTION: BUY-AND-HOLD, CONSTANT EXPOSURE AND RANDOM TIMING ON ONE SPAN
 def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in, seed_count_int_in=None,
                              initial_capital_in=config.INITIAL_CAPITAL,
                              entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
-                             market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
+                             market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                             realized_exposure_bool_in=False):
     """
-    Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean_weight
-    and rebalances daily (dead band 0). Random timing places the path's non-base spells at random (same time at
-    each weight; switch count may differ only at the two window edges).
+    Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean
+    exposure and rebalances daily (dead band 0). Random timing places the path's non-base spells at random (same time
+    at each weight; switch count may differ only at the two window edges). For all-or-nothing engines
+    (realized_exposure_bool_in True) the exposure is the position actually held at each close, not the decision
+    targets (audit B1, 2026-10-25).
 
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span bounds
-        prior_only_dict_in (dict): Engine result of the prior-only path (target_weight_arr, metric_dict)
+        prior_only_dict_in (dict): Engine result of the prior-only path (target_weight_arr, daily_equity_pdf)
         seed_count_int_in (int | None): Random draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
         initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine costs
+        realized_exposure_bool_in (bool): Exposure from the realized position (trailing stop, barrier)
 
     Returns:
         dict: Buy-and-hold, constant-exposure and random-timing returns and the random-family stats
     """
-    # THE PATH'S TARGETS AND ITS AVERAGE REALIZED WEIGHT (LAST SESSION EXCLUDED BY THE ENGINE)
-    if prior_only_dict_in is None or "target_weight_arr" not in prior_only_dict_in:
-        raise ValueError("the baselines need the prior-only path's target_weight_arr.")
-    target_arr = np.asarray(prior_only_dict_in["target_weight_arr"], dtype=float)
+    # THE EXPOSURE PATH AND ITS MEAN (LAST SESSION EXCLUDED: EVERYTHING IS SOLD AT ITS CLOSE)
+    if prior_only_dict_in is None:
+        raise ValueError("the baselines need the prior-only path.")
+    target_arr = get_exposure_weight_arr(prior_only_dict_in, realized_exposure_bool_in)
     session_count = int(len(target_arr))
     if session_count == 0:
         raise ValueError("the prior-only path has no sessions.")
     metric_dict = dict(prior_only_dict_in.get("metric_dict") or {})
-    mean_weight = float(metric_dict["mean_weight"]) if np.isfinite(metric_dict.get("mean_weight", np.nan)) else 0.0
+    filled_arr = get_filled_target_weight_arr(target_arr)
+    counted_arr = filled_arr[:-1] if len(filled_arr) > 1 else filled_arr
+    counted_arr = counted_arr[np.isfinite(counted_arr)]
+    if realized_exposure_bool_in:
+        mean_weight = float(counted_arr.mean()) if len(counted_arr) else 0.0
+    else:
+        if not np.isfinite(metric_dict.get("mean_weight", np.nan)):
+            raise ValueError("the fractional prior-only path has no mean_weight.")
+        mean_weight = float(metric_dict["mean_weight"])
     path_return = float(metric_dict["total_return"]) if np.isfinite(metric_dict.get("total_return", np.nan)) else np.nan
     # BUY-AND-HOLD: WEIGHT 1 EVERY SESSION, DAILY REBALANCE (MATCHES THE CONSTANT BASELINE AT WEIGHT 1)
     buy_hold_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, np.ones(session_count, dtype=float),
@@ -434,4 +475,5 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
             "random_timing_seed_list": list(seed_list),
             "random_timing_switch_count": get_weight_switch_count_int(target_arr),
             "random_timing_unique_weight_list": get_unique_weight_list(target_arr),
+            "exposure_source_str": "realized_position" if realized_exposure_bool_in else "decision_target",
             **family_dict}
