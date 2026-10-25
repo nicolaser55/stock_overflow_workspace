@@ -31,7 +31,7 @@ assert_temporary_data_root()
 from so.core.holdout import get_perturbed_ohlcv_dict
 from so.core.point_in_time import (get_ny_timestamp, get_minute_bar_available_ts, get_runner_context,
                                    register_source_dict, unregister_source, SOURCE_SPEC_DICT)
-from so.core.fractional_exposure import simulate_fractional_exposure_dict
+from fractional_exposure_reference import simulate_fractional_exposure_dict
 from so.core.reentry_simulation import get_buy_and_hold_result_dict
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_session_decision_idx_dict

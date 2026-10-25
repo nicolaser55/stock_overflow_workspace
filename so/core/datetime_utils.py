@@ -2,7 +2,6 @@ import pandas as pd
 import tzlocal
 import pytz
 from datetime import timedelta
-from datetime import time as datetime_time
 import importlib.util
 
 # FUNCTION: CHECK IF THE PACKAGE IS INSTALLED
@@ -36,41 +35,6 @@ local_tz = pytz.timezone(local_tz_name)
 # GET THE NEW YORK TIMEZONE
 ny_tz = pytz.timezone("America/New_York")
 
-# FUNCTION: CONVERT TIMESTAMP TO NEW YORK TIMESTAMP
-def convert_to_ny_ts(timestamp_in):
-    """
-    Converts a timestamp to New York timezone.
-    
-    Args:
-        timestamp_in: Input timestamp that can be a string, datetime object or pandas Timestamp
-        
-    Returns:
-        pandas.Timestamp: Timestamp converted to New York timezone
-    """
-    # IF THE TIMESTAMP IS NOT A TIMESTAMP OBJECT
-    if isinstance(timestamp_in, pd.Timestamp) == False:
-        # CONVERT TIMESTAMP TO NEW YORK TIMESTAMP
-        timestamp_in = pd.to_datetime(timestamp_in)
-        # IF THE TIMESTAMP DOES NOT EXIST
-        if timestamp_in.tz is None:
-            # CONVERT THE TIMESTAMP TO THE NEW YORK TIMEZONE
-            timestamp_in = timestamp_in.tz_localize(ny_tz)
-         # IF THE TIMEZONE EXISTS BUT IT IS NOT NEW YORK TIMEZONE
-        elif timestamp_in.tz != ny_tz:
-            # CONVERT THE TIMESTAMP TO THE NEW YORK TIMEZONE
-            timestamp_in = timestamp_in.tz_convert(ny_tz)
-    # IF THE TIMESTAMP IS A TIMESTAMP OBJECT
-    else:
-        # IF THE TIMEZONE IS NONE
-        if timestamp_in.tz is None:
-            # CONVERT THE TIMESTAMP TO THE NEW YORK TIMEZONE
-            timestamp_in = timestamp_in.tz_localize(ny_tz).tz_convert(ny_tz)
-        # IF THE TIMEZONE EXISTS BUT IT IS NOT NEW YORK TIMEZONE
-        elif timestamp_in.tz != ny_tz:
-            # CONVERT THE TIMESTAMP TO THE NEW YORK TIMEZONE
-            timestamp_in = timestamp_in.tz_convert(ny_tz)
-    # RETURN THE NEW YORK TIMESTAMP
-    return pd.to_datetime(timestamp_in)
 
 # FUNCTION: GET DATAFRAME FOR A SPECIFIC DATE
 def get_date_pdf(pdf_in, date_str_in, alert_in=True):
@@ -118,98 +82,6 @@ def get_date_pdf(pdf_in, date_str_in, alert_in=True):
     # IF THE DATE IS FOUND, RETURN THE DATAFRAME
     return date_pdf
 
-# FUNCTION: GET DATAFRAME FOR DATE RANGE
-def get_date_range_pdf(pdf_in, date1_str_in, date2_str_in):
-    """
-    Extracts data for a date range from a complete dataset
-    
-    Args:
-        pdf_in: Complete DataFrame containing the data
-        date1_str_in: Start date string to filter data from
-        date2_str_in: End date string to filter data to
-        
-    Returns:
-        DataFrame containing only data between specified dates with date and year columns dropped
-    """
-    # INPUT VALIDATION: CHECK IF PDF_IN IS A PANDAS DATAFRAME
-    if not isinstance(pdf_in, pd.DataFrame):
-        # RAISE AN ERROR
-        raise TypeError("pdf_in must be a pandas DataFrame")
-    # INPUT VALIDATION: CHECK IF DATE1_STR_IN AND DATE2_STR_IN ARE STRINGS
-    if not isinstance(date1_str_in, str) or not isinstance(date2_str_in, str):
-        # RAISE AN ERROR
-        raise TypeError("Date inputs must be strings")
-    # INPUT VALIDATION: CHECK IF PDF_IN CONTAINS THE REQUIRED COLUMNS
-    if "date" not in pdf_in.columns:
-        # RAISE AN ERROR
-        raise ValueError("DataFrame must contain 'date' columns")
-    # CONVERT DATE TO DATE OBJECT
-    try:
-        # CONVERT DATE1_STR_IN TO DATE OBJECT
-        date1_object = pd.to_datetime(date1_str_in).date()
-        # CONVERT DATE2_STR_IN TO DATE OBJECT
-        date2_object = pd.to_datetime(date2_str_in).date()
-    # IF THE DATE IS NOT CONVERTED
-    except:
-        # RAISE AN ERROR
-        raise ValueError("Invalid date string format")
-    # IF THE END DATE IS BEFORE THE START DATE
-    if date2_object < date1_object:
-        # RAISE AN ERROR
-        raise ValueError("End date must be after start date")
-    # GET THE DATAFRAME FOR THE SPECIFIC DATE AND RETURN
-    date_range_pdf = pdf_in[pdf_in.date.between(date1_object, date2_object)].copy()
-    # IF THE DATAFRAME IS EMPTY, RETURN AN EMPTY DATAFRAME
-    if date_range_pdf.empty:
-        # DISPLAY INFORMATION
-        print(f"❌ No data found for the specified date range: {date1_str_in} to {date2_str_in}")
-        # RETURN AN EMPTY DATAFRAME
-        return pd.DataFrame(columns=pdf_in.columns)
-    # RETURN THE DATAFRAME
-    return date_range_pdf
-
-# FUNCTION: SELECT DATAFRAME AT TIMESTAMP
-def find_pdf_ts_idx(pdf_list_in, arg_in):
-    # INPUT VALIDATION: CHECK IF PDF_LIST_IN IS PROVIDED AND NOT EMPTY
-    if not pdf_list_in:
-        # RAISE AN ERROR
-        raise ValueError("pdf_list_in cannot be empty or None")
-    # INPUT VALIDATION: CHECK IF ARG_IN IS PROVIDED
-    if arg_in is None:
-        # RAISE AN ERROR
-        raise ValueError("arg_in cannot be None")
-    # IF THE ARGUMENT IS AN INTEGER
-    if isinstance(arg_in, int):
-        # INPUT VALIDATION: CHECK IF INDEX IS WITHIN BOUNDS
-        if arg_in < 0 or arg_in >= len(pdf_list_in):
-            # RAISE AN ERROR
-            raise IndexError(f"Index {arg_in} is out of bounds for list of length {len(pdf_list_in)}")
-        # COLLECT THE LAST TIMESTAMP OF EACH DATAFRAME
-        idx_ts_tup_list = {idx: pdf for idx, pdf in enumerate(pdf_list_in)}
-        # RETURN THE DATAFRAME
-        return idx_ts_tup_list[arg_in].copy()
-    # INPUT VALIDATION: CHECK IF ARG_IN IS A STRING OR TIMESTAMP-LIKE OBJECT
-    if not isinstance(arg_in, (str, pd.Timestamp)):
-        # RAISE AN ERROR
-        raise TypeError(f"arg_in must be an integer, string, or pandas Timestamp, got {type(arg_in)}")
-    # TRY TO CONVERT TIMESTAMP TO NEW YORK TIMESTAMP
-    try:
-        # CALL FUNCTION TO CONVERT TIMESTAMP TO NEW YORK TIMESTAMP 
-        selected_ts = convert_to_ny_ts(arg_in)
-    # IF THE TIMESTAMP IS NOT CONVERTED
-    except Exception as e:
-        # RAISE AN ERROR
-        raise ValueError(f"Failed to convert timestamp: {e}")
-    # CREATE TIMESTMAP DATAFRAME DICTIONARY
-    ts_pdf_dict = {pdf.iloc[-1]["timestamp"]: pdf for pdf in pdf_list_in}
-    # INPUT VALIDATION: CHECK IF TIMESTAMP EXISTS IN THE DATA
-    if selected_ts not in ts_pdf_dict:
-        # COLLECT THE AVAILABLE TIMESTAMPS
-        available_timestamps = sorted(ts_pdf_dict.keys())
-        # RAISE AN ERROR
-        raise KeyError(f"Timestamp {selected_ts} not found in data. Available timestamps range from {available_timestamps[0]} to {available_timestamps[-1]}")
-    # RETURN THE DATAFRAME
-    return ts_pdf_dict[selected_ts].copy()
 
 # FUNCTION: GET NYSE STOCK EXCHANGE SCHEDULE FOR SPECIFIC DATE
 def get_date_market_schedule_pdf(date_str_in):

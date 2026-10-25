@@ -1,6 +1,4 @@
 import pandas as pd
-import json
-from json import JSONDecodeError
 import time
 import os
 # IMPORT DATA QUALITY FUNCTIONS
@@ -41,24 +39,6 @@ def check_file_exists(file_path_str_in, alert_in=False):
     # RETURN TRUE IF FILE EXISTS
     return file_exists_bool
 
-# FUNCTION: DELETE FILE FROM PATH
-def delete_file_from_path(file_path_str_in, alert_in=True):
-    """
-    Deletes a file from the local file system.
-    
-    Args:
-        file_path_str_in (str): The path to the file to delete
-    """
-    # CHECK IF THE FILE EXISTS
-    if check_file_exists(file_path_str_in):
-        # DISPLAY INFORMATION
-        print(f"✅ File:\t'{file_path_str_in}' Found!\n🗑️ Deleting File...\t(💾 From {STORAGE_NAME_STR})") if alert_in else None
-        # DELETE THE FILE FROM THE PATH
-        os.remove(file_path_str_in)
-    # IF THE FILE DOES NOT EXIST
-    else:
-        # DISPLAY INFORMATION
-        print(f"⚠️ File:\t'{file_path_str_in}' Not Found!\t(💾 In {STORAGE_NAME_STR})") if alert_in else None
 
 # FUNCTION: CHECK THAT A STRING HAS A VALID FILE SPECIFIED
 def check_valid_file_path(file_path_str_in, required_extension):
@@ -509,195 +489,6 @@ def get_missing_date_list(file_path_str_in, date1_str_in, date2_str_in, alert_in
     # RETURN MISSING DATES
     return missing_date_list
 
-# FUNCTION: READ JSON AS DICTIONARY FROM PATH
-def read_json_file_from_path(file_path_str_in, alert_in=True):
-    """
-    Reads JSON file into dictionary
-    
-    Args:
-        file_path_str_in: String path to JSON file
-        alert_in: Boolean to control progress messages
-        
-    Returns:
-        Dictionary containing JSON data or None if file not found/corrupted
-    """
-    # CHECK IF THE FILE PATH IS VALID
-    check_valid_file_path(file_path_str_in, "json")
-    # ATTEMPT TO READ DATA FILE
-    try:
-        # OPEN AND READ THE JSON FILE
-        with open(file_path_str_in, "r") as json_file:
-            # LOAD THE JSON DATA DICTIONARY
-            data_dict = json.load(json_file)
-            # DISPLAY INFORMATION
-            print(f"✅ File:\t'{file_path_str_in}' Found!\t(💾 In {STORAGE_NAME_STR})") if alert_in else None
-            # RETURN DATAFRAME
-            return data_dict
-    # CATCH JSON DECODE ERROR
-    except JSONDecodeError:
-        # DISPLAY INFORMATION
-        print(f"⚠️ File:\t'{file_path_str_in}' Corrupted!\t(💾 In {STORAGE_NAME_STR})") if alert_in else None
-        # RETURN NONE
-        return None
-    # CATCH FILE NOT FOUND EXCEPTION
-    except FileNotFoundError:
-        # DISPLAY INFORMATION
-        print(f"⚠️ File:\t'{file_path_str_in}' Not Found!\t(💾 In {STORAGE_NAME_STR})") if alert_in else None
-        # RETURN NONE
-        return None
-
-# FUNCTION: SAVE DICTIONARY AS JSON TO PATH
-def write_json_file_to_path(data_dict_in, file_path_str_in, access_mode_in="I", alert_in=True):
-    """
-    Writes dictionary to JSON file
-    
-    Args:
-        data_dict_in: Dictionary to save
-        file_path_str_in: String path where to save JSON
-        access_mode_in: String indicating write mode ('W'=overwrite, 'A'=append, 'N'=no write)
-        alert_in: Boolean to control progress messages
-        
-    Returns:
-        None
-    """
-    # CHECK IF THE INPUT IS A DICTIONARY
-    check_var_type(data_dict_in, dict)
-    # CHECK IF THE FILE PATH IS VALID
-    check_valid_file_path(file_path_str_in, "json")
-    # CONVERT ACCESS MODE TO UPPER CASE
-    access_mode = access_mode_in.upper()
-    # ASSERT THAT THE ACCESS MODE IS VALID
-    assert access_mode in ["W", "A", "N", "I"], f"Access mode '{access_mode_in}' is invalid"
-    # CHECK IF INPUT IS A NON-EMPTY DICTIONARY
-    if not isinstance(data_dict_in, dict) or not data_dict_in:
-        # DISPLAY INFORMATION
-        print("⚠️ Invalid input: Must be a non-empty dictionary.") if alert_in else None
-        # RETURN NONE
-        return None
-    # HANDLE 'N' ACCESS MODE
-    if access_mode == "N":
-        # DISPLAY INFORMATION
-        print("⚠️ Not saving dictionary.") if alert_in else None
-        # RETURN NONE
-        return None
-    # # COLLECT THE FILE PATH
-    # directory_path = "/".join(file_path_str_in.split("/")[:-1])
-    # # CREATE THE DIRECTORY IF IT DOES NOT EXIST
-    # os.makedirs(directory_path, exist_ok=True)
-    # CREATE THE DIRECTORY IF IT DOES NOT EXIST
-    directory_path = os.path.dirname(file_path_str_in)
-    # CREATE THE DIRECTORY IF IT DOES NOT EXIST, BUT ONLY IF directory_path IS NON-EMPTY
-    if directory_path not in ["", None]:
-        # MAKE A DIRECTORY PATH
-        os.makedirs(directory_path, exist_ok=True)
-    # ACCESS MODE MEANING
-    access_mode_dict = {"W": "Overwrite", "A": "Append", "I":"Ignore"}
-    # DISPLAY INFORMATION
-    print(f"ℹ️ Saving In {access_mode_dict[access_mode]} Mode.\t(💾 In {STORAGE_NAME_STR})") if alert_in else None
-    # READ JSON FROM PATH
-    existing_data = read_json_file_from_path(file_path_str_in, alert_in=alert_in)
-    # CHECK IF DATA FILE EXISTS
-    file_exists = isinstance(existing_data, dict)
-    # DEFINE THE SAVE DATA DICTIONARY
-    save_dict = data_dict_in
-    # IF FILE EXISTS BOOLEAN
-    if file_exists:
-        # IF THE ACCESS MODE IS I
-        if access_mode.upper() == "I":
-            # DISPLAY INFORMATION
-            print(f"\t⚠️ File:\t'{file_path_str_in}' Already Exists! Proceeding...") if alert_in else None
-            # RETURN NONE
-            return None
-        # IF THE ACCESS MODE IS W
-        if access_mode.upper() == "W":
-            # DISPLAY INFORMATION
-            print(f"\t♻️ File:\t'{file_path_str_in}' Has Been Overwritten!") if alert_in else None
-        # IF THE ACCESS MODE IS A
-        elif access_mode.upper() == "A":
-            # APPEND THE DICTIONARY
-            save_dict = {**existing_data, **data_dict_in}
-            # DISPLAY INFORMATION
-            print(f"\t✅ File:\t'{file_path_str_in}' Has Been Appended To!") if alert_in else None
-    # WRITE JSON TO FILE
-    with open(file_path_str_in, "w") as json_file:
-        # DUMP THE DATA
-        json.dump(save_dict, json_file, indent=4)
-    # DISPLAY INFORMATION
-    print(f"✅ File:\t'{file_path_str_in}' Has Been Saved!")
-
-# FUNCTION: GET OHLCV SEGMENT AGG DATAFRAME FOR DATE RANGE
-def generate_func_data_date_range(func_in, date1_str_in, date2_str_in, file_path_str_in, file_name_str_in, access_mode_in, reverse_in=False):
-    # ASSERT THAT THE ACCESS MODE IS VALID
-    assert access_mode_in.upper() in ["W", "I", "N"], f"Access mode '{access_mode_in}' is invalid"
-    # IMPORT GET DATE RANGE MARKET SCHEDULE PDF FUNCTION
-    from so.core.datetime_utils import get_date_range_market_schedule_pdf
-    # CALL FUNCTION TO GET NYSE SCHEDULE FOR DATE RANGE
-    nyse_schedule_pdf = get_date_range_market_schedule_pdf(date1_str_in, date2_str_in)
-    # IF THE NYSE SCHEDULE IS EMPTY
-    if nyse_schedule_pdf.empty:
-        # RETURN EMPTY DATAFRAME
-        return pd.DataFrame()
-    # COLLECT LIST OF OPEN MARKET DATES
-    date_list, date_count = nyse_schedule_pdf.date.tolist(), len(nyse_schedule_pdf)
-    # IF THE REVERSE IN IS TRUE
-    if reverse_in:
-        # REVERSE THE DATE LIST
-        date_list.reverse()
-    # CREATE A LIST TO HOLD DATA
-    data_list = []
-    # ITERATE OVER THE DATE RANGE
-    for idx, date_object in enumerate(date_list, 1):
-        # CREATE A DATE STRING
-        date_name_str, date_file_name_str = date_object.strftime("%Y-%m-%d"), date_object.strftime("%Y%m%d")
-        # DISPLAY INFORMATION
-        print(f"\nDate:\t{date_name_str}\t[{idx}/{date_count}]")
-        
-        # DEFINE THE FILE NAME
-        file_name_str = f"{file_name_str_in}_{date_file_name_str}.csv"
-        # COMBINE FILE NAME WITH FILE PATH
-        save_file_path_str = file_path_str_in + file_name_str
-        # PRE-DEFINE THE FILE VALID
-        valid_data_file_bool = False
-        # PRE-DEFINE SECONDS DURATION
-        seconds_duration = 0
-        # IF THE FILE EXISTS
-        if check_file_exists(save_file_path_str):
-            # READ THE EXISTING DATA FILE
-            read_pdf = read_csv_file_from_path(save_file_path_str, alert_in=False)
-            # BOOLEAN TO CHECK IF THE FILE CONTAINS DATA
-            valid_data_file_bool = isinstance(read_pdf, pd.DataFrame) and len(read_pdf) > 0
-        # IF A VALID DATA FILE EXISTS AND THE ACCESS MODE IS "I" (ignore)
-        if (valid_data_file_bool) and (access_mode_in.upper() == "I"):
-            # DISPLAY INFORMATION
-            print(f"⚠️ File '{file_name_str}' already exists!\nProceeding...")
-        # IF THE FILE DOES NOT EXIST OR THE ACCESS MODE IS "W" (write)
-        else:
-            # DISPLAY INFORMATION
-            print(f"\t⏳ Processing date...")
-            # START THE TIMER
-            start_time = time.time()
-            # EXECUTE THE ALGORITHM FOR THE CURRENT DATE
-            date_data_pdf = func_in(date_name_str)
-            # GET THE ELAPSED TIME
-            seconds_duration = time.time() - start_time
-            # DISPLAY INFORMATION
-            print(f"\t✅ Date:\t'{date_name_str}' Processed In {seconds_duration:.2f} seconds ({seconds_duration / 60:.2f} minutes)")
-            # IF THE OHLCV SEGMENT AGG DATAFRAME IS NOT EMPTY
-            if not date_data_pdf.empty:
-                # ADD THE DATE TO THE DATAFRAME
-                date_data_pdf["date"] = date_object
-                # SAVE DATAFRAME TO CSV
-                write_csv_file_to_path(date_data_pdf, save_file_path_str, access_mode_in)
-            # IF THE OHLCV SEGMENT AGG DATAFRAME IS EMPTY
-            else:
-                # DISPLAY INFORMATION
-                print(f"\t⚠️ No Data For Date:\t'{date_name_str}'")
-            # GET THE ELAPSED TIME
-            seconds_duration = time.time() - start_time
-            # ADD THE DATAFRAME TO THE LIST
-            data_list.append((date_object, seconds_duration))
-    # CONVERT THE LIST TO A DATAFRAME AND RETURN
-    return pd.DataFrame(data_list, columns=["date", "seconds_duration"])
 
 # FUNCTION: GET OHLCV SEGMENT AGG DATAFRAME FOR DATE RANGE
 def generate_func_data_date_list(func_in, date_list_in, file_path_str_in, file_name_str_in, access_mode_in, reverse_in=False):
@@ -774,4 +565,4 @@ def generate_func_data_date_list(func_in, date_list_in, file_path_str_in, file_n
         # ADD THE DATAFRAME TO THE LIST
         data_list.append((date_object, seconds_duration))
     # CONVERT THE LIST TO A DATAFRAME AND RETURN
-    return pd.DataFrame(data_list, columns=["date", "seconds_duration"])
+    return pd.DataFrame(data_list, columns=["date", "seconds_duration"])

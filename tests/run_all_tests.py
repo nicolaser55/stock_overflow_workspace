@@ -6,38 +6,44 @@ import tempfile
 import time
 
 """
-Run Every Test Suite
+Run the Test Suites
 
-Run from the workspace root:   python tests/run_all_tests.py
-Each suite runs in its own interpreter (plain asserts; a failing suite stops with its error). Takes a few minutes.
-Each suite gets its own empty temporary SO_DATA_PATH. If SO_DATA_PATH was already set, the trial log under that
-folder must keep the same size and modification time.
+    python tests/run_all_tests.py           every suite (before a merge or a pull request)
+    python tests/run_all_tests.py --fast    every suite except the two slow ones (minute mode, experiments), after an edit
 
-    tests/test_pipeline_shared.py    shared pipeline code (execution, barrier targets, features, costs, bad ticks)
-    tests/test_daily_shared.py       shared daily code: daily features and label, exit/re-entry simulator, schedule, evaluation, trial log
-    tests/test_experiments.py        the experiment designs on the runner (exp01 model; exp02-exp07, exp12, exp13 streams), view histories, look-ahead
-    tests/test_continuous_replay.py  continuous replay, episode scorecard, log-excess bootstrap, fractional exposure (Step 0)
-    tests/test_vix_features.py       VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, no look-ahead, formulas)
-    tests/test_holdout.py            rolling holdout (window, roll, guards, ledger, causal replay; synthetic data only)
-    tests/test_point_in_time.py      point-in-time registry, availability, labels, vintages, runner guards (synthetic data only)
-    tests/test_runner.py             point-in-time runner view, daily loop, fractional engine (synthetic data only)
-    tests/test_runner_candidates.py  runner 4b-1a: candidates, selection, trial log, checkpoints, parallel (synthetic)
-    tests/test_runner_verdict.py     runner 4b-1b: baselines, verdict, report, manifest, imported-folder guards (synthetic)
-    tests/test_runner_lookahead.py   runner 4b-1c: automatic look-ahead check (truncation, perturbation, leaks; synthetic)
-    tests/test_runner_holdout.py     runner 4b-1d: holdout evaluation through the runner (synthetic)
-    tests/test_runner_engines.py     runner 4b-2a: barrier and trailing-stop engines vs old simulators (synthetic)
-    tests/test_runner_minute.py      runner 4b-2b: minute mode (rows, shuffle check, models, fill, look-ahead; synthetic)
-    tests/test_rolling_retrain.py    rolling retrain sessions, purge, windows, label leak, selection, reporting (synthetic data only)
-    tests/test_execute_notebook.py   notebook execution saves a failed run (synthetic notebook only)
-    tests/test_holdout_baselines.py  family statistics and the span cut (the development replay is a separate argument)
-    tests/test_trial_log_append.py   locked CSV append (concurrent trial rows, byte prefix, refused header and newline, lock timeout)
-    tests/test_refresh_development_view.py  development-view refresh (cut, redact, slide, scan; synthetic trees only)
+Each suite runs in its own interpreter with its own empty temporary SO_DATA_PATH. A failing suite does not stop the
+others; the end lists every failing suite. If SO_DATA_PATH was already set, the trial log under that folder must keep
+the same size and modification time. Output is forced to UTF-8 (the suites print emoji).
 
-    Output is forced to UTF-8 (the suites print emoji; a Windows console or pipe in cp1252 would otherwise crash the print).
+Suite (fast set marked F):
+    test_pipeline_shared.py       F  pipeline code: execution, barrier targets, features, costs, plots, bad ticks
+    test_daily_shared.py          F  daily features and label, simulator reference, schedule
+    test_vix_features.py          F  VIX data layer (loader cutoffs, _prev / _intraday timing, staleness, formulas)
+    test_holdout.py               F  holdout window, roll, slide, guards, quarantine load, view stamp, design hash
+    test_point_in_time.py         F  point-in-time registry, availability, labels, vintages
+    test_rolling_retrain.py       F  retrain calendar, template refit log
+    test_trial_log_append.py      F  locked CSV append (concurrent rows, byte prefix, refused header and newline, lock timeout)
+    test_tools.py                 F  run queue, state, email, protected paths, package lock
+    test_execute_notebook.py      F  notebook execution saves a failed run
+    test_runner.py                F  runner view, daily loop, fractional engine
+    test_runner_engines.py        F  barrier and trailing-stop engines vs the old simulators
+    test_runner_candidates.py     F  candidates, selection, trial log, checkpoints, parallel
+    test_runner_verdict.py        F  baselines, verdict, report, manifest, imported-folder guards
+    test_runner_lookahead.py      F  automatic look-ahead check (truncation, perturbation, leaks)
+    test_runner_holdout.py        F  holdout evaluation through the runner
+    test_refresh_development_view.py F  development-view refresh (cut, redact, slide, scan)
+    test_runner_minute.py            minute mode (rows, shuffle check, models, fill, look-ahead, shared fits)
+    test_experiments.py              every experiment design on the runner, view histories, look-ahead
 """
 
-# DEFINE THE SUITES
-SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_experiments.py", "test_continuous_replay.py", "test_vix_features.py", "test_holdout.py", "test_point_in_time.py", "test_runner.py", "test_runner_candidates.py", "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py", "test_runner_engines.py", "test_runner_minute.py", "test_rolling_retrain.py", "test_execute_notebook.py", "test_holdout_baselines.py", "test_trial_log_append.py", "test_refresh_development_view.py"]
+# DEFINE THE SUITES AND THE FAST SET
+SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_vix_features.py", "test_holdout.py",
+              "test_point_in_time.py", "test_rolling_retrain.py", "test_trial_log_append.py", "test_tools.py",
+              "test_execute_notebook.py", "test_runner.py", "test_runner_engines.py", "test_runner_candidates.py",
+              "test_runner_verdict.py", "test_runner_lookahead.py", "test_runner_holdout.py",
+              "test_refresh_development_view.py", "test_runner_minute.py", "test_experiments.py"]
+SLOW_SUITE_SET = {"test_runner_minute.py", "test_experiments.py"}
+FAST_SUITE_LIST = [suite_str for suite_str in SUITE_LIST if suite_str not in SLOW_SUITE_SET]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
 
@@ -89,9 +95,12 @@ if __name__ == "__main__":
     # A PARENT SHELL MUST NOT HAND A REAL QUARANTINE ROOT TO A SUITE
     suite_env_base_dict.pop("SO_QUARANTINE_PATH", None)
     exit_code_int = 0
+    failed_list = []
     try:
-        # ITERATE OVER THE SUITES
-        for suite_str in SUITE_LIST:
+        # THE FAST SET OR EVERY SUITE
+        suite_list = FAST_SUITE_LIST if "--fast" in sys.argv[1:] else SUITE_LIST
+        print(f"{'fast set' if suite_list is FAST_SUITE_LIST else 'all suites'}: {len(suite_list)} suites", flush=True)
+        for suite_str in suite_list:
             # DISPLAY INFORMATION
             print(f"\n===== {suite_str} =====", flush=True)
             # ONE EMPTY TEMPORARY DATA FOLDER FOR THIS SUITE
@@ -104,13 +113,14 @@ if __name__ == "__main__":
             finally:
                 # REMOVE THE SUITE'S TEMPORARY FOLDER
                 shutil.rmtree(suite_dir_str, ignore_errors=True)
-            # STOP AT THE FIRST FAILURE
+            # RECORD A FAILURE AND CONTINUE, SO ONE RUN LISTS EVERY FAILING SUITE
+            elapsed_str = f"{time.time() - start_time:.0f} s"
             if result.returncode != 0:
-                print(f"\n❌ {suite_str} failed")
-                exit_code_int = result.returncode
-                break
-            # DISPLAY INFORMATION
-            print(f"({time.time() - start_time:.0f} s)", flush=True)
+                print(f"\n❌ {suite_str} failed ({elapsed_str})", flush=True)
+                failed_list.append(suite_str)
+                exit_code_int = exit_code_int or result.returncode
+            else:
+                print(f"({elapsed_str})", flush=True)
     finally:
         # WHEN THE CALLER NAMED A DATA FOLDER, ITS TRIAL LOG MUST BE UNCHANGED
         if before_stamp_tuple is not None:
@@ -122,5 +132,6 @@ if __name__ == "__main__":
                 exit_code_int = exit_code_int or 1
     # DISPLAY THE RESULT
     if exit_code_int != 0:
+        print(f"\n❌ failed suites: {', '.join(failed_list) if failed_list else '(trial log changed)'}")
         raise SystemExit(exit_code_int)
     print("\nAll test suites passed ✅")

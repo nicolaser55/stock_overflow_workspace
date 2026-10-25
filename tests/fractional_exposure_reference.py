@@ -14,7 +14,9 @@ from so.features.daily_features import get_session_decision_idx_dict
 from so.core.reentry_simulation import get_window_session_idx_arr
 
 """
-Fractional Exposure Simulation (roadmap Step 0, for exp05_vol_scaled_exposure)
+Fractional Exposure Simulation (test reference)
+
+The old simulator the runner's fractional engine was ported from. Only tests/test_runner.py uses it (engine parity).
 
 The account holds a fraction w in [0, 1] of its equity in SPY and the rest in cash (0% interest). Long only, unlevered:
 w never exceeds 1.

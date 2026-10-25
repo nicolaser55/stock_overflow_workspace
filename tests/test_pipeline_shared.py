@@ -40,13 +40,12 @@ from so import config
 from so.features import ohlcv_data_utils
 from so.features import tf_ohlcv_tools
 from so.core.datetime_utils import get_date_range_market_schedule_pdf
-from so.core.trade_execution import get_ohlcv_array_dict, resolve_barrier_exit_dict, resolve_entry_trade_dict, get_horizon_window_dict, \
-                            calculate_side_fee, get_affordable_share_count, get_net_return_arr, get_breakeven_tp_rate_arr, \
-                            get_expected_net_return_arr, get_trade_result_str
-from so.features.barrier_labels import get_date_TSBAR_pdf, get_date_market_open_ts_dict, add_TSBAR_label_cols, parse_TSBAR_cell_pdf, get_delta_col_str, format_TSBAR_pdf
+from so.core.trade_execution import get_ohlcv_array_dict, resolve_barrier_exit_dict, get_horizon_window_dict, calculate_side_fee, \
+                            get_affordable_share_count, get_net_return_arr, get_expected_net_return_arr, \
+                            get_trade_result_str
+from so.features.barrier_labels import get_date_TSBAR_pdf, get_date_market_open_ts_dict, add_TSBAR_label_cols, parse_TSBAR_cell_pdf, get_delta_col_str
 from so.features.context_features import add_cum_max_col, get_session_summary_pdf, get_relative_volume_reference_pdf, get_date_TSCTX_pdf
-from so.core.backtest_simulation import simulate_decision_trading_dict, simulate_buy_and_hold_dict
-from so.core.schedule import get_walk_forward_fold_pdf
+from so.core.backtest_simulation import simulate_decision_trading_dict
 from synthetic_data import get_synthetic_ohlcv_pdf
 import plotly.graph_objects as go
 from so.features.ohlcv_data_utils import ohlcv_pdf_to_PA_tf_ohlcv_pdf_list
@@ -222,14 +221,11 @@ def test_costs():
     net_return_arr = get_net_return_arr([100.0, 100.0], [101.0, 99.0], ["TP", "SL"])
     assert np.isclose(net_return_arr[0], (101.0 - 100.01 - 0.01) / 100.01)
     assert np.isclose(net_return_arr[1], (99.0 - 0.01 - 100.01 - 0.01) / 100.01)
-    # BREAKEVEN RATE MATCHES THE HAND CALCULATION ($700, 0.10% -> about 51.8%)
-    assert abs(get_breakeven_tp_rate_arr([700.0], 0.001)[0] - 0.5177) < 0.001
-    # THE EXPECTED RETURN AT THE BREAKEVEN PROBABILITY IS ABOUT ZERO
-    p_star = get_breakeven_tp_rate_arr([700.0], 0.001)[0]
-    assert abs(get_expected_net_return_arr([p_star], [700.0], 0.001)[0]) < 1e-6
+    # THE EXPECTED RETURN AT THE HAND-CALCULATED BREAKEVEN ($700, 0.10% -> about 51.8%) IS ABOUT ZERO
+    assert abs(get_expected_net_return_arr([0.5177], [700.0], 0.001)[0]) < 1e-5
     # RESULT LABELS
     assert get_trade_result_str(0.001) == "NULL" and get_trade_result_str(1.0) == "WIN" and get_trade_result_str(-1.0) == "LOSS"
-    passed("costs (fees, share count, net return, breakeven, expected return, NULL result)")
+    passed("costs (fees, share count, net return, expected return at breakeven, NULL result)")
 
 """
 5. Context Features (No Look-Ahead)
@@ -270,11 +266,6 @@ def test_context_no_lookahead(ohlcv_pdf_in, market_schedule_pdf_in):
 """
 7. Weights, Sampling And Signal Check
 """
-
-
-
-
-
 
 
 """
@@ -333,7 +324,6 @@ def test_plot_utils(ohlcv_pdf_in, ohlcv_array_dict_in, TSBAR_pdf_in, snapshot_pd
         date_object = TSBAR_pdf_in["decision_ts"].iloc[0].date()
         session_pdf = ohlcv_pdf_in[ohlcv_pdf_in["date"] == date_object]
         # SNAPSHOT PLOTS (STEP 00)
-        plot_ohlcv_utils.plot_ohlcv_extremas(snapshot_pdf_in, "test")
         plot_ohlcv_utils.plot_ohlcv(snapshot_pdf_in, {}, "test")
         plot_ohlcv_utils.plot_ohlcv_market_structure(snapshot_pdf_in)
         # SUBPLOT ROW / COLUMN ROUTING (A PLAIN FIGURE MUST IGNORE ROW / COLUMN, A SUBPLOT FIGURE MUST USE THEM)
@@ -364,7 +354,7 @@ def test_plot_utils(ohlcv_pdf_in, ohlcv_array_dict_in, TSBAR_pdf_in, snapshot_pd
         # RESTORE FIGURE DISPLAY
         go.Figure.show = original_show
     # ASSERT EVERY PLOT PRODUCED A FIGURE
-    assert len(shown_list) == 5, len(shown_list)
+    assert len(shown_list) == 4, len(shown_list)
     passed(f"plot / buy evaluation utilities ({len(shown_list)} figures built, subplot routing, ideal vs pred statistics)")
 
 # FUNCTION: TEST THE BAD TICK RULE
@@ -414,8 +404,6 @@ def test_bad_tick_rule(ohlcv_pdf_in):
     assert get_bad_tick_pdf(test_pdf).empty
     # DISPLAY INFORMATION
     passed("bad tick rule (3 planted wicks cut to the body, a real 5% drop kept, neighbours within the session, idempotent)")
-
-
 
 
 """

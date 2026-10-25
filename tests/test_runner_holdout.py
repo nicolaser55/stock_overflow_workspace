@@ -14,7 +14,6 @@ import os
 import sys
 import tempfile
 import shutil
-import types
 import pandas as pd
 
 # FORCE UTF-8 SO THE PASS MARK PRINTS ON A WINDOWS CONSOLE
@@ -530,27 +529,27 @@ def test_report_writer_crash_still_counts():
 
 
 # FUNCTION: THE EVALUATION SCRIPT CHOOSES THE RUNNER PATH FOR A PORTED DESIGN
-def test_evaluate_script_path_choice():
+def test_evaluate_script_runner_only():
     """
-    get_candidate_design selects run_holdout_dict. A design without it keeps the old replay. Both path labels are
-    in the script.
+    holdout_evaluate.py evaluates through run_holdout_dict only and refuses a design without get_candidate_design.
+    The old replay is gone.
 
     Returns:
         None
     """
-    # LOAD THE SCRIPT THE SAME WAY test_point_in_time DOES (ITS __main__ IS NOT EXECUTED)
-    import importlib.util
+    # A DESIGN WITHOUT get_candidate_design STOPS BEFORE ANY DATA IS LOADED
+    import subprocess
     script_path_str = os.path.join(WORKSPACE_PATH_STR, "scripts", "holdout_evaluate.py")
-    script_spec = importlib.util.spec_from_file_location("holdout_evaluate_runner_path", script_path_str)
-    script_module = importlib.util.module_from_spec(script_spec)
-    script_spec.loader.exec_module(script_module)
-    assert script_module.get_holdout_evaluate_path_str(cand_design) == script_module.RUNNER_PATH_STR
-    replay_module = types.ModuleType("replay_design")
-    assert script_module.get_holdout_evaluate_path_str(replay_module) == script_module.REPLAY_PATH_STR
+    design_folder_str = tempfile.mkdtemp(prefix="replay_design_", dir=TEMP_ROOT_STR)
+    with open(os.path.join(design_folder_str, "design.py"), "w", encoding="utf-8") as file_obj:
+        file_obj.write("EXPERIMENT_NAME = 'replay_design'\n")
+    result = subprocess.run([sys.executable, script_path_str, "--design", design_folder_str, "--token-file",
+                             os.path.join(design_folder_str, "missing_token.txt")], capture_output=True, text=True,
+                            encoding="utf-8", errors="replace")
+    assert result.returncode != 0 and "has no get_candidate_design" in result.stderr, result.stderr
     script_text = open(script_path_str, encoding="utf-8").read()
-    assert "run_holdout_dict(" in script_text and "run_holdout_evaluation(" in script_text
-    assert script_module.RUNNER_PATH_STR in script_text and script_module.REPLAY_PATH_STR in script_text
-    passed("holdout_evaluate.py uses the runner path for get_candidate_design and keeps the replay fallback")
+    assert "run_holdout_dict(" in script_text and "run_holdout_evaluation" not in script_text
+    passed("holdout_evaluate.py evaluates runner designs only (a design without get_candidate_design is refused)")
 
 
 # RUN THE SUITE
@@ -562,7 +561,7 @@ if __name__ == "__main__":
         test_evaluation_budget_is_enforced()
         test_missing_token_and_dirty_tree_are_refused()
         test_report_writer_crash_still_counts()
-        test_evaluate_script_path_choice()
+        test_evaluate_script_runner_only()
         print("\nAll runner holdout tests passed ✅")
     finally:
         clear_holdout_env()

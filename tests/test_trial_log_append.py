@@ -27,7 +27,7 @@ assert_temporary_data_root()
 from so import paths
 from so.core.csv_append import (append_csv_record_pdf, hold_csv_append_lock, CsvAppendLockTimeoutError,
                                CSV_APPEND_LOCK_TIMEOUT_SECONDS)
-from so.core.trial_log import TRIAL_LOG_COLUMN_LIST, log_trial_dict, log_trial_pdf
+from so.core.trial_log import TRIAL_LOG_COLUMN_LIST, log_trial_dict
 
 # PROCESSES ARE SPAWNED SO THE LOCK IS NOT INHERITED (WINDOWS AND LINUX)
 MP_CONTEXT = multiprocessing.get_context("spawn")
@@ -49,7 +49,7 @@ def passed(name_str_in):
 # FUNCTION: A SYNTHETIC EXPERIMENT CONFIG FOR THE TRIAL ID
 def get_config_module():
     """
-    A module with the two constants log_trial_pdf reads. It is not an experiment.
+    A module with the two constants log_trial_dict reads. It is not an experiment.
 
     Returns:
         module: EXPERIMENT_NAME and PROTOCOL_VERSION
@@ -108,8 +108,9 @@ def write_batch_worker(file_path_str_in, row_count_int_in):
     """
     # SYNTHETIC SETTINGS; THE PROCESS ID IS WHAT MAKES THE IDS UNIQUE ACROSS PROCESSES
     config_module = get_config_module()
-    setting_pdf = pd.DataFrame([{"stop_k": row_idx, "valid_total_return": 0.0} for row_idx in range(row_count_int_in)])
-    log_trial_pdf(config_module, "validation", setting_pdf, ["stop_k"], ["valid_total_return"], False, file_path_str_in=file_path_str_in)
+    for row_idx in range(row_count_int_in):
+        log_trial_dict(config_module, "validation", {"stop_k": row_idx}, {"valid_total_return": 0.0}, False,
+                       file_path_str_in=file_path_str_in)
 
 # FUNCTION: FOUR PROCESSES APPEND 100 ROWS EACH
 def test_concurrent_appends():
@@ -129,8 +130,8 @@ def test_concurrent_appends():
         row_list = list(csv.reader(csv_file))
     assert row_list[0] == TRIAL_LOG_COLUMN_LIST and len(row_list) == 401
     assert all(len(row) == len(TRIAL_LOG_COLUMN_LIST) for row in row_list)
-    # THE BATCH ID IS TIMESTAMP, ROW INDEX, PROCESS ID, CONFIG HASH
-    id_pattern = re.compile(r"^\d{25}_\d+_[0-9a-f]{10}$")
+    # THE ID IS TIMESTAMP, PROCESS ID, CONFIG HASH
+    id_pattern = re.compile(r"^\d{20}_\d+_[0-9a-f]{10}$")
     assert all(id_pattern.match(trial_id_str) for trial_id_str in trial_pdf["trial_id"].astype(str))
     passed("4 processes x 100 rows (400 rows, 400 unique trial ids, the file parses)")
 

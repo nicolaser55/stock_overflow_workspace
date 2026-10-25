@@ -44,7 +44,7 @@ from so import config, paths
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.core.backtest_simulation import simulate_decision_trading_dict, get_daily_equity_pdf
 from so.core.point_in_time import (get_ny_timestamp, get_minute_bar_available_ts, get_runner_context,
-                                   register_source_dict, unregister_source, SOURCE_SPEC_DICT, DataContext)
+                                   register_source_dict, unregister_source, SOURCE_SPEC_DICT)
 from so.runner import (run_minute_dict, run_development_dict, MinuteLoop, get_minute_row_pdf,
                        get_shuffled_signal_list, check_minute_signal, LOOK_AHEAD_PASS_STR)
 from so.runner.run import get_candidate_token_str

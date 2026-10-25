@@ -40,7 +40,7 @@ os.environ.pop("SO_QUARANTINE_PATH", None)
 from temporary_data_root import assert_temporary_data_root
 assert_temporary_data_root()
 # IMPORT THE SHARED MODULES
-from so import paths, config
+from so import paths
 from so.core.evaluation import get_success_criteria_dict, get_rolling_month_window_pdf
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.runner import (run_development_dict, check_clean_tree, CLEAN_TREE_MESSAGE_STR, get_code_hash_str,

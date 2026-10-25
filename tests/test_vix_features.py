@@ -39,7 +39,7 @@ assert_temporary_data_root()
 
 # IMPORT WORKSPACE MODULES
 from so import vix_config
-from so.core.datetime_utils import ny_tz, get_date_range_market_schedule_pdf
+from so.core.datetime_utils import ny_tz
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.features.daily_features import get_daily_feature_pdf
 from so.features.vix_features import (check_cutoff_date, read_vix_daily_pdf, read_vix_1min_pdf, get_vix_table_pdf, get_vix_feature_pdf,

@@ -188,7 +188,7 @@ HOLDOUT_EVALUATION_BUDGET = 10
 HOLDOUT_MIN_WINDOW_MONTHS = 6
 # DEFINE THE MINIMUM NEW SESSIONS BEFORE A DESIGN HASH MAY BE EVALUATED AGAIN
 HOLDOUT_MIN_FORWARD_SESSIONS = 21
-# DEFINE THE LAST DATE LOADED BY PROTOCOL-1.0 EXPERIMENTS (docs/RESEARCH_STATE_2026-10-11.md §3)
+# DEFINE THE LAST DATE LOADED BY PROTOCOL-1.0 EXPERIMENTS (research state of 2026-10-11)
 PRIOR_READ_LAST_DATE_STR = "2026-04-15"
 
 """
@@ -365,14 +365,4 @@ def get_feature_col_str_list(scale_type_str_list_in=None, source_str_list_in=Non
             if (scale_type_str_list_in is None or info_dict["scale_type"] in scale_type_str_list_in)
             and (source_str_list_in is None or info_dict["source"] in source_str_list_in)]
 
-# FUNCTION: GET THE CONFIGURATION SNAPSHOT DICTIONARY
-def get_config_snapshot_dict():
-    """
-    Collects every uppercase constant of this module into a JSON-serializable dictionary.
-
-    Returns:
-        dict: Constant name -> value
-    """
-    # COLLECT ALL UPPERCASE CONSTANTS
-    return {key_str: value for key_str, value in globals().items() if key_str.isupper()}
 

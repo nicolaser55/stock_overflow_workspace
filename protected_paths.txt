@@ -1,0 +1,57 @@
+# Files an agent must not change (scripts/check_protected_paths.py). Nicolas reviews and merges any change to them.
+# One glob per line, repo-relative, forward slashes. "append:<path>" = may only grow at its end.
+
+# Rules and this list
+AGENTS.md
+README.md
+.cursor/**
+protected_paths.txt
+
+# Records (holdout registry and ledger, bad-tick corrections)
+records/**
+
+# Holdout, point-in-time and data guards
+so/paths.py
+so/config.py
+so/vix_config.py
+so/core/holdout.py
+so/core/point_in_time.py
+so/core/development_span.py
+so/core/raw_data.py
+so/core/local_file_management.py
+so/core/trial_log.py
+so/core/csv_append.py
+so/features/vix_features.py
+
+# The runner (view, engines, look-ahead check, verdict, baselines, selection)
+so/runner/**
+
+# Scripts that touch the holdout, the view, runs, the queue or the agent account
+scripts/holdout_evaluate.py
+scripts/holdout_window.py
+scripts/refresh_development_view.py
+scripts/run_development.py
+scripts/run_all_development.py
+scripts/run_queue.py
+scripts/check_protected_paths.py
+scripts/check_environment.py
+scripts/setup_so_agent.ps1
+scripts/check_agent_access.py
+
+# Tests of the guards and the runner, and the test runner itself
+tests/run_all_tests.py
+tests/temporary_data_root.py
+tests/test_holdout.py
+tests/test_point_in_time.py
+tests/test_refresh_development_view.py
+tests/test_trial_log_append.py
+tests/test_runner*.py
+tests/test_tools.py
+
+# Environment
+requirements/**
+pyproject.toml
+setup_venv.py
+
+# Results: rows are only appended (by scripts/run_development.py)
+append:docs/RESULTS_LOG.md

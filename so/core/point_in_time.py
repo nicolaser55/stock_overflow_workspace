@@ -799,12 +799,11 @@ class DataContext:
     """
 
     # FUNCTION: STORE THE FRAMES THE RUNNER ALREADY LOADED
-    def __init__(self, mode_str_in, as_of_limit_ts_in=None, perturbation_in=None, frame_dict_in=None, access_sink_list_in=None, declared_name_list_in=None):
+    def __init__(self, mode_str_in, as_of_limit_ts_in=None, frame_dict_in=None, access_sink_list_in=None, declared_name_list_in=None):
         """
         Args:
             mode_str_in (str): "development" or "runner"
             as_of_limit_ts_in (datetime-like | None): Runner window end
-            perturbation_in (dict | None): {"decision_ts", "seed_int"} applied to feature sources on read
             frame_dict_in (dict | None): source name -> frame already loaded
             access_sink_list_in (list | None): Shared access log
             declared_name_list_in (list | None): Sources the design named in DATA_SOURCE_LIST (None = not checked)
@@ -812,39 +811,10 @@ class DataContext:
         # KEEP THE MODE, THE LIMIT AND THE FRAMES
         self.mode_str = mode_str_in
         self.as_of_limit_ts = as_of_limit_ts_in
-        self.perturbation_dict = perturbation_in
         self.frame_dict = {} if frame_dict_in is None else frame_dict_in
-        self.decision_ts = None
         self.access_sink_list = [] if access_sink_list_in is None else access_sink_list_in
         self.declared_name_list = None if declared_name_list_in is None else list(declared_name_list_in)
 
-    # FUNCTION: WHETHER THE RUNNER LOADED THIS SOURCE
-    def has_source_bool(self, source_name_str_in):
-        """
-        True when the source was loaded into this context. Does not count as a read.
-
-        Args:
-            source_name_str_in (str): Source name
-
-        Returns:
-            bool: True if a frame is loaded
-        """
-        # THE FRAME DICT IS THE LOADED SET
-        return source_name_str_in in self.frame_dict
-
-    # FUNCTION: ARM THE DECISION CLOCK
-    def set_decision_ts(self, decision_ts_in):
-        """
-        While set, a feature read with as_of_ts after this moment raises. None clears it.
-
-        Args:
-            decision_ts_in (datetime-like | None): The decision currently being made
-
-        Returns:
-            None
-        """
-        # CLEAR OR STORE
-        self.decision_ts = None if decision_ts_in is None else get_ny_timestamp(decision_ts_in)
 
     # FUNCTION: THE SOURCES A DESIGN HAS READ
     def get_access_name_list(self):
@@ -913,7 +883,7 @@ class DataContext:
     # FUNCTION: FEATURE ROWS KNOWABLE AT as_of
     def get(self, source_name_str_in, as_of_ts_in, columns_in=None):
         """
-        Feature rows with available_ts <= as_of_ts. A label source raises. as_of_ts after the armed decision raises.
+        Feature rows with available_ts <= as_of_ts. A label source raises.
 
         Args:
             source_name_str_in (str): Registered feature source
@@ -927,16 +897,11 @@ class DataContext:
         spec_dict = get_source_spec_dict(source_name_str_in)
         if spec_dict["role"] == "label":
             raise ValueError(f"{source_name_str_in} is a label. Read it through get_labels.")
-        # A READ PAST THE DECISION CURRENTLY BEING MADE IS A LEAK
         as_of_ts = get_ny_timestamp(as_of_ts_in)
-        if self.decision_ts is not None and as_of_ts > self.decision_ts:
-            raise ValueError(f"{source_name_str_in} as_of_ts is later than the decision currently being made.")
         # A SOURCE THE DESIGN DID NOT DECLARE IS REFUSED BEFORE ANY ROW IS RETURNED
         self._refuse_undeclared_source(source_name_str_in)
-        # STAMP, DROP ANY LABEL COLUMNS ON A FEATURE SOURCE, THEN THE OPTIONAL PERTURBATION
+        # STAMP AND DROP ANY LABEL COLUMNS ON A FEATURE SOURCE
         stamped_pdf = get_feature_column_pdf(source_name_str_in, self._get_stamped_pdf(source_name_str_in), columns_in)
-        if self.perturbation_dict is not None:
-            stamped_pdf = get_perturbed_feature_pdf(stamped_pdf, self.perturbation_dict["decision_ts"], self.perturbation_dict["seed_int"], source_name_str_in)
         # RECORD THE READ AND CUT AT as_of
         self._record_access(source_name_str_in)
         return get_as_of_pdf(source_name_str_in, as_of_ts, columns_in, pdf_in=stamped_pdf, mode_str_in=self.mode_str, as_of_limit_ts_in=self.as_of_limit_ts)
@@ -998,35 +963,8 @@ class DataContext:
             child_dict[source_name_str] = stamped_pdf.loc[available_series <= session_end_ts].copy()
         # SPY IS THE RUNNER'S TRUNCATED ARRAYS
         child_dict["SPY_1MIN"] = get_spy_frame_pdf(spy_array_dict_in)
-        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list, self.declared_name_list)
+        return DataContext(self.mode_str, self.as_of_limit_ts, child_dict, self.access_sink_list, self.declared_name_list)
 
-    # FUNCTION: A CONTEXT WHOSE LATER FEATURE VALUES ARE PERTURBED
-    def get_perturbed_context(self, decision_ts_in, seed_int_in, spy_array_dict_in):
-        """
-        Feature sources are perturbed after the decision. Labels are copied unchanged. SPY comes from the runner's
-        already-perturbed arrays.
-
-        Args:
-            decision_ts_in (datetime-like): End of the cut session's decision bar
-            seed_int_in (int): Cut-date seed
-            spy_array_dict_in (dict): Perturbed SPY arrays
-
-        Returns:
-            DataContext: Child context sharing the access log
-        """
-        # PERTURB FEATURES AND LEAVE LABELS ALONE
-        child_dict = {}
-        for source_name_str, frame_pdf in self.frame_dict.items():
-            if source_name_str == "SPY_1MIN":
-                continue
-            stamped_pdf = get_feature_column_pdf(source_name_str, add_available_ts_pdf(source_name_str, frame_pdf), None)
-            if get_source_spec_dict(source_name_str)["role"] == "feature":
-                child_dict[source_name_str] = get_perturbed_feature_pdf(stamped_pdf, decision_ts_in, seed_int_in, source_name_str)
-            else:
-                child_dict[source_name_str] = stamped_pdf
-        # SPY IS THE RUNNER'S PERTURBED ARRAYS, NOT A SECOND PERTURBATION
-        child_dict["SPY_1MIN"] = get_spy_frame_pdf(spy_array_dict_in)
-        return DataContext(self.mode_str, self.as_of_limit_ts, None, child_dict, self.access_sink_list, self.declared_name_list)
 
 # TSDAY COLUMNS COMPUTED FROM BARS AFTER THE DECISION BAR (NOT SERVED ON THE FEATURE PATH; THEY STAY ON TSDAY_FWD ROWS,
 # WHICH ARE ONLY SERVED 20 SESSIONS LATER)
@@ -1075,7 +1013,7 @@ def get_runner_context(ohlcv_array_dict_in, source_frame_dict_in=None, as_of_lim
         for source_name_str, frame_pdf in source_frame_dict_in.items():
             get_source_spec_dict(source_name_str)
             frame_dict[source_name_str] = frame_pdf
-    return DataContext("runner", as_of_limit_ts_in, None, frame_dict, [], declared_name_list_in)
+    return DataContext("runner", as_of_limit_ts_in, frame_dict, [], declared_name_list_in)
 
 # FUNCTION: THE SOURCES A DESIGN DECLARED
 def get_declared_source_name_list(design_module_in):

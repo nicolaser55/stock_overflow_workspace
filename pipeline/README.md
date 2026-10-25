@@ -11,8 +11,8 @@ are **kept across experiments**: re-running an experiment never requires re-runn
 | 03 | `step03_TSSEG_data_collection.ipynb` | `store02_workzone/step03_TSSEG_data/` (segments, `cum_max`) | exp01 |
 | 04 | `step04_TSCTX_data_collection.ipynb` | `store02_workzone/step04_TSCTX_data/` (context features, tested for look-ahead) | exp01 |
 | 05 | `step05_TSBAR_data_collection.ipynb` | `store03_goldzone/step05_TSBAR_data/` (barrier targets, 32 SL/TP distances) | exp01 |
-| 06 | `step06_TSDAY_data_collection.ipynb` | `store02_workzone/step06_TSDAY_data/TSDAY_data.csv` (one row per session) | exp02, exp03 (they rebuild it in memory; this file is the record) |
-| 07 | `step07_VIX_data_check.ipynb` | `store04_experiments/vix_data_layer/step07_VIX_data_check/` (coverage, daily vs 1-minute agreement, feature distribution; loads cut at 2026-04-15) | exp08-exp11 (the VIX features are rebuilt in memory by `so.features.vix_features`) |
+| 06 | `step06_TSDAY_data_collection.ipynb` | `store02_workzone/step06_TSDAY_data/TSDAY_data.csv` (one row per session) | the daily experiments (TSDAY source) |
+| 07 | `step07_VIX_data_check.ipynb` | `store04_experiments/vix_data_layer/step07_VIX_data_check/` (coverage, daily vs 1-minute agreement, feature distribution; loads cut at 2026-04-15) | exp12, exp13 (the VIX features are rebuilt in memory by `so.features.vix_features`) |
 
 Steps 00-05 are the notebooks of the previous workspace with only their imports changed (logic unchanged); their caches
 (steps 01-05) were built and corrected on 2026-10-04/05 and are kept as they are. Step 06 is the former step 09 (TSDAY)
@@ -28,17 +28,14 @@ changes the meaning of the cached files**: regenerate the affected steps and sta
 2. Run steps 01 -> 04 for the missing dates (ignore mode `"I"`).
 3. Run step 05: regenerate the incomplete dates (mode `"W"`), then the missing ones.
 4. Run step 06.
-5. Experiments: exp01 step 01 regenerates its 30 most recent model dataset days and adds the missing ones; exp02 and exp03
-   read the raw data directly.
-
-Note: the walk-forward schedule is anchored on the last session of the data, so new data shifts every fold window.
+5. Nicolas runs `scripts/refresh_development_view.py`, which moves the development view and the quarantine forward.
+   Experiments read the view through the point-in-time layer; they have no data step of their own.
 
 ## Known limitations (kept as they are)
 
 - The bad tick rule (3%) leaves smaller wicks of the same kind (1.5-3%), including some in 2015-2026
-  (`docs/history/AUDIT_2026-10-05.md`, F1). Rules that trigger on minute lows can be affected.
+  (audit of 2026-10-05, F1). Rules that trigger on minute lows can be affected.
 - 2007-07-02 is missing (not available from IBKR); 2009-07-27 and 2013-12-23 are partial sessions.
 - Prices are not adjusted for dividends: ex-dividend dates show as small overnight drops.
 - `TSSEG` 2021-08-24 differs from a regeneration (cause not identified; only exp01 uses TSSEG).
-- `validate_der_price_ohlcv_pdf_list` never compares; `get_pdf1_pdf2_diff_list` stops at the first difference; the
-  `ms_*` text columns lose `""` to NaN on a CSV round trip.
+- The `ms_*` text columns lose `""` to NaN on a CSV round trip.

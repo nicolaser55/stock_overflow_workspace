@@ -1,95 +1,9 @@
 import pandas as pd
-import numpy as np
 import webcolors
 import plotly.graph_objects as go
-# IMPORT DATA QUALITY FUNCTIONS
-from so.core.data_quality import get_col_histogram_pdf
 # IMPORT TRADE EXECUTION FUNCTIONS (SAME EXIT RULES AS THE TARGET MATRIX AND THE SIMULATOR)
 from so.core.trade_execution import resolve_barrier_exit_dict
 
-# FUNCTION: PLOT THE BIN GROUPS DATAFRAME
-def plot_col_histogram(pdf_in, col_str_in, title_str_in="", width_in=1100, height_in=500):
-    # GET THE MEAN AND MEDIAN OF THE COLUMN
-    avg = pdf_in[col_str_in].mean()
-    med = pdf_in[col_str_in].median()
-    # GET HISTOGRAM OF COLUMN
-    hist_pdf = get_col_histogram_pdf(pdf_in, col_str_in)
-    # DEFINE THE BUFFER
-    val_range = hist_pdf[col_str_in].max() - hist_pdf[col_str_in].min()
-    # DEFINE THE BUFFER AS 10% OF THE VALUE RANGE
-    buffer = val_range * 0.1
-    # COLLECT THE MINIMUM AND MAXIMUM PCT BINS
-    min_bin = hist_pdf[col_str_in].min() - buffer if hist_pdf[col_str_in].min() < 0 else 0
-    max_bin = hist_pdf[col_str_in].max() + buffer if hist_pdf[col_str_in].max() > 0 else 0
-    # COLLECT THE MINIMUM AND MAXIMUM SEGMENT COUNTS
-    min_count = 0
-    max_count = hist_pdf["count"].max() * 1.2
-    # CREATE A FIGURE
-    fig = go.Figure()
-    # ADD A VERTICAL RECTANGLE TO THE FIGURE (HIGLIGHT NEGATIVE BINS)
-    fig.add_trace(go.Scatter(x=[0, min_bin, min_bin, 0, 0],
-                            y=[min_count, min_count, max_count, max_count, min_count],
-                            mode="lines",
-                            fill="toself",
-                            fillcolor="red",
-                            opacity=0.1,
-                            line=dict(color="red", width=0),
-                            name="Negative Bins"))
-    # ADD A VERTICAL RECTANGLE TO THE FIGURE (HIGLIGHT POSITIVE BINS)
-    fig.add_trace(go.Scatter(x=[0, max_bin, max_bin, 0, 0],
-                            y=[min_count, min_count, max_count, max_count, min_count],
-                            mode="lines",
-                            fill="toself",
-                            fillcolor="lime",
-                            opacity=0.1,
-                            line=dict(color="green", width=0),
-                            name="Positive Bins"))
-    # ADD THE SEGMENT COUNT TO PCT BIN BARS
-    fig.add_trace(go.Bar(x=hist_pdf[col_str_in],
-                         y=hist_pdf["count"],
-                         marker_color='#4287f5',
-                         marker_line_width=0,
-                         name=f"{col_str_in} Count",
-                         text=hist_pdf["count"],
-                         textposition="outside",
-                         textfont=dict(
-                             family="Arial",
-                             size=30,
-                             color="white")))
-    # ADD AN AVERAGE AND MEDIAN LINE
-    fig.add_trace(go.Scatter(x=[avg, avg],
-                            y=[0, max_count],
-                            mode="lines",
-                            line=dict(color="yellow", width=1),
-                            name=f"Average: {avg:.6f}"))
-    fig.add_trace(go.Scatter(x=[med, med],
-                            y=[0, max_count],
-                            mode="lines",
-                            line=dict(color="white", width=1),
-                            name=f"Median: {med:.6f}"))
-    # UPDATE LAYOUT
-    fig.update_layout(
-        title=f"Distribution of '{col_str_in}' {title_str_in}",
-        yaxis_title="Frequency", 
-        xaxis_title=f"{col_str_in}",
-        showlegend=True,
-        template="plotly_dark",
-        xaxis=dict(
-            showgrid=True,
-            gridwidth=1,
-            tickangle=45
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridwidth=1,
-        ),
-        yaxis_range=[min_count, max_count],
-        width=width_in,
-        height=height_in,
-        font=dict(color="white"),
-    )
-    # SHOW THE FIGURE
-    fig.show()
 
 # FUNCTION: CONVERT NAMED COLOR TO RGBA
 def css_color_to_rgba(color_name_str_in, alpha=1.0):
@@ -98,25 +12,6 @@ def css_color_to_rgba(color_name_str_in, alpha=1.0):
     # RETURN STRING OF RGBA
     return f"rgba({rgb.red}, {rgb.green}, {rgb.blue}, {alpha})"
 
-# FUNCTION: CONVERT HEX COLOR TO RGBA
-def hex_to_rgba(hex_color, alpha=1.0):
-    # REMOVE THE HASH FROM THE HEX COLOR
-    hex_color = hex_color.lstrip("#")
-    # GET THE LENGTH OF THE HEX COLOR
-    lv = len(hex_color)
-    # IF THE LENGTH OF THE HEX COLOR IS 6
-    if lv == 6:
-        # COLLECT THE RGB VALUES
-        r, g, b = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
-    # IF THE LENGTH OF THE HEX COLOR IS 3
-    elif lv == 3:  # e.g. '#f00'
-        r, g, b = tuple(int(hex_color[i] * 2, 16) for i in range(3))
-    # IF THE HEX COLOR IS INVALID
-    else:
-        # RAISE AN ERROR
-        raise ValueError("Invalid HEX color format.")
-    # RETURN THE RGBA COLOR
-    return f"rgba({r}, {g}, {b}, {alpha})"
 
 # FUNCTION: GET THE ROW AND COLUMN KEYWORD DICTIONARY OF A TRACE
 def get_row_col_dict(fig_in, row_in=None, col_in=None):
@@ -189,12 +84,6 @@ def fig_add_maxima(fig_in, ohlcv_pdf_in, row_in=None, col_in=None):
         name="Maxima"
     ), **get_row_col_dict(fig_in, row_in, col_in))
 
-# FUNCTION: ADD EXTREMAS
-def fig_add_extremas(fig_in, ohlcv_pdf_in, row_in=None, col_in=None):
-    # ADD MINIMA
-    fig_add_minima(fig_in, ohlcv_pdf_in, row_in=row_in, col_in=col_in)
-    # ADD MAXIMA
-    fig_add_maxima(fig_in, ohlcv_pdf_in, row_in=row_in, col_in=col_in)
 
 # ADD EXTREMAS PRICE PATTERN
 def fig_add_extremas_pp(fig_in, ohlcv_pdf_in, row_in=None, col_in=None):
@@ -254,34 +143,6 @@ def fig_add_support_col(fig_in, ohlcv_pdf_in, opacity_in=0.15, row_in=None, col_
             text=f"Support"
         ), **get_row_col_dict(fig_in, row_in, col_in))
 
-# FUNCTION: ADD SUPPORT AREA TO FIGURE
-def fig_add_support_area(fig_in, start_ts, end_ts, top_p, bot_p, id_in, opacity_in=0.15, row_in=None, col_in=None):
-    # ADD THE SUPPORT AREA BUFFERED RECTANGLE
-    fig_in.add_trace(go.Scatter(
-        x=[start_ts, end_ts, end_ts, start_ts, start_ts],
-        y=[top_p, top_p, bot_p, bot_p, top_p],
-        mode="lines",
-        line=dict(color="green", width=1),
-        name=f"Support Level: {id_in}",
-        text=f"Support Level: {id_in}",
-        legendgroup=f"support {id_in}",
-        showlegend=False,
-        fill="toself",
-        fillcolor=f"rgba(0,255,0,{opacity_in})",
-        opacity=1,
-    ), **get_row_col_dict(fig_in, row_in, col_in))
-    # CALCULATE THE MID PRICE
-    mid_p = (top_p + bot_p) / 2
-    # ADD A SUPPORT MIDDLE LINE
-    fig_in.add_trace(go.Scatter(
-        x=[start_ts, end_ts],
-        y=[mid_p, mid_p],
-        mode="lines",
-        legendgroup=f"support {id_in}",
-        showlegend=True,
-        line=dict(color="green", width=2, dash="dash"),
-        name=f"Support Level: {id_in}",
-    ), **get_row_col_dict(fig_in, row_in, col_in))
 
 # FUNCTION: ADD RESISTANCE TREND LINE TO FIGURE
 def fig_add_resistance_col(fig_in, ohlcv_pdf_in, opacity_in=0.15, row_in=None, col_in=None):
@@ -319,34 +180,6 @@ def fig_add_resistance_col(fig_in, ohlcv_pdf_in, opacity_in=0.15, row_in=None, c
             text=f"Resistance"
         ), **get_row_col_dict(fig_in, row_in, col_in))
 
-# FUNCTION: ADD RESISTANCE AREA TO FIGURE
-def fig_add_resistance_area(fig_in, start_ts, end_ts, top_p, bot_p, id_in, opacity_in=0.15, row_in=None, col_in=None):
-    # ADD THE RESISTANCE LEVEL BUFFERED RECTANGLE
-    fig_in.add_trace(go.Scatter(
-        x=[start_ts, end_ts, end_ts, start_ts, start_ts],
-        y=[top_p, top_p, bot_p, bot_p, top_p],
-        mode="lines",
-        line=dict(color="red", width=1),
-        name=f"Resistance Level: {id_in}",
-        text=f"Resistance Level: {id_in}",
-        legendgroup=f"resistance {id_in}",
-        showlegend=False,
-        fill="toself",
-        fillcolor=f"rgba(255,0,0,{opacity_in})",
-        opacity=1,
-    ), **get_row_col_dict(fig_in, row_in, col_in))
-    # CALCULATE THE MID PRICE
-    mid_p = (top_p + bot_p) / 2
-    # ADD A RESISTANCE MIDDLE LINE
-    fig_in.add_trace(go.Scatter(
-        x=[start_ts, end_ts],
-        y=[mid_p, mid_p],
-        mode="lines",
-        legendgroup=f"resistance {id_in}",
-        showlegend=True,
-        line=dict(color="red", width=2, dash="dash"),
-        name=f"Resistance Level: {id_in}",
-    ), **get_row_col_dict(fig_in, row_in, col_in))
 
 # FUNCTION: ADD BUY MARKER
 def fig_add_buy_order_marker(fig_in, buy_order_price_in, ts_in, id_in, legend_group_in=None, color_str_in="white", symbol_str_in="diamond-dot", row_in=None, col_in=None):
@@ -510,115 +343,6 @@ def fig_add_transaction(fig_in, buy_ts_in, buy_price_in, sell_ts_in, sell_price_
                     line_width=1,
                     line_dash="dot")
 
-# FUNCTION: PLOT TREND LINES
-def plot_ohlcv_minimas(ohlcv_pdf_in, title_str_in="", width_in=1000, height_in=500):
-    """
-    Plot OHLCV data with trend lines and contact points
-    
-    Args:
-        df: DataFrame containing OHLCV data with trend lines and contact points
-        title: Title for the plot (default: "Price Chart with Trend Lines")
-    """
-    # CREATE A FIGURE
-    fig = go.Figure()
-    # ADD CANDLESTICK CHART
-    fig_add_ohlcv(fig, ohlcv_pdf_in, opacity_in=0.2)
-    # PLOT THE LOW PRICE
-    fig.add_trace(go.Scatter(
-        x=ohlcv_pdf_in["timestamp"],
-        y=ohlcv_pdf_in["low"],
-        mode="lines",
-        line=dict(color="red", width=1),
-        name="Low Price"
-        ), **get_row_col_dict(fig))
-
-    # ADD MINIMA
-    fig_add_minima(fig, ohlcv_pdf_in)
-    # UPDATE LAYOUT
-    fig.update_layout(
-        title=f"{title_str_in} OHLCV Price Chart Minimas",
-        yaxis_title="Price",
-        xaxis_title="Time",
-        showlegend=True,
-        xaxis_rangeslider_visible=False,
-        template="plotly_dark",
-        width=width_in,
-        height=height_in,
-        font=dict(color="white")
-    )
-    # DISPLAY FIGURE
-    fig.show()
-
-# FUNCTION: PLOT TREND LINES
-def plot_ohlcv_maximas(ohlcv_pdf_in, title_str_in="", width_in=1000, height_in=500):
-    """
-    Plot OHLCV data with trend lines and contact points
-    
-    Args:
-        df: DataFrame containing OHLCV data with trend lines and contact points
-        title: Title for the plot (default: "Price Chart with Trend Lines")
-    """
-    # CREATE A FIGURE
-    fig = go.Figure()
-    # ADD CANDLESTICK CHART
-    fig_add_ohlcv(fig, ohlcv_pdf_in, opacity_in=0.2)
-    # PLOT THE LOW PRICE
-    fig.add_trace(go.Scatter(
-        x=ohlcv_pdf_in["timestamp"],
-        y=ohlcv_pdf_in["high"],
-        mode="lines",
-        line=dict(color="green", width=1),
-        name="High Price"
-        ), **get_row_col_dict(fig))
-    
-    # ADD MAXIMA
-    fig_add_maxima(fig, ohlcv_pdf_in)
-    # UPDATE LAYOUT
-    fig.update_layout(
-        title=f"{title_str_in} OHLCV Price Chart Maximas",
-        yaxis_title="Price",
-        xaxis_title="Time",
-        showlegend=True,
-        xaxis_rangeslider_visible=False,
-        template="plotly_dark",
-        width=width_in,
-        height=height_in,
-        font=dict(color="white")
-    )
-    # DISPLAY FIGURE
-    fig.show()
-
-# FUNCTION: PLOT TREND LINES
-def plot_ohlcv_extremas(ohlcv_pdf_in, title_str_in="", width_in=1000, height_in=500):
-    """
-    Plot OHLCV data with trend lines and contact points
-    
-    Args:
-        df: DataFrame containing OHLCV data with trend lines and contact points
-        title: Title for the plot (default: "Price Chart with Trend Lines")
-    """
-    # CREATE A FIGURE
-    fig = go.Figure()
-    # ADD CANDLESTICK CHART
-    fig_add_ohlcv(fig, ohlcv_pdf_in, opacity_in=0.2)
-    # ADD MINIMA
-    fig_add_minima(fig, ohlcv_pdf_in)
-    # ADD MAXIMA
-    fig_add_maxima(fig, ohlcv_pdf_in)
-    # UPDATE LAYOUT
-    fig.update_layout(
-        title=f"{title_str_in} OHLCV Price Chart Extremas",
-        yaxis_title="Price",
-        xaxis_title="Time",
-        showlegend=True,
-        xaxis_rangeslider_visible=False,
-        template="plotly_dark",
-        width=width_in,
-        height=height_in,
-        font=dict(color="white")
-    )
-    # DISPLAY FIGURE
-    fig.show()
 
 # FUNCTION: PLOT TREND LINES
 def plot_ohlcv(ohlcv_pdf_in, SLTP_dict_in={}, title_str_in="", width_in=1200, height_in=700):
@@ -1004,71 +728,6 @@ def plot_ohlcv_market_structure(ohlcv_pdf_in, width_in=1200, height_in=700):
     # DISPLAY THE FIGURE
     fig.show()
 
-# FUNCTION: PLOT PATTERN INSTANCES OVER TIME
-def plot_buy_sell_ohlcv(ohlcv_pdf_in, ts_buy_sell_pdf_in, title_str_in, width_in=1100, height_in=700, order_ts_in=pd.NaT):
-    """
-    Plot buy/sell signals on OHLCV candlestick chart with transaction details.
-    
-    Args:
-        ohlcv_pdf_in (pd.DataFrame): OHLCV price data
-        buy_sell_signal_pdf_in (pd.DataFrame): Buy/sell signals with transaction details
-        title_str_in (str): Chart title
-    """
-    # IF THE DATAFRAME IS EMPTY
-    if ts_buy_sell_pdf_in.empty:
-        # DISPLAY INFORMATION
-        print("Buy/Sell Signal Dataframe is empty")
-        # RETURN NONE
-        return
-    # CREATE FIGURE
-    fig = go.Figure()
-    # ADD CANDLESTICK CHART
-    fig_add_ohlcv(fig, ohlcv_pdf_in)
-    # ITERATE OVER TRANSACTION GROUPS
-    for transaction_id, transaction_pdf in ts_buy_sell_pdf_in.groupby("transaction_id"):
-        # VALIDATE TRANSACTION HAS BOTH BUY AND SELL SIGNALS
-        if len(transaction_pdf) < 2:
-            # RAISE ERROR
-            raise ValueError(f"Warning: Transaction {transaction_id} incomplete - skipping")
-        # SORT BY TIMESTAMP TO ENSURE BUY COMES BEFORE SELL
-        transaction_pdf = transaction_pdf.sort_values('timestamp')
-        # EXTRACT BUY AND SELL DATA
-        buy_order_row = transaction_pdf[transaction_pdf.signal == "order"].iloc[0]
-        buy_row = transaction_pdf[transaction_pdf.signal == "buy"].iloc[0]
-        sell_row = transaction_pdf[transaction_pdf.signal == "sell"].iloc[0]
-        # VALIDATE BUY/SELL ORDER
-        if buy_row["signal"] != "buy" or sell_row["signal"] != "sell":
-            # RAISE ERROR
-            raise ValueError(f"Warning: Transaction {transaction_id} has incorrect signal order - skipping")
-        # EXTRACT TRANSACTION DETAILS
-        order_ts = buy_order_row["timestamp"]
-        buy_price = buy_row["price"]
-        sell_price = sell_row["price"]
-        buy_ts = buy_row["timestamp"]
-        sell_ts = sell_row["timestamp"]
-        stop_loss = sell_row["SL_price"]
-        take_profit = sell_row["TP_price"]
-        # ADD TRANSACTION TO FIGURE
-        fig_add_transaction(fig, buy_ts, buy_price, sell_ts, sell_price, stop_loss, take_profit, transaction_id, order_ts)
-    # UPDATE LAYOUT WITH IMPROVED STYLING
-    fig.update_layout(
-        title={
-            'text': f"{title_str_in} Simulated Trade",
-            'x': 0.5,
-            'xanchor': 'center'
-        },
-        yaxis_title="Price ($)",
-        xaxis_title='Time',
-        showlegend=True,
-        xaxis_rangeslider_visible=False,
-        template='plotly_dark',
-        width=width_in,
-        height=height_in,
-        font=dict(color='white', size=12),
-        hoverlabel=dict(font_size=12),
-    )
-    # SHOW PLOT
-    fig.show()
 
 # FUNCTION: PLOT THE SIMULATED TRANSACTIONS OF THE BACKTEST SIMULATOR
 def plot_transaction_ohlcv(ohlcv_pdf_in, transaction_pdf_in, title_str_in="", width_in=1100, height_in=700):

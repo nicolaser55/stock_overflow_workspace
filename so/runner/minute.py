@@ -11,7 +11,7 @@ from so.core.point_in_time import (get_ny_timestamp, get_minute_bar_available_ts
 from so.core.backtest_simulation import get_session_first_entry_idx
 from so.core.reentry_simulation import get_window_session_idx_arr
 # IMPORT THE REFIT CALENDAR AND THE TRAINING MASK
-from so.core.rolling_retrain import get_retrain_session_list, get_training_mask_arr, TRAIN_WINDOW_ALLOWED_LIST
+from so.core.rolling_retrain import get_retrain_session_list, TRAIN_WINDOW_ALLOWED_LIST
 # IMPORT THE ENGINE DECISION SHAPE
 from so.runner.engine import (BarrierEngine, get_decision_dict, get_barrier_buy_bool, DECISION_KEY_LIST,
                               FLOAT_DECISION_KEY_LIST)
@@ -361,49 +361,6 @@ def get_minute_row_pdf(design_module_in, ohlcv_array_dict_in, date1_in, date2_in
     return row_pdf.reset_index(drop=True)
 
 
-# FUNCTION: TRAINING ROWS AT ONE REFIT (LABEL DOOR)
-def get_minute_train_pdf(row_pdf_in, data_context_in, design_module_in, refit_ts_in, train_window_str_in):
-    """
-    Feature rows inside the training window whose label_known_ts is strictly before refit_ts_in. Unfinished labels
-    are dropped. When the design declares no label source, the windowed feature rows are returned as they are.
-
-    Args:
-        row_pdf_in (pd.DataFrame): Minute feature rows
-        data_context_in (DataContext | None): Loaded sources
-        design_module_in (module): Design
-        refit_ts_in: Refit moment
-        train_window_str_in (str): Training window
-
-    Returns:
-        pd.DataFrame: Rows the fit may see
-    """
-    # THE CALENDAR WINDOW, THEN THE LABEL CLOCK
-    label_name_list = get_label_source_name_list(design_module_in)
-    if not label_name_list or data_context_in is None:
-        dummy_label_arr = np.array([refit_ts_in - pd.Timedelta(seconds=1)] * len(row_pdf_in), dtype="object")
-        mask_arr = get_training_mask_arr(row_pdf_in["decision_ts"], dummy_label_arr, refit_ts_in, train_window_str_in)
-        return row_pdf_in.loc[mask_arr].reset_index(drop=True)
-    train_pdf = row_pdf_in.copy()
-    train_pdf["_join_ts"] = pd.DatetimeIndex(pd.to_datetime(train_pdf["bar_ts"])).tz_convert("America/New_York")
-    for source_name_str in label_name_list:
-        label_pdf = data_context_in.get_labels(source_name_str, refit_ts_in)
-        if label_pdf.empty:
-            return row_pdf_in.iloc[0:0].copy()
-        label_pdf = label_pdf.copy()
-        label_pdf["_join_ts"] = get_source_join_ts_series(label_pdf)
-        drop_set = SIGNAL_DROP_COL_SET | {"_join_ts"}
-        keep_col_list = [column_str for column_str in label_pdf.columns if column_str not in drop_set or column_str == "label_known_ts"]
-        take_col_list = ["_join_ts"] + [column_str for column_str in keep_col_list if column_str != "_join_ts"]
-        take_pdf = label_pdf[take_col_list].drop_duplicates("_join_ts", keep="last")
-        train_pdf = train_pdf.merge(take_pdf, on="_join_ts", how="inner")
-    if train_pdf.empty:
-        return train_pdf.reset_index(drop=True)
-    if "label_known_ts" not in train_pdf.columns:
-        raise ValueError("label rows have no label_known_ts.")
-    mask_arr = get_training_mask_arr(train_pdf["decision_ts"], train_pdf["label_known_ts"], refit_ts_in, train_window_str_in)
-    return train_pdf.loc[mask_arr].drop(columns=["_join_ts"], errors="ignore").reset_index(drop=True)
-
-
 # FUNCTION: WHETHER TWO DECISION DICTS MATCH
 def get_minute_decision_equal_bool(left_dict_in, right_dict_in, tolerance_float_in=None):
     """
@@ -707,7 +664,7 @@ def get_train_clock_dict(train_pool_pdf_in):
     return {"day_ord_arr": day_ord_arr, "label_ns_arr": label_ns_arr, "label_ok_arr": label_ok_arr}
 
 
-# FUNCTION: THE TRAINING MASK, VECTORIZED (SAME RULE AS so.core.rolling_retrain.get_training_mask_arr)
+# FUNCTION: THE TRAINING MASK (ROW DAY IN THE WINDOW, LABEL KNOWN BEFORE THE REFIT)
 def get_fast_training_mask_arr(clock_dict_in, refit_ts_in, train_window_str_in):
     """
     Row day inside [refit day - window, refit day] and label_known_ts strictly before the refit moment. A missing
@@ -869,7 +826,7 @@ class MinuteLoop:
     def get_train_pool_pdf(self, pool_pdf_in):
         """
         The label door is applied per refit by the training mask (label_known_ts strictly before the refit moment).
-        Joining once here gives the same rows as get_minute_train_pdf at each refit, without re-reading the labels.
+        Joining once here and masking per refit gives the training rows of each refit without re-reading the labels.
         A design without a label source gets label_known_ts = NaT and is masked by the row clock only.
 
         Args:

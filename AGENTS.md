@@ -1,45 +1,39 @@
 # AGENTS.md: Stock Overflow research workspace
 
-You are continuing a thesis-style quantitative research project for Nicolas: can a long-only, unlevered strategy on SPY
-beat **buy-and-hold's total return** after realistic costs, out of sample? You act as a rigorous research collaborator,
-not as an optimizer chasing a good number.
+You are a research collaborator on a thesis project: can a long-only, unlevered SPY strategy beat buy-and-hold's total
+return after costs, out of sample? The goal is a true answer a thesis examiner can trace, not a good number. Negative
+results are results.
 
-## Read first, every new chat (in this order)
+## Read first
 
-1. `docs/RESEARCH_STATE_<latest date>.md`: where the research stands, what data has been seen, the roadmap, open items.
-2. `docs/RESULTS_LOG.md`: every result so far, including failures.
-3. `experiments/README.md`: the experiment registry and how to add an experiment.
-4. The `PROTOCOL.md` of the experiment you work on (and `experiments/exp02_stop_reentry/PROTOCOL.md` as the reference
-   walk-forward design).
-5. `README.md` §4-§8: machines, data folders, discipline, tests, conventions.
+1. `README.md`: layout, commands, data folders.
+2. `.cursor/rules/research-integrity.mdc`: what you may and may not do. Its "Never" rules override everything else.
+3. `docs/RESULTS_LOG.md`: every run so far.
+4. `experiments/README.md` and the `PROTOCOL.md` of the experiment you work on.
+5. `docs/RUNNER_DESIGN.md` when you touch a design (what the runner guarantees and what a design writes).
 
-The rules in `.cursor/rules/` always apply: `research-integrity.mdc` (what you may and may not do, file scope, and what
-to park for Nicolas), `workflow.mdc` (how to run things on this Windows machine and what to record), `code-conventions.mdc` (style).
+## How work is done
 
-## The project in five lines
+- Account and folders: you run as `so_agent` in your own clone. You can write only in that clone and in
+  `store04_experiments/`. You cannot read the quarantine or the holdout results. An "access denied" is a boundary:
+  stop that action and report it; never work around it.
+- Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
+- Protected files (`protected_paths.txt`): the guards, the runner, the rules, the records, the guard tests, the
+  environment. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
+  `docs/RESULTS_LOG.md` only grows (runs append rows).
+- Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
+- Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never
+  commit failing tests. New tests go in a new `tests/test_*.py` added to `tests/run_all_tests.py` (synthetic data only).
+- Runs: commit first (a run refuses uncommitted changes in `so/` or the experiment folder), then
+  `scripts\run_queue.py add experiments\<exp> --note "<why>"` and `scripts\run_queue.py run`. Each run writes a
+  report, a manifest and a results-log row. Read results from those files, never from memory.
+- A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
+  selection rule, stopping rule, trial budget) and commit it with `config.py`, `design.py` and tests before the first
+  run (message `preregister expNN`). Any change after a run is a new protocol version.
+- Writing: separate implemented / tested / observed / intended / inferred. Quote numbers with their file. Report the
+  prior-only result, the baselines and the look-ahead status; never present a result as stronger than the evidence.
 
-- Code: `so/` (shared library, including `so.runner` through 4b-2b: daily view, fractional / trailing-stop / barrier
-  engines, minute mode), `pipeline/` (shared data notebooks 00-06), `experiments/expNN_<name>/` (one folder per experiment:
-  `PROTOCOL.md`, `config.py`, code, `stepNN_*.ipynb`), `tests/`, `docs/`, `records/`.
-- Data (never in git): the folder in SO_DATA_PATH (`so.paths`).
-- Every experiment run is logged in `store04_experiments/trial_log.csv` (never edit it) and reported in
-  `docs/RESULTS_LOG.md` the same day.
-- exp01 to exp07, exp12 and exp13 are protocol 2.0. exp08 and the skipped exp09–exp11 were removed from this tree on
-  2026-10-16; their results stay in `docs/RESULTS_LOG.md` and their code at tag `pre-port-20261012`. The VIX line is
-  closed (exp13: E1M1 IS NOT ROBUST).
-- Every series a strategy reads is registered in `so.core.point_in_time` and read through `DataContext`
-  (`docs/DATA_SOURCES.md`). A value may be used at a decision only when its `available_ts` is at or before that decision.
-  Labels may look forward; a model trained at time t uses only rows whose `label_known_ts` is before t.
-- The evaluation design is the rolling 12-month holdout (`so.core.holdout`, `records/holdout_windows.csv`). Rule 1 of
-  `research-integrity.mdc`: never read the registered window for exploration, validation or any decision; never set
-  `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`; never run
-  `scripts/holdout_window.py` or `scripts/holdout_evaluate.py`. Tests under `tests/` may set those variables to
-  temporary values on synthetic data only. If no window is registered, development notebooks must refuse to run.
-- Next is parked for Nicolas: write-up of the negative result, then text data. Calibration re-runs of exp05 and exp06
-  under the new split, as new versions, are proposed and waiting for Nicolas.
-- **You work autonomously** (Nicolas, 2026-10-06): never ask for permission or wait for an answer. Decisions only Nicolas
-  can make are parked in §7 of the research state and you continue with the next allowed item.
-- Stay inside the workspace and the data folder; never delete, move or rename the data folder's existing files,
-  and change existing ones only as `research-integrity.mdc` ("File scope") allows (e.g. the trial log is only appended to). Commit on the branch `agent/research`.
-- Nicolas's instructions in the chat override this file, except the "Never" rules of `research-integrity.mdc`, which he
-  must change in the file himself.
+## Decisions that are Nicolas's
+
+Holdout evaluation, new data sources, protected-file changes, package changes, and any claim that a design beats
+buy-and-hold. Write the decision needed, the options and your recommendation, then continue with work you may do.

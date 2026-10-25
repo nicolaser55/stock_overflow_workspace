@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-# IMPORT EXPERIMENT CONFIGURATION
-from so import config
 # IMPORT MARKET DATETIME FUNCTIONS
 from so.core.datetime_utils import get_date_pdf
 # IMPORT DATA QUALITY FUNCTIONS

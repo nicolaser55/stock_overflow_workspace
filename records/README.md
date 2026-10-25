@@ -1,18 +1,14 @@
 # Records
 
-Research records that must be versioned even though they are CSV files (the root `.gitignore` excludes `*.csv` except in
-this folder and its sub-folders).
+Versioned CSV records (the root `.gitignore` excludes `*.csv` except in this folder). All files here are protected
+(`protected_paths.txt`): only the scripts named below write them, and only Nicolas runs those scripts.
 
-| File | Content | How to update |
+| File | Content | Written by |
 |---|---|---|
-| `bad_tick_corrections.csv` | The 62 raw cells corrected on 2026-10-04 by the bad tick rule (timestamp, column, old and new value, distance, file, row, threshold, run time, backup folder) | Appended by `scripts/fix_raw_bad_ticks.py --apply`, never by hand |
-| `bad_tick_invalidated_dates.csv` | The per-day files of the old steps 01-06 moved for regeneration after the correction (record of the targeted rebuild of 2026-10-04/05) | Final; never edited |
-| `trial_log_snapshot.csv` | Copy of `store04_experiments/trial_log.csv` (the multiple-testing record of the reorganized workspace) | After each working session on nicodesktop: copy, commit, push |
-| `legacy/trial_log_legacy_20261005.csv` | The previous trial log (4,089 entries, 2026-10-03 → 2026-10-05): v1, v2, step 13 | Copied once on 2026-10-05; never edited |
-| `legacy/audit_trials_20261005.csv` | The 1,584 validation entries of the audit's bad tick sensitivity check (`audit_bad_tick_sensitivity_v2`) | Final; never edited |
+| `holdout_windows.csv` | The registered holdout windows (start, end, status) | `scripts/holdout_window.py` (append; a retired row is filled once) |
+| `holdout_evaluations.csv` | One summary row per holdout evaluation (created by the first evaluation) | `scripts/holdout_evaluate.py` (append) |
+| `bad_tick_corrections.csv` | The 62 raw cells corrected on 2026-10-04 by the bad-tick rule | `scripts/fix_raw_bad_ticks.py --apply` (append) |
+| `bad_tick_invalidated_dates.csv` | The per-day pipeline files rebuilt after that correction | final, never edited |
 
-`archived_reproduction_expected.csv` and `archived_reproduction_20261012_1309.csv` were removed on 2026-10-16. The
-headline numbers stay in `docs/RESULTS_LOG.md`. The notebooks the checker read stay at tag `pre-port-20261012`.
-
-The trial logs are the multiple-testing record of the thesis (how many things were tried before a result was reported).
-Never edit or delete their rows.
+The trial log (the multiple-testing record) is `store04_experiments/trial_log.csv` in the data folder; it is only
+appended to, through `so.core.trial_log`.

@@ -13,6 +13,8 @@ from so.core.point_in_time import (get_declared_source_name_list, get_minute_bar
                                    load_source_frame_dict)
 from so.runner import run_development_dict
 from so.runner.verdict import REPORT_MD_FILE_STR, REPORT_JSON_FILE_STR
+sys.path.insert(1, str(Path(__file__).resolve().parent))
+from check_environment import check_environment_list, LOCK_PATH
 
 """
 Development Run (one experiment folder)
@@ -129,6 +131,12 @@ if __name__ == "__main__":
     parser.add_argument("--n-jobs", type=int, default=None, help="Candidate process count (default min(8, candidates))")
     parser.add_argument("--run-id", default=None, help="Resume key (default experiment name plus timestamp)")
     arg_dict = parser.parse_args()
+    # THE INSTALLED PACKAGES MUST MATCH THE LOCK (WITHOUT A LOCK: A WARNING)
+    difference_list = check_environment_list()
+    if difference_list is None:
+        print(f"warning: no package lock at {LOCK_PATH}; the run does not check package versions", flush=True)
+    elif difference_list:
+        raise SystemExit("installed packages differ from the lock:\n" + "\n".join(difference_list))
     # LOAD THE DESIGN, THE DEVELOPMENT BARS, AND THE DECLARED SOURCES THROUGH THE LAST SESSION
     design_module = load_design_module(arg_dict.design)
     if not hasattr(design_module, "get_candidate_design"):

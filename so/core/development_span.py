@@ -1,6 +1,3 @@
-import pandas as pd
-# IMPORT THE SHARED CONFIGURATION
-from so import config
 
 """
 Development Span (the bars a development notebook may replay)
@@ -44,26 +41,3 @@ def get_development_ohlcv_dict(embargo_sessions_in, ohlcv_pdf_in=None):
     return {"ohlcv_array_dict": cut_dict, "development_end": development_end, "window_start": window_start,
             "anchor_session_list": anchor_session_list, "last_price_date": price_session_list[-1]}
 
-# FUNCTION: DEVELOPMENT VALIDATION PERIODS ON THOSE BARS
-def get_development_period_pdf(anchor_session_list_in, ohlcv_array_dict_in, embargo_sessions_in, train_years_in):
-    """
-    Validation quarters anchored on the development end, made non-overlapping. There is no test window.
-
-    Args:
-        anchor_session_list_in (list): Sessions that include the holdout start
-        ohlcv_array_dict_in (dict): Bars through the development end
-        embargo_sessions_in (int): Embargo
-        train_years_in (int): Fold-schedule training length (not a model's rolling window)
-
-    Returns:
-        tuple: period_pdf, fold_pdf
-    """
-    # IMPORT THE SCHEDULE AND THE PERIOD BUILDER HERE
-    from so.core.schedule import get_development_fold_pdf
-    from so.core.continuous_replay import get_replay_period_pdf
-    # BUILD THE QUARTERS, THEN THE NON-OVERLAPPING PERIODS ON THE PRICE SESSIONS
-    fold_pdf = get_development_fold_pdf(anchor_session_list_in, int(embargo_sessions_in), [int(train_years_in)],
-                                       validation_window_months_in=config.VALIDATION_WINDOW_MONTHS,
-                                       step_months_in=config.WALK_FORWARD_STEP_MONTHS)
-    period_pdf = get_replay_period_pdf(fold_pdf, ohlcv_array_dict_in["session_date_list"])
-    return period_pdf, fold_pdf

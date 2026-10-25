@@ -1,7 +1,5 @@
 import pandas as pd
 import numpy as np
-# IMPORT EXPERIMENT CONFIGURATION
-from so import config
 # IMPORT TRANSFORM OHLCV DATA FUNCTIONS
 from so.features.ohlcv_data_utils import ohlcv_pdf_to_PA_tf_ohlcv_pdf_list, \
                                 get_or_create_date_PA_tf_ohlcv_pdf_list, \

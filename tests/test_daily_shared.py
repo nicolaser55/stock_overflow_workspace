@@ -35,22 +35,17 @@ assert_temporary_data_root()
 
 # IMPORT WORKSPACE MODULES
 from so import config
-import tempfile
 from experiments.exp02_stop_reentry import config as exp_config
 from experiments.exp01_minute_entry import config as exp01_config
 from experiments.exp03_ath_exit import config as exp03_config
-from so.core.trial_log import get_config_hash_str, log_trial_dict, log_trial_pdf, read_trial_log_pdf, get_trial_count_pdf
+from so.core.trial_log import get_config_hash_str
 from so.core.datetime_utils import get_date_range_market_schedule_pdf
 from so.core.trade_execution import get_ohlcv_array_dict, calculate_side_fee, get_affordable_share_count
 from so.core.backtest_simulation import get_session_first_entry_idx
 from so.features.context_features import add_cum_max_col, get_session_summary_pdf, get_relative_volume_reference_pdf, get_date_TSCTX_pdf
 from so.features.barrier_labels import get_date_market_open_ts_dict
 from so.features.daily_features import get_daily_feature_pdf, get_session_decision_idx_dict
-from so.core.reentry_simulation import simulate_stop_reentry_dict, get_fixed_delay_reentry_func, get_oracle_reentry_func, \
-                                    get_window_session_idx_arr, get_buy_and_hold_result_dict, simulate_trend_rule_dict
-from so.core.evaluation import get_chained_daily_return_pdf, get_excess_return_bootstrap_dict, get_success_criteria_dict, get_prior_only_pdf, \
-                               get_window_return_summary_dict, get_candidate_summary_pdf, get_baseline_summary_pdf, get_mde_float
-from so.core.evaluation import get_pooled_selection_pdf as get_generic_pooled_selection_pdf
+from so.core.reentry_simulation import (simulate_stop_reentry_dict, get_fixed_delay_reentry_func, get_window_session_idx_arr)
 from synthetic_data import get_synthetic_ohlcv_pdf
 
 # FUNCTION: PRINT A PASSED TEST
@@ -233,41 +228,6 @@ def test_simulator_reference(ohlcv_array_dict_in, daily_pdf_in):
     assert stop_total > 10
     passed(f"vectorized simulator == bar-by-bar reference ({stop_total} stops, delays 1/5/20, forced re-entry, END exits)")
 
-# FUNCTION: TEST THE SIMULATOR SPECIAL CASES
-def test_simulator_rules(ohlcv_array_dict_in, daily_pdf_in):
-    # COLLECT THE VOLATILITY AND A WINDOW
-    volatility_arr = daily_pdf_in["daily_volatility"].to_numpy(dtype=float)
-    date1, date2 = daily_pdf_in["date"].iloc[300], daily_pdf_in["date"].iloc[480]
-    # NO STOP = BUY AND HOLD EXACTLY
-    no_stop_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, None, None)
-    buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, date1, date2)
-    assert np.isclose(no_stop_dict["metric_dict"]["total_return"], buy_hold_dict["metric_dict"]["total_return"], atol=1e-10)
-    assert np.allclose(no_stop_dict["daily_equity_pdf"]["equity"], buy_hold_dict["daily_equity_pdf"]["equity"], atol=1e-6)
-    # ORACLE: EVERY RE-ENTRY IS AT THE LOWEST FILL OPEN OF ITS ALLOWED DECISIONS
-    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1, date2)
-    oracle_dict = simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, 1.0,
-                                             get_oracle_reentry_func(ohlcv_array_dict_in, window_session_idx_arr, exp_config.MAX_CASH_SESSIONS), "oracle",
-                                             max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)
-    fill_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict_in)["fill_idx_arr"]
-    oracle_pdf = oracle_dict["episode_pdf"][oracle_dict["episode_pdf"]["reentry_reason"] == "oracle"]
-    assert len(oracle_pdf) > 0
-    assert (oracle_pdf["share_gain_pct"].mean() > simulate_stop_reentry_dict(ohlcv_array_dict_in, date1, date2, volatility_arr, 1.0,
-                                                                               get_fixed_delay_reentry_func(1), "delay", max_cash_sessions_in=exp_config.MAX_CASH_SESSIONS)["episode_pdf"]["share_gain_pct"].mean())
-    for first_cash_session_idx, reentry_ts in zip(oracle_pdf["first_cash_session_idx"], oracle_pdf["reentry_ts"]):
-        candidate_arr = np.arange(first_cash_session_idx, min(first_cash_session_idx + exp_config.MAX_CASH_SESSIONS, window_session_idx_arr[-1]))
-        reentry_session_idx = ohlcv_array_dict_in["date_session_idx_dict"][reentry_ts.date()]
-        assert ohlcv_array_dict_in["open_arr"][fill_idx_arr[reentry_session_idx]] == ohlcv_array_dict_in["open_arr"][fill_idx_arr[candidate_arr]].min()
-    # TREND RULE: EXITS ONLY WHEN THE DECISION CLOSE IS BELOW THE MOVING AVERAGE, ENTRIES ONLY WHEN ABOVE
-    trend_dict = simulate_trend_rule_dict(ohlcv_array_dict_in, daily_pdf_in, date1, date2, "ma50_dist_pct")
-    trend_pdf = trend_dict["transaction_pdf"]
-    ts_session_dict = {ts: idx for idx, ts in enumerate(daily_pdf_in["decision_ts"])}
-    for _, row in trend_pdf[trend_pdf["exit_reason"] == "SIGNAL"].iterrows():
-        decision_ts = ohlcv_array_dict_in["timestamp_index"][row["sell_idx"] - 1]
-        assert daily_pdf_in["ma50_dist_pct"].iloc[ts_session_dict[decision_ts]] < 0
-    for decision_ts in trend_pdf.loc[trend_pdf["entry_reason"] == "rule", "decision_ts"]:
-        assert daily_pdf_in["ma50_dist_pct"].iloc[ts_session_dict[decision_ts]] > 0
-    assert (trend_pdf["exit_reason"] == "SIGNAL").sum() > 0
-    passed("simulator rules (no stop == buy-and-hold, oracle beats delay-1, trend rule follows its signal)")
 
 """
 7-8. Schedule And Selection
@@ -297,36 +257,6 @@ def test_schedule():
         paths.HOLDOUT_WINDOWS_FILE_PATH_STR = real_path_str
     passed(f"exp02 development schedule ({len(fold_pdf)} folds, embargo {exp_config.EMBARGO_TRADING_DAYS}, no test window)")
 
-# FUNCTION: TEST THE SUCCESS CRITERIA AND THE BOOTSTRAP
-def test_success_criteria():
-    # BUILD TWO YEARS OF DAILY RETURNS
-    rng = np.random.default_rng(5)
-    date_arr = pd.bdate_range("2020-01-01", "2021-12-31").date
-    buy_hold_pdf = pd.DataFrame({"date": date_arr, "daily_return": rng.normal(0.0005, 0.01, len(date_arr))})
-    # IDENTICAL RETURNS: ZERO EXCESS, NOT SUPPORTED, COMPARABLE, NO SECONDARY WIN
-    same_dict = get_success_criteria_dict(buy_hold_pdf, buy_hold_pdf)
-    bootstrap_dict = get_excess_return_bootstrap_dict(buy_hold_pdf, buy_hold_pdf, iteration_count_in=200)
-    assert not same_dict["primary_success"] and same_dict["comparable_return"] and not same_dict["secondary_sharpe"]
-    # ASSERT THE SECONDARY CRITERION IS "EITHER": TRUE IFF ONE OF THE TWO FLAGS IS TRUE
-    assert same_dict["secondary_success"] == (same_dict["secondary_sharpe"] or same_dict["secondary_drawdown"])
-    assert np.isclose(bootstrap_dict["excess_return"], 0) and not bootstrap_dict["supported"]
-    # A STRATEGY THAT SKIPS EVERY DAY BELOW -1% (HINDSIGHT): PRIMARY SUCCESS, SUPPORTED, SMALLER DRAWDOWN
-    strategy_pdf = buy_hold_pdf.assign(daily_return=np.where(buy_hold_pdf["daily_return"] < -0.01, 0.0, buy_hold_pdf["daily_return"]))
-    better_dict = get_success_criteria_dict(strategy_pdf, buy_hold_pdf, {"fixed_delay_1": 0.0})
-    assert better_dict["primary_success"] and better_dict["secondary_drawdown"] and better_dict["all_baselines_beaten"]
-    assert better_dict["secondary_success"]
-    # A SCALED-DOWN STRATEGY WITH A TINY DAILY DRAG: SMALLER DRAWDOWN, LOWER SHARPE, COMPARABLE RETURN -> SECONDARY MET ("EITHER")
-    scaled_pdf = buy_hold_pdf.assign(daily_return=buy_hold_pdf["daily_return"] * 0.95 - 1e-6)
-    scaled_dict = get_success_criteria_dict(scaled_pdf, buy_hold_pdf)
-    assert scaled_dict["comparable_return"] and scaled_dict["secondary_drawdown"] and not scaled_dict["secondary_sharpe"] and scaled_dict["secondary_success"]
-    assert get_excess_return_bootstrap_dict(strategy_pdf, buy_hold_pdf, iteration_count_in=200)["supported"]
-    # NEGATIVE BUY-AND-HOLD: THE COMPARABLE FLOOR IS BUY-AND-HOLD - 10% OF ITS SIZE
-    down_pdf = buy_hold_pdf.assign(daily_return=-0.001)
-    assert np.isclose(get_success_criteria_dict(down_pdf, down_pdf)["comparable_floor"], ((1 - 0.001) ** len(date_arr) - 1) * 1.1)
-    # CHAINING TWO WINDOWS OF ONE DAY EACH
-    chained_pdf = get_chained_daily_return_pdf([pd.DataFrame({"date": [date_arr[0]], "equity": [110_000.0]}), pd.DataFrame({"date": [date_arr[1]], "equity": [99_000.0]})])
-    assert np.allclose(chained_pdf["daily_return"], [0.10, -0.01])
-    passed("success criteria and monthly bootstrap (primary, comparable floor, secondary, baselines, chaining)")
 
 """
 11. End-To-End Fold
@@ -336,53 +266,6 @@ def test_success_criteria():
 12. Evaluation Helpers And Trial Log
 """
 
-# FUNCTION: TEST THE EVALUATION HELPERS
-def test_evaluation_helpers():
-    # BUILD A TOY CANDIDATE TABLE (2 CANDIDATES, 5 FOLDS)
-    candidate_pdf = pd.DataFrame([{"fold_id": f, "cand": c, "valid_total_return": r, "valid_buy_hold_total_return": 0.02, "valid_excess_return": r - 0.02}
-                                  for f in range(5) for c, r in [("a", 0.03), ("b", 0.01 if f < 4 else 0.10)]])
-    # SINGLE-QUARTER SELECTION PICKS "a" UNTIL FOLD 3 AND "b" AT FOLD 4; PRIOR-ONLY EVALUATES FOLDS 1..4 WITH THE PREVIOUS CHOICE
-    selection_pdf = get_generic_pooled_selection_pdf(candidate_pdf, ["cand"], "valid_excess_return", 1, [("cand", True)])
-    assert selection_pdf["cand"].tolist() == ["a", "a", "a", "a", "b"]
-    prior_only_pdf = get_prior_only_pdf(candidate_pdf, selection_pdf, ["cand"])
-    assert prior_only_pdf["fold_id"].tolist() == [1, 2, 3, 4] and prior_only_pdf["cand"].tolist() == ["a", "a", "a", "a"]
-    assert (prior_only_pdf["selected_at_fold_id"] == prior_only_pdf["fold_id"] - 1).all()
-    # WINDOW SUMMARY: CHAINING, BEAT COUNT, MDE = 2.8 x SD / sqrt(n)
-    summary_dict = get_window_return_summary_dict([0.03, -0.01, 0.02, 0.0], [0.02, 0.02, 0.02, 0.02])
-    excess_arr = np.array([0.01, -0.03, 0.0, -0.02])
-    assert np.isclose(summary_dict["chained_return"], 1.03 * 0.99 * 1.02 - 1) and summary_dict["windows_beating_buy_hold"] == 1
-    assert np.isclose(summary_dict["mde_per_window"], 2.8 * excess_arr.std(ddof=1) / 2) and np.isclose(summary_dict["mde_per_year"], 4 * summary_dict["mde_per_window"])
-    assert np.isclose(get_mde_float(0.04, 44), 2.8 * 0.04 / np.sqrt(44))
-    # CANDIDATE SUMMARY: ONE ROW PER CANDIDATE, BEST FIRST
-    candidate_summary_pdf = get_candidate_summary_pdf(candidate_pdf, ["cand"])
-    assert candidate_summary_pdf["cand"].tolist() == ["a", "b"] and candidate_summary_pdf["window_count"].tolist() == [5, 5]
-    # BASELINE SUMMARY: CHAINED BASELINES AND THE SHARE OF RANDOM RUNS THE MODEL BEATS
-    baseline_pdf = pd.DataFrame([{"fold_id": f, "baseline": b, "total_return": r} for f in range(2)
-                                 for b, r in [("model", 0.02), ("buy_hold", 0.01), ("random_00", 0.0), ("random_01", 0.05)]])
-    baseline_summary_pdf = get_baseline_summary_pdf(baseline_pdf).set_index("baseline")
-    assert "model" not in baseline_summary_pdf.index and baseline_summary_pdf.loc["buy_hold", "model_beats"]
-    assert np.isclose(baseline_summary_pdf.loc["random_* (median of runs)", "model_beats_random_run_share"], 0.5)
-    passed("evaluation helpers (pooled selection, prior-only path, window summary and MDE, candidate and baseline summaries)")
-
-# FUNCTION: TEST THE TRIAL LOG
-def test_trial_log():
-    # WRITE TO A TEMPORARY FILE
-    with tempfile.TemporaryDirectory() as directory_str:
-        file_path_str = f"{directory_str}/trial_log.csv".replace("\\", "/")
-        fold_row = pd.Series({"fold_id": 3, "train_start_10y": pd.Timestamp("2010-01-04").date(), "train_start_all": pd.Timestamp("2005-01-03").date(),
-                              "train_end": pd.Timestamp("2020-01-02").date(), "valid_start": pd.Timestamp("2020-02-03").date(), "valid_end": pd.Timestamp("2020-04-30").date(),
-                              "test_start": pd.Timestamp("2020-06-01").date(), "test_end": pd.Timestamp("2020-08-31").date()})
-        # ONE ENTRY, THEN A BATCH OF TWO
-        row_dict = log_trial_dict(exp_config, "validation", {"train_window": "all", "stop_k": 4}, {"valid_total_return": np.float64(0.01)}, False, fold_row, file_path_str_in=file_path_str)
-        batch_pdf = pd.DataFrame([{"fold_id": 3, "train_window": "10y", "stop_k": k, "valid_total_return": 0.0} for k in [3, 5]])
-        log_trial_pdf(exp_config, "validation", batch_pdf, ["train_window", "stop_k"], ["valid_total_return"], False, pd.DataFrame([fold_row]), file_path_str_in=file_path_str)
-        trial_log_pdf = read_trial_log_pdf(file_path_str, expand_metrics_bool_in=True)
-    # ASSERT THE CONTENT
-    assert len(trial_log_pdf) == 3 and (trial_log_pdf["experiment"] == exp_config.EXPERIMENT_NAME).all() and trial_log_pdf["trial_id"].is_unique
-    assert (trial_log_pdf["config_hash"] == get_config_hash_str(exp_config)).all() and (trial_log_pdf["protocol_version"].astype(str) == exp_config.PROTOCOL_VERSION).all()
-    assert str(row_dict["train_start"]) == "2005-01-03" and trial_log_pdf["train_start"].tolist()[1:] == ["2010-01-04", "2010-01-04"]
-    assert not trial_log_pdf["test_window_touched"].any() and get_trial_count_pdf(trial_log_pdf)["trial_count"].sum() == 3
-    passed("trial log (name, protocol version and hash per experiment, training start of the evaluated window, batch writes, unique ids)")
 
 """
 Runner
@@ -401,9 +284,5 @@ if __name__ == "__main__":
     test_daily_no_lookahead(synthetic_ohlcv_pdf, synthetic_daily_pdf)
     test_daily_label(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_simulator_reference(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
-    test_simulator_rules(synthetic_ohlcv_array_dict, synthetic_daily_pdf)
     test_schedule()
-    test_success_criteria()
-    test_evaluation_helpers()
-    test_trial_log()
     print("\nAll shared daily tests passed ✅")

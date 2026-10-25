@@ -22,7 +22,6 @@ An engine sees the fill or mark it is given and its own state only.
     open_window      buy initial_weight at the first 10:00 open
     apply_decision   rebalance / enter / flatten at the 15:59 fill (daily mode)
     process_bars     intra-session trailing stops or barrier exits (numba); no-op for fractional
-    process_bar      one-bar wrapper around process_bars
     close_session    mark cash + shares x session close
     close_window     sell everything at the last close
     get_state_dict   read-only snapshot for the view (in position, shares, last exit, cash sessions)
@@ -32,8 +31,8 @@ A fill event has bar_idx, timestamp, raw_price (the open, except END which is th
 decision_ts, session_idx and session_end_idx. A mark event has session_date and close. A bar-range event has
 bar_idx_arr, timestamp_index, open_arr, high_arr, low_arr, close_arr, session_date.
 
-Fractional weight matches so.core.fractional_exposure. BarrierEngine matches so.core.trade_execution and
-so.core.backtest_simulation.simulate_decision_trading_dict. TrailingStopEngine matches
+Fractional weight matches the old fractional simulator (tests/fractional_exposure_reference.py). BarrierEngine
+matches so.core.trade_execution and so.core.backtest_simulation.simulate_decision_trading_dict. TrailingStopEngine matches
 so.core.reentry_simulation.simulate_stop_reentry_dict. A float decision is target_weight. NaN or a missing
 weight means keep.
 """
@@ -118,7 +117,7 @@ def get_empty_engine_state_dict():
 # FUNCTION: ENGINE BASE (4B ENGINES SUBCLASS THIS)
 class Engine:
     """
-    Fills and marks. process_bar is a no-op so a 4b engine can override it without a 4a loop change.
+    Fills and marks.
     """
 
     # FUNCTION: START OF THE WINDOW
@@ -152,28 +151,6 @@ class Engine:
         # 4A ENGINES IMPLEMENT THIS
         raise NotImplementedError("apply_decision")
 
-    # FUNCTION: ONE BAR FOR WORKING STOPS (4B)
-    def process_bar(self, bar_event_dict_in):
-        """
-        One-bar wrapper around process_bars. Fractional ignores it.
-
-        Args:
-            bar_event_dict_in (dict): bar_idx, timestamp, open, high, low, close, session_date
-
-        Returns:
-            None
-        """
-        # BUILD A ONE-BAR RANGE AND DELEGATE
-        bar_idx = int(bar_event_dict_in["bar_idx"])
-        timestamp = bar_event_dict_in["timestamp"]
-        range_dict = {"bar_idx_arr": np.asarray([bar_idx], dtype=np.int64),
-                      "timestamp_index": [timestamp],
-                      "open_arr": np.asarray([float(bar_event_dict_in["open"])], dtype=np.float64),
-                      "high_arr": np.asarray([float(bar_event_dict_in["high"])], dtype=np.float64),
-                      "low_arr": np.asarray([float(bar_event_dict_in["low"])], dtype=np.float64),
-                      "close_arr": np.asarray([float(bar_event_dict_in["close"])], dtype=np.float64),
-                      "session_date": bar_event_dict_in.get("session_date")}
-        self.process_bars(range_dict)
 
     # FUNCTION: A RANGE OF BARS FOR WORKING STOPS (4B)
     def process_bars(self, bar_event_dict_in):
@@ -277,10 +254,10 @@ class Engine:
         raise NotImplementedError("get_result_dict")
 
 
-# FUNCTION: FRACTIONAL-WEIGHT ENGINE (SAME RULES AS so.core.fractional_exposure)
+# FUNCTION: FRACTIONAL-WEIGHT ENGINE (SAME RULES AS the old fractional simulator (tests/fractional_exposure_reference.py))
 class FractionalWeightEngine(Engine):
     """
-    Holds a fraction w in [0, 1] of equity in SPY. Rebalances only outside the dead band. process_bar is a no-op.
+    Holds a fraction w in [0, 1] of equity in SPY. Rebalances only outside the dead band.
     """
 
     # FUNCTION: STORE COSTS AND THE EMPTY ACCOUNT
@@ -306,7 +283,7 @@ class FractionalWeightEngine(Engine):
     # FUNCTION: MOVE TO A TARGET WEIGHT AT A BAR PRICE
     def _rebalance(self, fill_event_dict_in, target_weight_in, reason_str_in, weight_before_in):
         """
-        Same share-count and fee rules as so.core.fractional_exposure.
+        Same share-count and fee rules as the old fractional simulator (tests/fractional_exposure_reference.py).
 
         Args:
             fill_event_dict_in (dict): bar_idx, timestamp, raw_price
@@ -398,7 +375,7 @@ class FractionalWeightEngine(Engine):
         Returns:
             None
         """
-        # THE SAME MARK AS so.core.fractional_exposure
+        # THE SAME MARK AS the old fractional simulator (tests/fractional_exposure_reference.py)
         close_price = float(mark_event_dict_in["close"])
         equity = self.cash_float + self.share_count_int * close_price
         self.equity_dict_list.append({"date": mark_event_dict_in["session_date"], "equity": round(equity, 6),
@@ -449,7 +426,7 @@ class FractionalWeightEngine(Engine):
         Returns:
             dict: trade_pdf, daily_equity_pdf, metric_dict
         """
-        # THE SAME METRIC KEYS AS so.core.fractional_exposure
+        # THE SAME METRIC KEYS AS the old fractional simulator (tests/fractional_exposure_reference.py)
         trade_pdf, daily_equity_pdf = pd.DataFrame(self.trade_dict_list), pd.DataFrame(self.equity_dict_list)
         if daily_equity_pdf.empty:
             return {"trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": {}}

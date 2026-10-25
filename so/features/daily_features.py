@@ -193,22 +193,3 @@ def get_daily_feature_pdf(ohlcv_array_dict_in, label_horizon_in=config.LABEL_HOR
     # RETURN THE DATAFRAME
     return daily_pdf
 
-# FUNCTION: GET THE TRAINING ROWS OF A DATE WINDOW
-def get_daily_train_pdf(daily_pdf_in, date1_in, date2_in, feature_col_str_list_in=config.DAILY_FEATURE_COL_STR_LIST):
-    """
-    Returns the rows of a date window that have a resolved label and every feature (rows with missing values are dropped).
-
-    Args:
-        daily_pdf_in (pd.DataFrame): Output of get_daily_feature_pdf
-        date1_in, date2_in (datetime.date | str): Window bounds (inclusive)
-        feature_col_str_list_in (list[str]): Model features
-
-    Returns:
-        pd.DataFrame: Usable training rows
-    """
-    # CONVERT THE BOUNDS
-    date1_object, date2_object = pd.to_datetime(date1_in).date(), pd.to_datetime(date2_in).date()
-    # SELECT THE WINDOW
-    window_pdf = daily_pdf_in[(daily_pdf_in["date"] >= date1_object) & (daily_pdf_in["date"] <= date2_object)]
-    # RETURN THE COMPLETE ROWS
-    return window_pdf.dropna(subset=list(feature_col_str_list_in) + ["y_fwd_positive"])

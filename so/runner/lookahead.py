@@ -174,7 +174,7 @@ def get_lookahead_perturbed_context(data_context_in, ohlcv_array_dict_in, cut_da
             perturbed_pdf["available_ts"] = original_available_series
         child_dict[source_name_str] = perturbed_pdf
     child_dict["SPY_1MIN"] = get_spy_frame_pdf(perturbed_ohlcv_dict_in)
-    return DataContext(data_context_in.mode_str, data_context_in.as_of_limit_ts, None, child_dict,
+    return DataContext(data_context_in.mode_str, data_context_in.as_of_limit_ts, child_dict,
                        data_context_in.access_sink_list, data_context_in.declared_name_list)
 
 

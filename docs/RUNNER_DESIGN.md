@@ -1,4 +1,4 @@
-# Point-in-time runner: design (2026-10-20, updated 2026-10-22)
+# Point-in-time runner: design (2026-10-20, updated 2026-10-25)
 
 *Written by the assistant for infrastructure step 4 (audit S7 raised to a blocker by Nicolas on 2026-10-19; also S1,
 S2, S3, S6, S9, B6). Agreed by Nicolas on 2026-10-21, with the minute mode, the single holdout path and the extra
@@ -22,7 +22,7 @@ Engines, each ported from the existing simulator and required to reproduce it ex
 
 | Engine | Ported from | First user | Status |
 |---|---|---|---|
-| Fractional weight (costs, dead band, integer shares) | `so.core.fractional_exposure` | exp04-exp07 | 4a |
+| Fractional weight (costs, dead band, integer shares) | the old fractional simulator (now `tests/fractional_exposure_reference.py`, parity tests only) | exp05 | 4a |
 | Barrier trades (take-profit, stop-loss, time exit) | `so.core.trade_execution`, `so.core.backtest_simulation` | exp01 | 4b-2a daily, 4b-2b minute (`BarrierEngine`) |
 | Trailing stop and re-entry | `so.core.reentry_simulation` | exp02 | 4b-2a (`TrailingStopEngine`; daily mode with a minute-checked stop) |
 
@@ -136,12 +136,12 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 Nicolas's holdout evaluation calls the same runner function with the quarantine root and the evaluation token. The run
 starts at the development start (warm-up, models, selection history and position carried through), and only the
 holdout sessions are reported. The report's result on the never-read part of the window (after 2026-04-15) is labelled
-a sanity check: about 80 sessions are too few to pass or fail a design. The separate replay path in `so.core.holdout`
-is retired once the runner is calibrated, so the development result and the holdout result always come from one code
-path.
+a sanity check: about 80 sessions are too few to pass or fail a design.
 
-Implemented 2026-10-21 on `agent/infra-04b1d-holdout`: `so.runner.run_holdout_dict`. `scripts/holdout_evaluate.py`
-uses it when the design has `get_candidate_design`, and keeps the old replay for designs not yet ported.
+Implemented 2026-10-21: `so.runner.run_holdout_dict`. The old replay path in `so.core.holdout`
+(`run_holdout_evaluation`, `get_prior_only_result_dict`) was deleted on 2026-10-25 (drop 4):
+`scripts/holdout_evaluate.py` evaluates runner designs only, so the development result and the holdout result always
+come from one code path.
 
 ## What a new experiment writes
 

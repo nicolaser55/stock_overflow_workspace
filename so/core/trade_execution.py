@@ -410,44 +410,6 @@ def get_net_return_arr(entry_price_arr_in, exit_price_arr_in, exit_reason_arr_in
     # RETURN THE NET RETURN
     return (exit_fill_arr - entry_fill_arr - 2 * fee_per_share_in) / entry_fill_arr
 
-# FUNCTION: GET THE BREAKEVEN TAKE PROFIT RATE
-def get_breakeven_tp_rate_arr(entry_price_arr_in, delta_float_in, rr_ratio_float_in=config.RR_RATIO,
-                              entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
-                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
-                              limit_exit_slippage_in=config.LIMIT_EXIT_SLIPPAGE_PER_SHARE,
-                              fee_per_share_in=config.FEE_PER_SHARE_PER_SIDE):
-    """
-    Calculates the take profit rate needed to break even after costs, assuming exits fill exactly at the barriers.
-
-    win  = (TP - limit_slippage) - (entry + entry_slippage) - 2 * fee
-    loss = (entry + entry_slippage) - (SL - market_slippage) + 2 * fee
-    breakeven TP rate = loss / (win + loss)    (1.0 if a win cannot cover its costs)
-
-    Note: gaps through the stop loss make real losses larger, and time limit exits are ignored, so this is an optimistic
-    (lower) breakeven.
-
-    Args:
-        entry_price_arr_in (array-like): Entry prices
-        delta_float_in (float): Take profit distance as a fraction of the entry price
-        rr_ratio_float_in (float): Stop loss distance / take profit distance
-        entry_slippage_in, market_exit_slippage_in, limit_exit_slippage_in (float): Slippage per share
-        fee_per_share_in (float): Fee per share per side
-
-    Returns:
-        np.ndarray: Breakeven take profit rate per entry price
-    """
-    # CONVERT THE ENTRY PRICES TO AN ARRAY
-    entry_price_arr = np.atleast_1d(np.asarray(entry_price_arr_in, dtype=float))
-    # CALCULATE THE BARRIER PRICES
-    take_profit_arr = np.round(entry_price_arr * (1 + delta_float_in), config.SLTP_PRICE_DECIMALS)
-    stop_loss_arr = np.round(entry_price_arr * (1 - delta_float_in * rr_ratio_float_in), config.SLTP_PRICE_DECIMALS)
-    # CALCULATE THE ENTRY FILL PRICE
-    entry_fill_arr = entry_price_arr + entry_slippage_in
-    # CALCULATE THE WIN AND LOSS PER SHARE
-    win_arr = (take_profit_arr - limit_exit_slippage_in) - entry_fill_arr - 2 * fee_per_share_in
-    loss_arr = entry_fill_arr - (stop_loss_arr - market_exit_slippage_in) + 2 * fee_per_share_in
-    # RETURN THE BREAKEVEN RATE (1.0 WHEN A WIN CANNOT COVER ITS COSTS)
-    return np.where(win_arr > 0, loss_arr / (win_arr + loss_arr), 1.0)
 
 # FUNCTION: GET THE EXPECTED NET RETURN OF A TAKE PROFIT PROBABILITY
 def get_expected_net_return_arr(tp_proba_arr_in, price_arr_in, delta_float_in, rr_ratio_float_in=config.RR_RATIO,

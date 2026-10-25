@@ -43,8 +43,7 @@ from so import config, paths
 from so.core.trade_execution import get_ohlcv_array_dict, get_ts_bar_idx_arr
 from so.core.backtest_simulation import (simulate_decision_trading_dict, get_daily_equity_pdf,
                                          get_session_first_entry_idx)
-from so.core.reentry_simulation import (simulate_stop_reentry_dict, get_fixed_delay_reentry_func,
-                                        get_window_session_idx_arr)
+from so.core.reentry_simulation import (simulate_stop_reentry_dict, get_fixed_delay_reentry_func)
 from so.features.daily_features import get_session_decision_idx_dict
 from so.runner import (run_daily_dict, run_development_dict, TrailingStopEngine, BarrierEngine, get_decision_dict,
                        LOOK_AHEAD_PASS_STR)

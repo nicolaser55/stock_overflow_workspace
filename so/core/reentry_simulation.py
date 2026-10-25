@@ -41,20 +41,6 @@ model, fixed delay, random and oracle rules (get_*_reentry_func).
 Re-entry Rule Builders
 """
 
-# FUNCTION: GET THE MODEL RE-ENTRY RULE
-def get_model_reentry_func(proba_arr_in, threshold_float_in):
-    """
-    Re-enters when the model probability of the session is at or above the threshold (NaN never re-enters).
-
-    Args:
-        proba_arr_in (np.ndarray): P(positive forward return) per session position (NaN where unavailable)
-        threshold_float_in (float): Re-entry threshold p*
-
-    Returns:
-        function: Re-entry rule
-    """
-    # RETURN THE RULE
-    return lambda session_idx, cash_session_count, episode_dict: bool(proba_arr_in[session_idx] >= threshold_float_in)
 
 # FUNCTION: GET THE FIXED-DELAY RE-ENTRY RULE
 def get_fixed_delay_reentry_func(delay_session_count_in):
@@ -70,57 +56,6 @@ def get_fixed_delay_reentry_func(delay_session_count_in):
     # RETURN THE RULE
     return lambda session_idx, cash_session_count, episode_dict: cash_session_count >= delay_session_count_in
 
-# FUNCTION: GET THE RANDOM RE-ENTRY RULE
-def get_random_reentry_func(daily_probability_in, seed_in=config.RANDOM_SEED):
-    """
-    Re-enters at each cash decision with a fixed probability (mean time in cash about 1 / probability decisions).
-
-    Args:
-        daily_probability_in (float): Re-entry probability per cash decision
-        seed_in (int): Random seed
-
-    Returns:
-        function: Re-entry rule
-    """
-    # CREATE THE RANDOM GENERATOR
-    rng = np.random.default_rng(seed_in)
-    # RETURN THE RULE
-    return lambda session_idx, cash_session_count, episode_dict: bool(rng.random() < daily_probability_in)
-
-# FUNCTION: GET THE ORACLE RE-ENTRY RULE (UPPER BOUND, USES FUTURE PRICES; MECHANISM CHECK ONLY)
-def get_oracle_reentry_func(ohlcv_array_dict_in, window_session_idx_arr_in, max_cash_sessions_in):
-    """
-    Re-enters at the cash decision whose fill price (15:59 open) is the LOWEST of the decisions allowed before the forced
-    re-entry. It looks into the future, so it is only an upper bound of what re-entry timing could add (step 10).
-
-    Args:
-        ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict
-        window_session_idx_arr_in (np.ndarray): Session positions of the window (the last one never re-enters)
-        max_cash_sessions_in (int): Forced re-entry after this many cash decisions
-
-    Returns:
-        function: Re-entry rule
-    """
-    # COLLECT THE FILL BARS
-    fill_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict_in)["fill_idx_arr"]
-    # DEFINE THE LAST SESSION THAT ALLOWS AN ENTRY
-    last_entry_session_idx = int(window_session_idx_arr_in[-1]) - 1
-    # DICTIONARY OF THE TARGET SESSION PER EPISODE
-    target_dict = {}
-    # FUNCTION: THE RULE
-    def oracle_func(session_idx, cash_session_count, episode_dict):
-        # DEFINE THE EPISODE KEY (FIRST CASH DECISION SESSION)
-        episode_key = episode_dict["first_cash_session_idx"]
-        # IF THE TARGET IS NOT KNOWN YET
-        if episode_key not in target_dict:
-            # COLLECT THE CANDIDATE SESSIONS (FIRST CASH DECISION .. FORCED RE-ENTRY, INSIDE THE WINDOW)
-            candidate_arr = np.arange(episode_key, min(episode_key + max_cash_sessions_in, last_entry_session_idx + 1))
-            # STORE THE SESSION WITH THE LOWEST FILL OPEN
-            target_dict[episode_key] = int(candidate_arr[np.argmin(ohlcv_array_dict_in["open_arr"][fill_idx_arr[candidate_arr]])]) if len(candidate_arr) else -1
-        # RETURN TRUE ON THE TARGET SESSION
-        return session_idx == target_dict[episode_key]
-    # RETURN THE RULE
-    return oracle_func
 
 """
 Simulator
@@ -433,73 +368,9 @@ def get_buy_and_hold_result_dict(ohlcv_array_dict_in, date1_in, date2_in, initia
                             "max_drawdown": get_max_drawdown(daily_equity_pdf, initial_capital_in),
                             "final_equity": round(final_equity, 6)}}
 
-# FUNCTION: SIMULATE THE TEXTBOOK TREND RULE (200-SESSION MOVING AVERAGE, NO STOP)
-def simulate_trend_rule_dict(ohlcv_array_dict_in, daily_pdf_in, date1_in, date2_in, ma_col_str_in="ma200_dist_pct", **simulation_kwargs):
-    """
-    Invested while the decision close is above the moving average, in cash while it is below (decisions at 15:58, fills at
-    the 15:59 open). Starts invested like every other strategy. No stop and no forced re-entry.
-
-    Args:
-        ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict
-        daily_pdf_in (pd.DataFrame): Output of daily_features.get_daily_feature_pdf (indexed by session position)
-        date1_in, date2_in (datetime.date | str): Window bounds (inclusive)
-        ma_col_str_in (str): Moving average distance column
-        **simulation_kwargs: Cost overrides for simulate_stop_reentry_dict
-
-    Returns:
-        dict: Output of simulate_stop_reentry_dict
-    """
-    # COLLECT THE MOVING AVERAGE DISTANCE (NaN = NO SIGNAL EITHER WAY)
-    ma_dist_arr = daily_pdf_in[ma_col_str_in].to_numpy(dtype=float)
-    above_arr, below_arr = np.nan_to_num(ma_dist_arr, nan=0.0) > 0, np.nan_to_num(ma_dist_arr, nan=0.0) < 0
-    # RETURN THE SIMULATION
-    return simulate_stop_reentry_dict(ohlcv_array_dict_in, date1_in, date2_in, np.full(len(ma_dist_arr), np.nan), stop_k_in=None,
-                                      reentry_func_in=lambda session_idx, cash_session_count, episode_dict: bool(above_arr[session_idx]),
-                                      reentry_reason_str_in="rule", exit_signal_arr_in=below_arr, max_cash_sessions_in=None, **simulation_kwargs)
 
 """
 Mechanism Diagnostics
 """
 
-# FUNCTION: GET THE PRICE PATH AFTER EVERY EXIT (SHARE GAIN IF RE-ENTERED AT THE n-TH CASH DECISION)
-def get_post_exit_path_pdf(ohlcv_array_dict_in, episode_pdf_in, max_cash_sessions_in,
-                           entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE):
-    """
-    For every exit, calculates the share gain that re-entering at the n-th cash decision WOULD have produced, for
-    n = 1 .. max_cash_sessions_in (whatever the episode actually did). Averaged over exits, the curve shows whether prices
-    keep falling after a stop (waiting pays, information has something to find) or rebound (re-entering fast is best).
-
-    Args:
-        ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict
-        episode_pdf_in (pd.DataFrame): episode_pdf of a simulation (exit_fill_price, first_cash_session_idx)
-        max_cash_sessions_in (int): Longest delay considered
-        entry_slippage_in (float): Dollars per share added to the hypothetical re-entry
-
-    Returns:
-        pd.DataFrame: episode_id, exit_ts, cash_decision_count (n), reentry_fill_price, share_gain_pct, log_share_gain
-
-    Average log_share_gain, not share_gain_pct: the mean of S / R - 1 is biased upwards by the randomness of R alone
-    (Jensen's inequality: even on a driftless random walk it grows with n), the mean of log(S / R) is not.
-    """
-    # COLLECT THE FILL BARS AND THE SESSION COUNT
-    fill_idx_arr = get_session_decision_idx_dict(ohlcv_array_dict_in)["fill_idx_arr"]
-    session_count = len(ohlcv_array_dict_in["session_date_list"])
-    # LIST TO HOLD THE ROWS
-    row_dict_list = []
-    # ITERATE OVER THE EPISODES WITH A FIRST CASH DECISION
-    for episode_id, episode_row in episode_pdf_in.dropna(subset=["first_cash_session_idx"]).iterrows():
-        # ITERATE OVER THE DELAYS
-        for cash_decision_count in range(1, max_cash_sessions_in + 1):
-            # COLLECT THE SESSION OF THE n-TH CASH DECISION
-            session_idx = int(episode_row["first_cash_session_idx"]) + cash_decision_count - 1
-            # STOP AT THE END OF THE DATA
-            if session_idx >= session_count:
-                break
-            # CALCULATE THE HYPOTHETICAL RE-ENTRY
-            reentry_fill_price = ohlcv_array_dict_in["open_arr"][fill_idx_arr[session_idx]] + entry_slippage_in
-            row_dict_list.append({"episode_id": episode_id, "exit_ts": episode_row["exit_ts"], "cash_decision_count": cash_decision_count,
-                                  "reentry_fill_price": reentry_fill_price, "share_gain_pct": episode_row["exit_fill_price"] / reentry_fill_price - 1,
-                                  "log_share_gain": float(np.log(episode_row["exit_fill_price"] / reentry_fill_price))})
-    # RETURN THE DATAFRAME
-    return pd.DataFrame(row_dict_list)
 
