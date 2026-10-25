@@ -37,8 +37,9 @@ scripts/holdout_evaluate.py, run by Nicolas, may read the window, and it reads t
 (SO_QUARANTINE_PATH), not from the development view. Development code stops at get_development_end_date (the session
 an embargo before the window start) and reads only SO_DATA_PATH.
 
-records/holdout_windows.csv and records/holdout_evaluations.csv are versioned (dates and summary metrics are not
-secret). Daily paths are written only under SO_HOLDOUT_PATH, which has no default.
+records/holdout_windows.csv (window dates) is versioned. Every holdout result (the evaluation ledger
+holdout_evaluations.csv, daily paths, run folders) is written only under SO_HOLDOUT_PATH, which has no default and which
+the agent account cannot read: an agent that saw holdout outcomes could steer new designs toward them.
 """
 
 # DEFINE THE REGISTRY COLUMNS
@@ -510,8 +511,10 @@ def read_holdout_evaluation_pdf(file_path_str_in=None):
     Returns:
         pd.DataFrame: One row per evaluation
     """
-    # RETURN AN EMPTY TABLE WHEN THE FILE DOES NOT EXIST
+    # THE LEDGER EXISTS ONLY UNDER SO_HOLDOUT_PATH; A MISSING FILE IS AN EMPTY TABLE
     file_path_str = file_path_str_in or paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR
+    if not file_path_str:
+        raise ValueError("❌ SO_HOLDOUT_PATH must be set to read the evaluation ledger.")
     if not os.path.isfile(file_path_str):
         return pd.DataFrame(columns=EVALUATION_COLUMN_LIST)
     # RETURN THE LEDGER
@@ -1070,6 +1073,8 @@ def append_holdout_evaluation_dict(row_dict_in, file_path_str_in=None):
     """
     # APPEND THE ROW UNDER THE EXCLUSIVE LOCK (A MISSING COLUMN IS LEFT EMPTY, AS IN THE LEDGER SCHEMA)
     file_path_str = file_path_str_in or paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR
+    if not file_path_str:
+        raise ValueError("❌ SO_HOLDOUT_PATH must be set to write the evaluation ledger.")
     row_pdf = pd.DataFrame([row_dict_in], columns=EVALUATION_COLUMN_LIST)
     append_csv_record_pdf(row_pdf, file_path_str, EVALUATION_COLUMN_LIST)
 

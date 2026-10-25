@@ -18,8 +18,9 @@ Holdout Evaluation (Nicolas only)
 
 Only Nicolas may run this script. Agents must not (research-integrity.mdc, rule 1). It evaluates one frozen design
 once on the active holdout window. Bars and declared sources are read from the quarantine root (SO_QUARANTINE_PATH),
-not from the development view. Daily paths go under SO_HOLDOUT_PATH. One summary row is appended to
-records/holdout_evaluations.csv and one trial-log row (stage "test") is appended to the shared trial log.
+not from the development view. Every result goes under SO_HOLDOUT_PATH: the run folder, the daily paths and one summary
+row in holdout_evaluations.csv (the ledger). The shared trial log gets one stage "test" row with no metrics, so the
+evaluation is counted without showing its outcome to agents.
 
 The design is evaluated through the runner (run_holdout_dict), the same code path as its development run. A design
 without get_candidate_design is refused.

@@ -286,6 +286,8 @@ def test_holdout_matches_development_decisions():
         assert len(trial_pdf) == 1
         assert str(trial_pdf["stage"].iloc[0]) == "test"
         assert "holdout evaluation" in str(trial_pdf["note"].iloc[0])
+        # THE SHARED TRIAL LOG CARRIES NO HOLDOUT NUMBER (AGENTS READ IT)
+        assert json.loads(str(trial_pdf["metric_json"].iloc[0])) == {}, trial_pdf["metric_json"].iloc[0]
         assert holdout_dict["ledger_row_dict"]["status"] == "valid"
         called_list = []
         import so.runner.run as run_mod

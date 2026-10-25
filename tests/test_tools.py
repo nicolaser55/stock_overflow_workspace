@@ -1,5 +1,5 @@
 """
-Workspace Tests: operation tools (run queue, state, email, protected paths, package lock)
+Workspace Tests: operation tools (run queue, state, email, protected paths, package lock, ledger location)
 
 Run from the workspace root:   python tests/test_tools.py   (or python tests/run_all_tests.py)
 (Plain asserts, no test framework required.)
@@ -14,6 +14,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+# NO REAL HOLDOUT SETTING REACHES THIS SUITE
+for _name_str in ["SO_QUARANTINE_PATH", "SO_HOLDOUT_PATH", "SO_HOLDOUT_EVALUATION_TOKEN"]:
+    os.environ.pop(_name_str, None)
 # A TEMPORARY DATA ROOT WHEN THE CALLER DID NOT SET ONE
 if not os.environ.get("SO_DATA_PATH", "").strip():
     os.environ["SO_DATA_PATH"] = tempfile.mkdtemp(prefix="so_tools_")
@@ -234,10 +237,34 @@ def test_environment_lock():
     passed("package lock (missing and different versions reported, extras ignored)")
 
 
+# FUNCTION: TEST THAT HOLDOUT RESULTS STAY OUT OF THE REPOSITORY
+def test_ledger_outside_repository():
+    """
+    Without SO_HOLDOUT_PATH there is no evaluation ledger path, and reading or writing it raises. records/ holds no
+    ledger.
+
+    Returns:
+        None
+    """
+    # THIS SUITE NEVER SETS SO_HOLDOUT_PATH
+    from so import paths
+    from so.core.holdout import read_holdout_evaluation_pdf, append_holdout_evaluation_dict
+    assert not os.environ.get("SO_HOLDOUT_PATH") and paths.HOLDOUT_EVALUATIONS_FILE_PATH_STR is None
+    for call_func in (lambda: read_holdout_evaluation_pdf(), lambda: append_holdout_evaluation_dict({"status": "valid"})):
+        try:
+            call_func()
+            raise AssertionError("the ledger was reached without SO_HOLDOUT_PATH")
+        except ValueError as error:
+            assert "SO_HOLDOUT_PATH" in str(error)
+    assert not os.path.exists(os.path.join(WORKSPACE_PATH_STR, "records", "holdout_evaluations.csv"))
+    passed("holdout ledger only under SO_HOLDOUT_PATH (none in records/, unreachable without the variable)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
     test_email_outbox_and_smtp()
     test_protected_paths()
     test_environment_lock()
+    test_ledger_outside_repository()
     print("\nAll tool tests passed ✅")

@@ -1079,10 +1079,11 @@ def run_holdout_dict(design_module_in, design_id_str_in, ohlcv_array_dict_in, to
     row_dict["status"] = "valid"
     row_dict.update(ledger_fields_dict)
     append_holdout_evaluation_dict(row_dict, ledger_path_str_in)
+    # THE SHARED TRIAL LOG COUNTS THE EVALUATION BUT CARRIES NO HOLDOUT NUMBER (AGENTS READ IT; THE LEDGER HAS THEM)
     log_trial_dict(design_module_in, "test", {"design_id": design_id_str_in, "design_hash": precondition_dict["design_hash_str"]},
-                   {key_str: row_dict[key_str] for key_str in ["total_return", "buy_hold_total_return", "annualized_log_excess", "primary_pass"]},
-                   True, fold_row_in={"test_start": reported_start, "test_end": reported_end},
-                   note_str_in="holdout evaluation", file_path_str_in=trial_log_path_str, alert_in=False)
+                   {}, True, fold_row_in={"test_start": reported_start, "test_end": reported_end},
+                   note_str_in="holdout evaluation (results in the ledger under SO_HOLDOUT_PATH)",
+                   file_path_str_in=trial_log_path_str, alert_in=False)
     finish_dict["manifest_dict"]["ledger_row"] = get_json_value(row_dict)
     finish_dict["manifest_dict"]["window_id"] = window_dict["window_id"]
     finish_dict["manifest_dict"]["quarantine_stamp"] = quarantine_stamp_dict
