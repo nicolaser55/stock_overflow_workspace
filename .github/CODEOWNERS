@@ -16,6 +16,7 @@
 /so/core/local_file_management.py @nicolaser55
 /so/core/trial_log.py @nicolaser55
 /so/core/csv_append.py @nicolaser55
+/so/core/multiple_testing.py @nicolaser55
 /so/features/vix_features.py @nicolaser55
 /so/__init__.py @nicolaser55
 /so/core/__init__.py @nicolaser55

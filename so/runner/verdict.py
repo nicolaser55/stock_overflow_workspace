@@ -7,6 +7,8 @@ from so import config, paths
 # IMPORT THE SUCCESS CRITERIA AND THE ROLLING MONTH WINDOWS
 from so.core.evaluation import (get_chained_daily_return_pdf, get_success_criteria_dict, get_rolling_month_window_pdf,
                                 get_report_float_str)
+# IMPORT THE MULTIPLE-TESTING PART
+from so.core.multiple_testing import get_multiple_testing_verdict_dict
 
 """
 Runner Verdict, Report And Manifest (infrastructure step 4b-1b)
@@ -16,11 +18,17 @@ One shared function, applied to the prior-only path:
     return       total return >= buy-and-hold passes; between 90% and 100% of buy-and-hold passes only with a
                  smaller max drawdown or a higher Sharpe; below 90% fails. Numbers come from
                  so.core.evaluation.get_success_criteria_dict (comparable floor, Sharpe, drawdown).
-    consistency  ahead of buy-and-hold on at least 60% of rolling 12-month windows, stepped monthly.
+    consistency  ahead of buy-and-hold on at least 60% of the decisive rolling 12-month windows, stepped monthly. A
+                 window within +/- RUNNER_CONSISTENCY_TIE_TOLERANCE of buy-and-hold is a tie and is not counted;
+                 fewer than RUNNER_CONSISTENCY_MIN_DECISIVE_WINDOWS decisive windows fails (audit S1, 2026-10-25: a
+                 design invested like buy-and-hold in most windows lost every tied window under the old rule).
     baselines    total return strictly above the constant-exposure baseline and above at least 95% of the random
                  draws.
     look-ahead   "pass" or "fail" from the automatic truncation and perturbation check (4b-1c). "pending" is not a
                  pass (only used when that check is skipped).
+    multiple testing  the deflated Sharpe ratio of quarterly excess returns and a Bonferroni random-timing test, both
+                 scaled by N, the number of designs tried on the development data (so.core.multiple_testing; audit
+                 B5, 2026-10-25).
 
 The verdict is "email-worthy" only if every part passes. look-ahead "pending" is not a pass. Otherwise
 "not email-worthy", listing what failed.
@@ -163,30 +171,43 @@ def get_return_verdict_dict(success_dict_in):
 
 
 # FUNCTION: THE CONSISTENCY PART OF THE VERDICT
-def get_consistency_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in,
-                                 window_months_in=None, step_months_in=None, min_share_in=None):
+def get_consistency_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, window_months_in=None, step_months_in=None,
+                                 min_share_in=None, tie_tolerance_in=None, min_decisive_in=None):
     """
-    Ahead of buy-and-hold on at least 60% of rolling 12-month windows, stepped monthly. Zero windows fail.
+    Ahead of buy-and-hold on at least 60% of the decisive rolling 12-month windows, stepped monthly. A window whose
+    excess return is within the tie band is not counted. Too few decisive windows fail.
 
     Args:
         strategy_return_pdf_in, buy_hold_return_pdf_in (pd.DataFrame): date, daily_return
         window_months_in, step_months_in (int | None): Window and step (None = config)
-        min_share_in (float | None): Required share (None = config)
+        min_share_in (float | None): Required share of decisive windows (None = config)
+        tie_tolerance_in (float | None): Tie band on the absolute excess return (None = config)
+        min_decisive_in (int | None): Minimum decisive windows (None = config)
 
     Returns:
-        dict: pass_bool, window_count, ahead_count, ahead_share, min_share, window_pdf
+        dict: pass_bool, window_count, tie_count, decisive_count, ahead_count, ahead_share, min_share, window_pdf
     """
-    # THE SHARED ROLLING-MONTH TABLE
+    # THE SHARED ROLLING-MONTH TABLE, THEN THE TIE BAND
     window_int = int(config.RUNNER_CONSISTENCY_WINDOW_MONTHS if window_months_in is None else window_months_in)
     step_int = int(config.RUNNER_CONSISTENCY_STEP_MONTHS if step_months_in is None else step_months_in)
     min_share = float(config.RUNNER_CONSISTENCY_MIN_SHARE if min_share_in is None else min_share_in)
+    tie_float = float(config.RUNNER_CONSISTENCY_TIE_TOLERANCE if tie_tolerance_in is None else tie_tolerance_in)
+    min_decisive_int = int(config.RUNNER_CONSISTENCY_MIN_DECISIVE_WINDOWS if min_decisive_in is None else min_decisive_in)
     window_pdf = get_rolling_month_window_pdf(strategy_return_pdf_in, buy_hold_return_pdf_in, window_int, step_int)
     window_count = int(len(window_pdf))
-    ahead_count = int(window_pdf["ahead_bool"].sum()) if window_count else 0
-    ahead_share = float(ahead_count / window_count) if window_count else float("nan")
-    pass_bool = bool(window_count > 0 and ahead_share >= min_share)
-    return {"pass_bool": pass_bool, "window_count": window_count, "ahead_count": ahead_count,
-            "ahead_share": ahead_share, "min_share": min_share, "window_months": window_int, "step_months": step_int,
+    if window_count:
+        window_pdf = window_pdf.copy()
+        window_pdf["tie_bool"] = window_pdf["excess_return"].abs() <= tie_float
+    tie_count = int(window_pdf["tie_bool"].sum()) if window_count else 0
+    decisive_count = window_count - tie_count
+    ahead_count = int((window_pdf["ahead_bool"] & ~window_pdf["tie_bool"]).sum()) if window_count else 0
+    ahead_share = float(ahead_count / decisive_count) if decisive_count else float("nan")
+    enough_bool = decisive_count >= max(1, min_decisive_int)
+    pass_bool = bool(enough_bool and ahead_share >= min_share)
+    return {"pass_bool": pass_bool, "window_count": window_count, "tie_count": tie_count,
+            "decisive_count": int(decisive_count), "ahead_count": ahead_count, "ahead_share": ahead_share,
+            "min_share": min_share, "tie_tolerance": tie_float, "min_decisive_count": min_decisive_int,
+            "enough_decisive_bool": bool(enough_bool), "window_months": window_int, "step_months": step_int,
             "window_pdf": window_pdf}
 
 
@@ -244,7 +265,8 @@ def get_look_ahead_verdict_dict(status_str_in=LOOK_AHEAD_PENDING_STR):
 
 # FUNCTION: THE SHARED VERDICT ON THE PRIOR-ONLY PATH
 def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, baseline_dict_in,
-                            look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR):
+                            look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, trial_log_path_str_in=None,
+                            legacy_path_list_in=None):
     """
     One decision rule. email-worthy only if return, consistency, baselines and look-ahead all pass.
 
@@ -252,6 +274,8 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
         strategy_return_pdf_in, buy_hold_return_pdf_in (pd.DataFrame): date, daily_return
         baseline_dict_in (dict): Output of get_runner_baseline_dict
         look_ahead_status_str_in (str): pending, pass, or fail
+        trial_log_path_str_in (str | None): Trial log that counts the designs tried (None = the shared log)
+        legacy_path_list_in (list[str] | None): Pre-reset records (None = records/legacy)
 
     Returns:
         dict: parts, failed_list, email_worthy_bool, label_str, success_dict
@@ -262,6 +286,9 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
     consistency_dict = get_consistency_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in)
     baseline_verdict_dict = get_baseline_verdict_dict(return_dict["strategy_total_return"], baseline_dict_in)
     look_ahead_dict = get_look_ahead_verdict_dict(look_ahead_status_str_in)
+    multiple_testing_dict = get_multiple_testing_verdict_dict(
+        strategy_return_pdf_in, buy_hold_return_pdf_in, return_dict["strategy_total_return"],
+        list(baseline_dict_in.get("random_timing_return_list") or []), trial_log_path_str_in, legacy_path_list_in)
     failed_list = []
     if not return_dict["pass_bool"]:
         failed_list.append("return")
@@ -271,9 +298,11 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
         failed_list.append("baselines")
     if not look_ahead_dict["pass_bool"]:
         failed_list.append("look-ahead")
+    if not multiple_testing_dict["pass_bool"]:
+        failed_list.append("multiple-testing")
     email_worthy_bool = len(failed_list) == 0
     return {"return_dict": return_dict, "consistency_dict": consistency_dict, "baseline_dict": baseline_verdict_dict,
-            "look_ahead_dict": look_ahead_dict, "failed_list": failed_list,
+            "look_ahead_dict": look_ahead_dict, "multiple_testing_dict": multiple_testing_dict, "failed_list": failed_list,
             "email_worthy_bool": bool(email_worthy_bool),
             "label_str": EMAIL_WORTHY_STR if email_worthy_bool else NOT_EMAIL_WORTHY_STR,
             "success_dict": success_dict}
@@ -311,6 +340,7 @@ def get_report_payload_dict(verdict_dict_in, extra_dict_in=None):
                     "consistency_dict": dict(verdict_dict_in["consistency_dict"]),
                     "baseline_dict": dict(verdict_dict_in["baseline_dict"]),
                     "look_ahead_dict": dict(verdict_dict_in["look_ahead_dict"]),
+                    "multiple_testing_dict": dict(verdict_dict_in.get("multiple_testing_dict") or {}),
                     "success_dict": dict(verdict_dict_in["success_dict"])}
     if extra_dict_in:
         payload_dict.update(dict(extra_dict_in))
@@ -358,9 +388,11 @@ def get_report_markdown_str(report_dict_in):
     line_list.extend(["", "### Consistency", ""])
     share_str = get_report_float_str(consistency_dict["ahead_share"]) if np.isfinite(consistency_dict["ahead_share"]) else "n/a"
     line_list.append(
-        f"Ahead of buy-and-hold on {consistency_dict['ahead_count']} of {consistency_dict['window_count']} "
-        f"rolling {consistency_dict['window_months']}-month windows ({share_str}; need "
-        f"{get_report_float_str(consistency_dict['min_share'])}): "
+        f"Ahead of buy-and-hold on {consistency_dict['ahead_count']} of {consistency_dict.get('decisive_count', consistency_dict['window_count'])} "
+        f"decisive rolling {consistency_dict['window_months']}-month windows ({share_str}; need "
+        f"{get_report_float_str(consistency_dict['min_share'])}; {consistency_dict.get('tie_count', 0)} of "
+        f"{consistency_dict['window_count']} windows tied within +/-{consistency_dict.get('tie_tolerance', 0):.3f}; at least "
+        f"{consistency_dict.get('min_decisive_count', 0)} decisive windows required): "
         f"{'pass' if consistency_dict['pass_bool'] else 'fail'}."
     )
     line_list.extend(["", "### Baselines", ""])
@@ -392,6 +424,25 @@ def get_report_markdown_str(report_dict_in):
             line_list.append("fail.")
     else:
         line_list.append(f"{look_ahead_dict['status_str']}.")
+    cost_list = report_dict_in.get("cost_sensitivity_list") or []
+    if cost_list:
+        line_list.extend(["", "### Cost sensitivity (reported, not part of the verdict)", ""])
+        for row_dict in cost_list:
+            line_list.append(f"Slippage ${float(row_dict['slippage_per_share']):.2f} per share: prior-only "
+                             f"{get_report_float_str(row_dict['strategy_total_return'])} vs buy-and-hold "
+                             f"{get_report_float_str(row_dict['buy_hold_total_return'])}.")
+    multiple_dict = report_dict_in.get("multiple_testing_dict") or {}
+    if multiple_dict:
+        line_list.extend(["", "### Multiple testing", ""])
+        line_list.append(
+            f"Designs tried on the development data: {multiple_dict['design_count']} "
+            f"({multiple_dict['current_design_count']} in the trial log, {multiple_dict['legacy_design_count']} in the "
+            f"pre-reset records; counted once each). Deflated Sharpe probability "
+            f"{get_report_float_str(multiple_dict['deflated_sharpe_probability'])} over {multiple_dict['quarter_count']} "
+            f"quarters (need {get_report_float_str(multiple_dict['deflated_sharpe_min'])}; trial spread from "
+            f"{str(multiple_dict['trial_sharpe_variance_source_str']).replace('_', ' ')}). Random-timing p-value "
+            f"{multiple_dict['random_timing_p']:.2e} (need at most {multiple_dict['random_timing_p_max']:.2e}): "
+            f"{'pass' if multiple_dict['pass_bool'] else 'fail'}.")
     unread_dict = report_dict_in.get("unread_dict") or {}
     if unread_dict:
         line_list.extend(["", "### Never-read tail", ""])

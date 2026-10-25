@@ -28,13 +28,16 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 | `exp06_capped_regret_reentry` | Trend or near-ATH exit, buy-stop or recovery re-entry with a cooling-off | daily, trailing-stop engine |
 | `exp07_warning_lights_exit` | Exit when at least k of 5 warning lights are on | daily, trailing-stop engine |
 | `exp12_vix_fear_reentry` | Exits and re-entries modified by VIX fear and term structure (previous-session values) | daily, trailing-stop engine |
-| `exp13_e1m1_robustness` | exp12's E1M1 rule alone | daily, trailing-stop engine |
+| `exp13_e1m1_robustness` | exp12's E1M1 rule alone. Derived from: exp12 candidate E1M1, chosen after exp12's results on the same development data were seen (audit B5); not an independent test | daily, trailing-stop engine |
 
 ## Adding an experiment
 
 1. Copy `_template/` to `expNN_<name>/` (next free number).
 2. Write `PROTOCOL.md` from the template before looking at any result: question, success criteria, data and sources,
-   rules, the complete candidate list, selection rule, baselines, stopping rule, limitations, trial budget.
+   rules, the complete candidate list, selection rule, baselines, stopping rule, limitations, trial budget, and the
+   "Derived from:" line. The first run of a new version is refused unless these sections exist and the last commit of
+   the folder is a `preregister` commit; a changed folder may not rerun an already-run version; at most three versions
+   per experiment (`so/runner/preregistration.py`).
 3. Fill `config.py` (`EXPERIMENT_NAME`, `PROTOCOL_VERSION = "1.0"`, every constant; shared constants are read from
    `so.config`, never copied).
 4. Write `design.py`. Declare every source in `DATA_SOURCE_LIST` (registered in `so.core.point_in_time`).

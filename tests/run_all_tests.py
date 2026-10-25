@@ -30,6 +30,7 @@ Suite (fast set marked F):
     test_runner_candidates.py     F  candidates, selection, trial log, checkpoints, parallel
     test_runner_verdict.py        F  baselines, verdict, report, manifest, imported-folder guards
     test_runner_guard.py          F  design-code guard (data files, subprocesses, so.* rewrites), preflight write rule
+    test_runner_protocol.py       F  pre-registration guard, cost sensitivity in the report
     test_runner_lookahead.py      F  automatic look-ahead check (truncation, perturbation, leaks)
     test_runner_holdout.py        F  holdout evaluation through the runner
     test_refresh_development_view.py F  development-view refresh (cut, redact, slide, scan)
@@ -41,7 +42,7 @@ Suite (fast set marked F):
 SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_vix_features.py", "test_holdout.py",
               "test_point_in_time.py", "test_rolling_retrain.py", "test_trial_log_append.py", "test_tools.py",
               "test_execute_notebook.py", "test_runner.py", "test_runner_engines.py", "test_runner_candidates.py",
-              "test_runner_verdict.py", "test_runner_guard.py", "test_runner_lookahead.py", "test_runner_holdout.py",
+              "test_runner_verdict.py", "test_runner_guard.py", "test_runner_protocol.py", "test_runner_lookahead.py", "test_runner_holdout.py",
               "test_refresh_development_view.py", "test_runner_minute.py", "test_experiments.py"]
 SLOW_SUITE_SET = {"test_runner_minute.py", "test_experiments.py"}
 FAST_SUITE_LIST = [suite_str for suite_str in SUITE_LIST if suite_str not in SLOW_SUITE_SET]

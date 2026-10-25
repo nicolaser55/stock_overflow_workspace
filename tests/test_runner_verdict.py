@@ -208,19 +208,35 @@ def test_consistency_verdict_parts():
     # BUY-AND-HOLD FLAT; STRATEGY GETS A +10% MONTH IN THE FIRST THREE MONTHS
     buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 16)
     pass_pdf = get_month_return_pdf("2010-01-01", [0.10, 0.10, 0.10] + [0.0] * 13)
-    pass_dict = get_consistency_verdict_dict(pass_pdf, buy_hold_pdf)
+    # THE OLD RULE (NO TIE BAND): 3 OF 5 AHEAD PASSES, 1 OF 5 FAILS
+    pass_dict = get_consistency_verdict_dict(pass_pdf, buy_hold_pdf, tie_tolerance_in=-1.0, min_decisive_in=1)
     assert pass_dict["window_count"] == 5 and pass_dict["ahead_count"] == 3
     assert np.isclose(pass_dict["ahead_share"], 0.6) and pass_dict["pass_bool"]
     fail_pdf = get_month_return_pdf("2010-01-01", [0.10] + [0.0] * 15)
-    fail_dict = get_consistency_verdict_dict(fail_pdf, buy_hold_pdf)
+    fail_dict = get_consistency_verdict_dict(fail_pdf, buy_hold_pdf, tie_tolerance_in=-1.0, min_decisive_in=1)
     assert fail_dict["window_count"] == 5 and fail_dict["ahead_count"] == 1
     assert not fail_dict["pass_bool"]
+    # THE TIE BAND (AUDIT S1): THE TWO WINDOWS WITH ZERO EXCESS ARE TIES, SO 3 OF 3 DECISIVE ARE AHEAD
+    tie_dict = get_consistency_verdict_dict(pass_pdf, buy_hold_pdf, min_decisive_in=1)
+    assert tie_dict["tie_count"] == 2 and tie_dict["decisive_count"] == 3 and np.isclose(tie_dict["ahead_share"], 1.0)
+    assert tie_dict["pass_bool"]
+    # A RARE-EXIT DESIGN: AHEAD ONLY IN THE WINDOWS WITH ITS ONE EXIT, IDENTICAL ELSEWHERE, IS NO LONGER PUNISHED
+    rare_pdf = get_month_return_pdf("2010-01-01", [0.0] * 6 + [0.05] + [0.0] * 33)
+    flat_pdf = get_month_return_pdf("2010-01-01", [0.0] * 40)
+    old_rare_dict = get_consistency_verdict_dict(rare_pdf, flat_pdf, tie_tolerance_in=-1.0, min_decisive_in=1)
+    assert not old_rare_dict["pass_bool"]
+    rare_dict = get_consistency_verdict_dict(rare_pdf, flat_pdf, min_decisive_in=1)
+    assert rare_dict["decisive_count"] == 7 and rare_dict["ahead_count"] == 7 and rare_dict["pass_bool"]
+    # TOO FEW DECISIVE WINDOWS IS INSUFFICIENT EVIDENCE (THE DEFAULT MINIMUM IS 24)
+    default_rare_dict = get_consistency_verdict_dict(rare_pdf, flat_pdf)
+    assert default_rare_dict["min_decisive_count"] == 24 and not default_rare_dict["enough_decisive_bool"]
+    assert not default_rare_dict["pass_bool"]
     short_pdf = get_month_return_pdf("2010-01-01", [0.01] * 3)
     short_dict = get_consistency_verdict_dict(short_pdf, get_month_return_pdf("2010-01-01", [0.0] * 3))
     assert short_dict["window_count"] == 0 and not short_dict["pass_bool"]
     window_pdf = get_rolling_month_window_pdf(pass_pdf, buy_hold_pdf, 12, 1)
     assert list(window_pdf["ahead_bool"]) == [True, True, True, False, False]
-    passed("consistency passes at 60% of rolling 12-month windows and fails below")
+    passed("consistency: 60% of decisive windows, ties within +/-0.5 pp excluded, at least 24 decisive windows")
 
 
 # FUNCTION: BASELINE VERDICT PASSES AND FAILS ON HAND-BUILT RETURNS
@@ -255,10 +271,16 @@ def test_email_worthy_needs_every_part():
     Returns:
         None
     """
-    # 16 MONTHS AHEAD OF A FLAT BUY-AND-HOLD, EASY BASELINES
-    strategy_pdf = get_month_return_pdf("2010-01-01", [0.01] * 16)
-    buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 16)
+    # 48 MONTHS AHEAD OF A FLAT BUY-AND-HOLD (37 DECISIVE WINDOWS), EASY BASELINES, ONE DESIGN TRIED (EMPTY RECORDS)
+    strategy_pdf = get_month_return_pdf("2010-01-01", [0.012, 0.006] * 24)
+    buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 48)
     easy_baseline_dict = get_hand_baseline_dict(-0.5, -0.5, 100)
+    empty_log_str = os.path.join(TEMP_ROOT_STR, "verdict_empty_trial_log.csv")
+
+    def get_runner_verdict_dict(strategy_pdf_in, buy_hold_pdf_in, baseline_dict_in, status_str_in, legacy_list_in=None):
+        from so.runner.verdict import get_runner_verdict_dict as verdict_func
+        return verdict_func(strategy_pdf_in, buy_hold_pdf_in, baseline_dict_in, status_str_in,
+                            trial_log_path_str_in=empty_log_str, legacy_path_list_in=legacy_list_in or [])
     pass_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR)
     assert pass_dict["return_dict"]["pass_bool"] and pass_dict["consistency_dict"]["pass_bool"]
     assert pass_dict["baseline_dict"]["pass_bool"] and pass_dict["look_ahead_dict"]["pass_bool"]
@@ -272,7 +294,57 @@ def test_email_worthy_needs_every_part():
     hard_baseline_dict = get_hand_baseline_dict(10.0, 10.0, 100)
     base_fail_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, hard_baseline_dict, LOOK_AHEAD_PASS_STR)
     assert "baselines" in base_fail_dict["failed_list"] and not base_fail_dict["email_worthy_bool"]
-    passed("email-worthy only when every verdict part passes")
+    # THE SAME PATH AFTER 2,000 DESIGNS WERE TRIED: THE RANDOM-TIMING DRAWS ARE NO LONGER FAR ENOUGH BELOW IT
+    many_path_str = os.path.join(TEMP_ROOT_STR, "verdict_many_designs.csv")
+    pd.DataFrame({"experiment": ["expZZ"] * 2000, "stage": ["validation"] * 2000,
+                  "setting_json": [json.dumps({"candidate": f"c{idx}"}) for idx in range(2000)],
+                  "metric_json": ["{}"] * 2000}).to_csv(many_path_str, index=False)
+    close_baseline_dict = {**easy_baseline_dict, "random_timing_return_list": list(np.linspace(0.085, 0.415, 100))}
+    one_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, close_baseline_dict, LOOK_AHEAD_PASS_STR)
+    many_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, close_baseline_dict, LOOK_AHEAD_PASS_STR, [many_path_str])
+    assert one_dict["multiple_testing_dict"]["design_count"] == 1 and "multiple-testing" not in one_dict["failed_list"]
+    assert many_dict["multiple_testing_dict"]["design_count"] == 2000
+    assert "multiple-testing" in many_dict["failed_list"] and not many_dict["email_worthy_bool"]
+    passed("email-worthy only when every verdict part passes, including the multiple-testing part")
+
+
+# FUNCTION: THE MULTIPLE-TESTING PIECES (AUDIT B5)
+def test_multiple_testing_parts():
+    """
+    The deflated Sharpe ratio reproduces the paper's example (0.9004). Designs are counted once: folds, runs and a _v2
+    port of the same rule do not add designs; notes do not count; the legacy records join by union. The random-timing
+    p-value falls as the path moves above the draws.
+
+    Returns:
+        None
+    """
+    # BAILEY AND LOPEZ DE PRADO (2014): SR 2.5 A YEAR, 1,250 DAYS, SKEW -3, KURTOSIS 10, 100 TRIALS, V[SR] 0.5 A YEAR
+    from so.core.multiple_testing import (get_deflated_sharpe_dict, get_tried_design_count_dict,
+                                          get_random_timing_p_float, get_design_key_str)
+    paper_dict = get_deflated_sharpe_dict(2.5 / np.sqrt(250), 1250, -3.0, 10.0, 0.5 / 250, 100)
+    assert abs(paper_dict["probability"] - 0.9004) < 1e-3, paper_dict
+    assert get_deflated_sharpe_dict(0.3, 40, 0.0, 3.0, float("nan"), 1)["variance_source_str"] == "null_1_over_T"
+    # COUNTING
+    log_path_str = os.path.join(TEMP_ROOT_STR, "mt_trial_log.csv")
+    legacy_path_str = os.path.join(TEMP_ROOT_STR, "mt_legacy.csv")
+    row_list = [{"experiment": "exp02_stop_reentry", "stage": "validation", "setting_json": json.dumps({"candidate": "A", "run_id": f"r{run}", "commit": "x"}), "metric_json": "{}"}
+                for run in range(3)]
+    row_list += [{"experiment": "exp02_stop_reentry", "stage": "validation", "setting_json": json.dumps({"candidate": "B", "run_id": "r0"}), "metric_json": "{}"},
+                 {"experiment": "exp02_stop_reentry", "stage": "note", "setting_json": json.dumps({"candidate": "C"}), "metric_json": "{}"}]
+    pd.DataFrame(row_list).to_csv(log_path_str, index=False)
+    pd.DataFrame([{"experiment": "exp02_stop_reentry_v2", "stage": "validation", "setting_json": json.dumps({"candidate": "A", "window": "w1"}), "metric_json": "{}"},
+                  {"experiment": "exp03_ath_exit", "stage": "exploration", "setting_json": json.dumps({"rule": "x"}), "metric_json": "{}"}]).to_csv(legacy_path_str, index=False)
+    count_dict = get_tried_design_count_dict(log_path_str, [legacy_path_str])
+    assert count_dict == {"current_count": 2, "legacy_count": 2, "total_count": 3}, count_dict
+    assert get_design_key_str("exp02_stop_reentry_v2_1", {"candidate": "A", "commit": "y"}) == get_design_key_str("exp02_stop_reentry", {"candidate": "A"})
+    # THE RESTORED PRE-RESET RECORDS ARE IN THE REPOSITORY AND COUNT
+    restored_dict = get_tried_design_count_dict(log_path_str)
+    assert restored_dict["legacy_count"] >= 200, restored_dict
+    # RANDOM TIMING
+    draw_list = list(np.linspace(0.0, 1.0, 100))
+    assert get_random_timing_p_float(2.0, draw_list) < get_random_timing_p_float(1.0, draw_list) < 0.5
+    assert get_random_timing_p_float(0.5, [0.1] * 10) == 0.0 and get_random_timing_p_float(0.05, [0.1] * 10) == 1.0
+    passed(f"multiple testing: deflated Sharpe matches the paper, designs counted once ({restored_dict['legacy_count']} pre-reset), random-timing p-value")
 
 
 # FUNCTION: RANDOM TIMING IS REPRODUCIBLE AND CONSTANT WEIGHT 1 EQUALS BUY-AND-HOLD
@@ -660,6 +732,7 @@ if __name__ == "__main__":
         test_consistency_verdict_parts()
         test_baseline_verdict_parts()
         test_email_worthy_needs_every_part()
+        test_multiple_testing_parts()
         test_baselines_reproducible_and_constant_one_equals_buy_hold()
         test_random_timing_preserves_time_two_three_four_weights()
         test_random_timing_one_exit_spreads_over_the_window()

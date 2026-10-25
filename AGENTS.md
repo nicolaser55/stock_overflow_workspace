@@ -32,7 +32,8 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   report, a manifest and a results-log row. Read results from those files, never from memory.
 - A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
   selection rule, stopping rule, trial budget) and commit it with `config.py`, `design.py` and tests before the first
-  run (message `preregister expNN`). Any change after a run is a new protocol version.
+  run (message `preregister expNN`). Any change after a run is a new protocol version. The runner enforces this
+  (`so/runner/preregistration.py`) and counts every design you try against the multiple-testing bar.
 - Writing: separate implemented / tested / observed / intended / inferred. Quote numbers with their file. Report the
   prior-only result, the baselines and the look-ahead status; never present a result as stronger than the evidence.
 
