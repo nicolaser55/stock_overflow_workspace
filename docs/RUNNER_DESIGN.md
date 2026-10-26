@@ -119,6 +119,16 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   several processes writing at once.
 - **Checkpoints:** after each period, so a crash resumes instead of restarting.
 - **Parallel:** candidates run in separate processes (8 cores).
+- **Verdict parts (2026-10-25):** return; consistency (ahead in at least 60% of the decisive rolling 12-month
+  windows; a window within +/-0.5 percentage points of buy-and-hold is a tie and is not counted; at least 24 decisive
+  windows; audit S1, a data-dependent amendment because exp13 failed only the old rule); baselines (constant exposure
+  with a 0.05 dead band, random timing on the realized exposure); look-ahead; multiple testing (deflated Sharpe
+  ratio of quarterly excess returns at 0.95 or more, and random-timing p-value at most 0.05 / N, N = designs tried on
+  the development data including the pre-reset records; `so.core.multiple_testing`, audit B5). The report also shows
+  the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02 (not part of the verdict).
+- **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
+  with different design-folder code, a first run of a new version without a `preregister` last commit or without the
+  required protocol sections and "Derived from:" line, and a fourth version of an experiment.
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.

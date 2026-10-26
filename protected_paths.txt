@@ -21,6 +21,7 @@ so/core/raw_data.py
 so/core/local_file_management.py
 so/core/trial_log.py
 so/core/csv_append.py
+so/core/multiple_testing.py
 so/features/vix_features.py
 so/__init__.py
 so/core/__init__.py

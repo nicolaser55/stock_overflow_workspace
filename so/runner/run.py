@@ -35,6 +35,7 @@ from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict
+from so.runner.preregistration import check_preregistration_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
                                write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, get_json_value,
@@ -354,7 +355,7 @@ def get_module_file_path_str(design_module_in):
 
 
 # FUNCTION: A DEFAULT ENGINE FOR ONE CANDIDATE
-def get_candidate_engine(design_module_in):
+def get_candidate_engine(design_module_in, entry_slippage_in=None, market_exit_slippage_in=None):
     """
     ENGINE_NAME selects fractional (default), trailing_stop or barrier. Shared costs. Optional MAX_CASH_SESSIONS,
     MAX_HOLD_TRADING_DAYS, RR_RATIO, DEAD_BAND.
@@ -371,8 +372,8 @@ def get_candidate_engine(design_module_in):
         engine_name_str = (ENGINE_BARRIER_STR if get_design_mode_str(design_module_in) == MODE_MINUTE_STR
                            else ENGINE_FRACTIONAL_STR)
     initial_capital = config.INITIAL_CAPITAL
-    entry_slippage = config.ENTRY_SLIPPAGE_PER_SHARE
-    market_exit_slippage = config.MARKET_EXIT_SLIPPAGE_PER_SHARE
+    entry_slippage = config.ENTRY_SLIPPAGE_PER_SHARE if entry_slippage_in is None else float(entry_slippage_in)
+    market_exit_slippage = config.MARKET_EXIT_SLIPPAGE_PER_SHARE if market_exit_slippage_in is None else float(market_exit_slippage_in)
     if engine_name_str == ENGINE_TRAILING_STOP_STR:
         max_cash_sessions = getattr(design_module_in, "MAX_CASH_SESSIONS", None)
         engine = TrailingStopEngine(max_cash_sessions, initial_capital, entry_slippage, market_exit_slippage)
@@ -619,6 +620,11 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
     commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
     code_hash_str = (str(code_hash_str_in) if code_hash_str_in is not None
                      else get_code_hash_str(design_folder_str, design_file_path_str_in=design_file_path_str))
+    # A DEVELOPMENT RUN OF COMMITTED CODE MUST RESPECT PRE-REGISTRATION (AUDIT S5); TESTS WITH INJECTED CODE SKIP IT
+    preregistration_dict = None
+    if check_clean_tree_bool_in and log_trial_bool_in:
+        preregistration_dict = check_preregistration_dict(design_module_in, design_folder_str, design_folder_hash_str,
+                                                          trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
     period_pdf = period_pdf_in.copy()
     if period_pdf.empty:
         raise ValueError("no periods to run.")
@@ -692,7 +698,8 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
                 "run_folder_str": run_folder_str, "design_file_path_str": design_file_path_str,
                 "ohlcv_path_str": ohlcv_path_str, "context_path_str": context_path_str,
                 "candidate_list": list(candidate_list), "n_jobs_int": n_jobs_int,
-                "experiment_name_str": experiment_name_str, "runs_root_str": runs_root_str_in}
+                "experiment_name_str": experiment_name_str, "runs_root_str": runs_root_str_in,
+                "trial_log_path_str": trial_log_path_str, "preregistration_dict": preregistration_dict}
     finally:
         # RESTORE THE DEVELOPMENT RUNS ROOT EVEN WHEN A WORKER RAISES
         if runs_root_str_in is not None:
@@ -741,7 +748,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
     strategy_return_pdf = get_equity_daily_return_pdf(prior_only_dict_in["daily_equity_pdf"])
     buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
     verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
-                                           look_ahead_status_str_in=look_ahead_status_str)
+                                           look_ahead_status_str_in=look_ahead_status_str,
+                                           trial_log_path_str_in=stream_dict_in.get("trial_log_path_str"))
     if lookahead_dict is not None:
         verdict_dict["look_ahead_dict"]["cut_date_list"] = list(lookahead_dict["cut_date_list"])
         verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
@@ -767,6 +775,7 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                                 "file": stream_dict_in["design_file_path_str"]},
                      "candidate_list": list(stream_dict_in["candidate_list"]),
                      "trial_id_list": list(stream_dict_in["trial_id_list"]),
+                     "preregistration": stream_dict_in.get("preregistration_dict"),
                      "output_files": list(output_file_list),
                      "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
                                  "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
@@ -806,6 +815,41 @@ def write_runner_result_files_dict(stream_dict_in, finish_dict_in, reported_path
     # REPORT BEFORE THE MANIFEST; A CRASH HERE STILL LEAVES THE LEDGER ROW
     write_run_report_dict(stream_dict_in["run_folder_str"], finish_dict_in["report_dict"])
     write_run_manifest_dict(stream_dict_in["run_folder_str"], finish_dict_in["manifest_dict"])
+
+
+# FUNCTION: THE PRIOR-ONLY PATH AND BUY-AND-HOLD AT OTHER SLIPPAGE LEVELS (AUDIT S8)
+def get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict_in):
+    """
+    Replays the prior-only path's recorded decisions (no design call) at each slippage in
+    COST_SENSITIVITY_SLIPPAGE_LIST, applied per share to entries and market exits; buy-and-hold uses the same slippage.
+    Reported, not part of the verdict.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars
+        stream_dict_in (dict): Output of run_candidate_streams_dict
+
+    Returns:
+        list[dict]: slippage_per_share, strategy_total_return, buy_hold_total_return
+    """
+    # ONE REPLAY AND ONE BUY-AND-HOLD PER LEVEL
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
+    default_weight = 0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0
+    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", default_weight))
+    row_list = []
+    for slippage_float in list(config.COST_SENSITIVITY_SLIPPAGE_LIST):
+        path_dict = run_prior_only_from_decisions_dict(
+            ohlcv_array_dict_in, stream_dict_in["date1"], stream_dict_in["date2"], stream_dict_in["window_session_date_list"],
+            stream_dict_in["candidate_decision_dict"], stream_dict_in["governing_dict"], stream_dict_in["period_pdf"],
+            dead_band, initial_weight, config.INITIAL_CAPITAL, float(slippage_float), float(slippage_float),
+            engine_in=get_candidate_engine(design_module_in, slippage_float, slippage_float), design_module_in=design_module_in)
+        buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, stream_dict_in["date1"], stream_dict_in["date2"],
+                                                     config.INITIAL_CAPITAL, float(slippage_float), float(slippage_float))
+        row_list.append({"slippage_per_share": float(slippage_float),
+                         "strategy_total_return": float(path_dict["metric_dict"].get("total_return", float("nan"))),
+                         "buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"])})
+    return row_list
 
 
 # FUNCTION: A DEVELOPMENT RUN OF EVERY CANDIDATE
@@ -856,10 +900,13 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         n_jobs_int_in=n_jobs_int_in, trial_log_path_str_in=trial_log_path_str_in, commit_str_in=commit_str_in,
         crash_after_period_id_in=crash_after_period_id_in, code_hash_str_in=code_hash_str_in,
         check_clean_tree_bool_in=check_clean_tree_bool_in, log_trial_bool_in=True, note_str_in=note_str_in)
+    cost_sensitivity_list = get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict)
     finish_dict = write_runner_finish_dict(
         design_module_in, ohlcv_array_dict_in, stream_dict, stream_dict["prior_only_dict"], stream_dict["date1"],
         stream_dict["date2"], baseline_seed_count_int_in=baseline_seed_count_int_in,
-        look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in)
+        look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in,
+        extra_report_dict_in={"cost_sensitivity_list": cost_sensitivity_list,
+                              "preregistration_dict": stream_dict.get("preregistration_dict")})
     return {**stream_dict, **finish_dict}
 
 

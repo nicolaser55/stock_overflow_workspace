@@ -4,6 +4,10 @@
 Agreed with Nicolas on YYYY-MM-DD, before any of this experiment's data was explored. After the first development
 run, any rule change is a new version with a new experiment name.*
 
+Derived from: none. (Write "none", or the earlier experiment and candidate this design comes from and how it was
+chosen, for example "exp12 candidate E1M1, the best of six after its results were seen". The runner copies this line
+into the manifest, and a derived design counts against the same multiple-testing record.)
+
 This folder is the runner template (`docs/RUNNER_DESIGN.md`). A new experiment copies it and fills the sections
 below. `design.py` declares the candidates, the sources, the engine and `decide(view)`. Replay, selection, baselines
 and the report live in `so.runner`. Development is `scripts/run_development.py <this folder>`. Holdout evaluation is

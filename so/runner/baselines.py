@@ -413,7 +413,7 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
                              realized_exposure_bool_in=False):
     """
     Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean
-    exposure and rebalances daily (dead band 0). Random timing places the path's non-base spells at random (same time
+    exposure and rebalances when it drifts more than RUNNER_CONSTANT_EXPOSURE_DEAD_BAND (0.05; audit S8). Random timing places the path's non-base spells at random (same time
     at each weight; switch count may differ only at the two window edges). For all-or-nothing engines
     (realized_exposure_bool_in True) the exposure is the position actually held at each close, not the decision
     targets (audit B1, 2026-10-25).
@@ -452,8 +452,9 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
                                          1.0, 0.0, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
     # CONSTANT EXPOSURE AT THE PATH'S AVERAGE WEIGHT, REBALANCED DAILY
     constant_arr = np.full(session_count, mean_weight, dtype=float)
-    constant_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, constant_arr, mean_weight, 0.0,
-                                         initial_capital_in, entry_slippage_in, market_exit_slippage_in)
+    constant_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, constant_arr, mean_weight,
+                                         float(config.RUNNER_CONSTANT_EXPOSURE_DEAD_BAND), initial_capital_in,
+                                         entry_slippage_in, market_exit_slippage_in)
     # RANDOM TIMING: SAME TIME AT EACH WEIGHT, SPELLS PLACED AT RANDOM, FIXED SEEDS
     seed_list = get_random_timing_seed_list(seed_count_int_in)
     random_return_list = []
@@ -470,6 +471,7 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
             "constant_exposure_total_return": float(constant_dict["metric_dict"]["total_return"]),
             "constant_exposure_weight": mean_weight,
             "constant_exposure_metric_dict": dict(constant_dict["metric_dict"]),
+            "constant_exposure_dead_band": float(config.RUNNER_CONSTANT_EXPOSURE_DEAD_BAND),
             "constant_exposure_daily_equity_pdf": constant_dict["daily_equity_pdf"],
             "random_timing_return_list": list(random_return_list),
             "random_timing_seed_list": list(seed_list),
