@@ -53,7 +53,8 @@ scripts/holdout_evaluate.py
 scripts/holdout_window.py
 scripts/refresh_development_view.py
 scripts/run_development.py
-scripts/run_all_development.py
+scripts/append_results_log.py
+scripts/setup_so_runner.ps1
 scripts/run_queue.py
 scripts/check_protected_paths.py
 scripts/check_environment.py

@@ -308,3 +308,45 @@ def get_done_bool(run_id_str_in, candidate_token_str_in):
     # RESUME SKIPS A FINISHED STREAM
     file_path_str = os.path.join(get_candidate_folder_str(run_id_str_in, candidate_token_str_in), DONE_FILE_STR)
     return get_file_exists_bool(file_path_str)
+
+
+# THE LARGE FILES A FINISHED RUN NO LONGER NEEDS (AUDIT S11, 2026-10-25)
+PRUNE_RUN_FILE_LIST = ["ohlcv.pkl", "data_context.pkl"]
+PRUNE_RUN_FOLDER_LIST = ["fit_cache"]
+
+
+# FUNCTION: DELETE THE BULK OF A FINISHED RUN
+def prune_finished_run_folder(run_folder_str_in):
+    """
+    Called after the manifest is written. Deletes the bar and source pickles, every candidate checkpoint and the
+    shared fit cache. Kept: report.json, report.md, lookahead.json, manifest.json, the identity, and per candidate
+    decisions.pkl, scores.pkl and done.marker (enough to rebuild the prior-only path and to audit every decision).
+    A rerun under the same run id rebuilds what it needs.
+
+    Args:
+        run_folder_str_in (str): Run folder
+
+    Returns:
+        int: Bytes freed
+    """
+    # ONLY A FINISHED RUN (ITS MANIFEST EXISTS)
+    import shutil
+    if not os.path.isfile(os.path.join(run_folder_str_in, "manifest.json")):
+        return 0
+    freed_int = 0
+    path_list = [os.path.join(run_folder_str_in, file_str) for file_str in PRUNE_RUN_FILE_LIST]
+    candidate_root_str = os.path.join(run_folder_str_in, "candidates")
+    if os.path.isdir(candidate_root_str):
+        for token_str in os.listdir(candidate_root_str):
+            path_list.append(os.path.join(candidate_root_str, token_str, CHECKPOINT_FILE_STR))
+    for path_str in path_list:
+        if os.path.isfile(path_str):
+            freed_int += os.path.getsize(path_str)
+            os.remove(path_str)
+    for folder_str in PRUNE_RUN_FOLDER_LIST:
+        folder_path_str = os.path.join(run_folder_str_in, folder_str)
+        if os.path.isdir(folder_path_str):
+            for dir_str, _dir_list, file_list in os.walk(folder_path_str):
+                freed_int += sum(os.path.getsize(os.path.join(dir_str, file_str)) for file_str in file_list)
+            shutil.rmtree(folder_path_str, ignore_errors=True)
+    return int(freed_int)

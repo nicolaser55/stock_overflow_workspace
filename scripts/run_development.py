@@ -53,10 +53,10 @@ def load_design_module(design_folder_str_in):
         config_module = importlib.util.module_from_spec(config_spec)
         with design_code_guard():
             config_spec.loader.exec_module(config_module)
-    check_module_snapshot(module_snapshot_dict, f"while importing {design_folder_str_in}")
         for key_str, value in vars(config_module).items():
             if key_str.isupper() and not hasattr(design_module, key_str):
                 setattr(design_module, key_str, value)
+    check_module_snapshot(module_snapshot_dict, f"while importing {design_folder_str_in}")
     # RETURN THE DESIGN
     return design_module
 
@@ -98,35 +98,31 @@ def load_declared_frame_dict(design_module_in, declared_name_list_in, developmen
     return frame_dict
 
 
-# THE RESULTS LOG EVERY DEVELOPMENT RUN APPENDS TO
-RESULTS_LOG_PATH_STR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "RESULTS_LOG.md")
-
-
-# FUNCTION: ONE RESULTS-LOG ROW FROM THE RUN
-def append_results_row(result_dict_in, note_str_in):
+# FUNCTION: ONE RESULTS-LOG ROW FROM A RUN'S REPORT
+def get_results_row_str(report_dict_in, run_id_str_in, note_str_in, date_str_in=None):
     """
-    Appends one table row to docs/RESULTS_LOG.md (after the header). The row is the run's own report: date, experiment,
-    protocol, run id, verdict, prior-only and buy-and-hold total return, failed parts, look-ahead, note.
+    The docs/RESULTS_LOG.md row of a run: date, experiment, protocol, run id, verdict, prior-only and buy-and-hold
+    total return, failed parts, look-ahead, note. The run prints it; scripts/append_results_log.py writes it.
 
     Args:
-        result_dict_in (dict): Output of run_development_dict
+        report_dict_in (dict): report.json of the run
+        run_id_str_in (str): Run id
         note_str_in (str): The --note text
+        date_str_in (str | None): Date shown (None = today)
 
     Returns:
         str: The row
     """
     # THE NUMBERS THE VERDICT USED
-    verdict_dict = result_dict_in["verdict_dict"]
-    return_dict = verdict_dict.get("return_dict", {})
-    report_dict = result_dict_in.get("report_dict", {})
-    look_ahead_str = str(verdict_dict.get("look_ahead_dict", {}).get("status_str", verdict_dict.get("look_ahead_dict", {}).get("status", "")))
-    row_str = (f"| {datetime.date.today().isoformat()} | {report_dict.get('experiment_name_str', '')} | "
-               f"{report_dict.get('protocol_version_str', '')} | {result_dict_in['run_id_str']} | {verdict_dict['label_str']} | "
-               f"{float(return_dict.get('strategy_total_return', float('nan'))):+.2%} vs {float(return_dict.get('buy_hold_total_return', float('nan'))):+.2%} | "
-               f"{', '.join(verdict_dict['failed_list']) or 'none'} | {look_ahead_str} | {note_str_in} |")
-    with open(RESULTS_LOG_PATH_STR, "a", encoding="utf-8") as file_obj:
-        file_obj.write(row_str + "\n")
-    return row_str
+    return_dict = report_dict_in.get("return_dict", {})
+    look_ahead_str = str((report_dict_in.get("look_ahead_dict") or {}).get("status_str", ""))
+    date_str = date_str_in or datetime.date.today().isoformat()
+    return (f"| {date_str} | {report_dict_in.get('experiment_name_str', '')} | "
+            f"{report_dict_in.get('protocol_version_str', '')} | {run_id_str_in} | {report_dict_in.get('label_str', '')} | "
+            f"{float(return_dict.get('strategy_total_return', float('nan'))):+.2%} vs "
+            f"{float(return_dict.get('buy_hold_total_return', float('nan'))):+.2%} | "
+            f"{', '.join(report_dict_in.get('failed_list') or []) or 'none'} | {look_ahead_str} | "
+            f"{str(note_str_in).replace('|', '/')} |")
 
 
 # PARSE THE COMMAND
@@ -170,5 +166,5 @@ if __name__ == "__main__":
     print(f"verdict {verdict_dict['label_str']}")
     print(f"email_worthy {bool(verdict_dict['email_worthy_bool'])}")
     print(f"failed {list(verdict_dict['failed_list'])}")
-    print(f"results_row {append_results_row(result_dict, arg_dict.note)}")
+    print(f"results_row {get_results_row_str(result_dict['report_dict'], result_dict['run_id_str'], arg_dict.note)}")
     print(f"saved {report_md_str}")

@@ -5,9 +5,12 @@ import uuid
 from pathlib import Path
 
 """
-Agent Access Check (run as so_agent after scripts/setup_so_agent.ps1)
+Account Access Check (run as so_agent after scripts/setup_so_agent.ps1, or as so_runner after setup_so_runner.ps1)
 
     python scripts/check_agent_access.py --quarantine <folder> --nicolas-workspace <folder> [--holdout <folder>]
+    python scripts/check_agent_access.py --role runner --quarantine <folder> --nicolas-workspace <folder>
+
+so_agent may write only queue/pending under store04_experiments; so_runner may write all of store04_experiments.
 
 Tries each access the account must have or must not have and prints one line per check, OK or FAIL. A write test
 creates a uniquely named empty file and removes it at once; nothing existing is touched. Exit 1 on any FAIL.
@@ -61,6 +64,7 @@ if __name__ == "__main__":
     parser.add_argument("--quarantine", required=True)
     parser.add_argument("--nicolas-workspace", required=True)
     parser.add_argument("--holdout", default="")
+    parser.add_argument("--role", choices=["agent", "runner"], default="agent")
     arg_dict = parser.parse_args()
     data_root_str = os.environ.get("SO_DATA_PATH", "").strip()
     check_list = []
@@ -74,7 +78,17 @@ if __name__ == "__main__":
                 check_list.append((f"{zone_str} can be read", get_can_list_bool(zone_path_str)))
                 check_list.append((f"{zone_str} cannot be written", not get_can_write_bool(zone_path_str)))
         experiment_zone_str = os.path.join(data_root_str, "store04_experiments")
-        check_list.append(("store04_experiments can be written", get_can_write_bool(experiment_zone_str)))
+        pending_str = os.path.join(experiment_zone_str, "queue", "pending")
+        check_list.append(("queue/pending can be written", get_can_write_bool(pending_str)))
+        if arg_dict.role == "runner":
+            check_list.append(("store04_experiments can be written", get_can_write_bool(experiment_zone_str)))
+        else:
+            check_list.append(("store04_experiments cannot be written (runs, trial log, run index)",
+                               not get_can_write_bool(experiment_zone_str)))
+            for name_str in ["runs", os.path.join("queue", "done"), os.path.join("queue", "failed")]:
+                folder_str = os.path.join(experiment_zone_str, name_str)
+                if os.path.isdir(folder_str):
+                    check_list.append((f"{name_str} cannot be written", not get_can_write_bool(folder_str)))
     check_list.append(("quarantine cannot be read", not get_can_list_bool(arg_dict.quarantine)))
     if arg_dict.holdout:
         check_list.append(("holdout results cannot be read", not get_can_list_bool(arg_dict.holdout)))

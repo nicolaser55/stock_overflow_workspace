@@ -8,10 +8,10 @@ raw data arrives and step 00 reports bad ticks:
     python scripts/fix_raw_bad_ticks.py --apply              # back up the raw files, correct them, write the correction log
     python scripts/fix_raw_bad_ticks.py --path "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_spy_1min/"
 
-Known limitation (audit of 2026-10-05, docs/history/AUDIT_2026-10-05.md, F1): the 3% threshold leaves smaller wicks of
+Known limitation (audit of 2026-10-05, F1; its document was deleted on 2026-10-22): the 3% threshold leaves smaller wicks of
 the same kind (1.5-3%), including some in 2015-2026. The rule is kept unchanged so the pipeline caches stay valid.
 
-Problem (docs/history/RESULTS_LOG_2026-10-05.md, 2026-10-04):
+Problem (2026-10-04; the results log of that time was deleted on 2026-10-22):
     62 minute bars, all in 2005-2009 (15 / 11 / 14 / 15 / 7 per year), have a high or a low 3-8% away from their own
     open / close AND from the neighbouring bars (e.g. 2007-06-06 14:16: open / close $151.92, high $161.90). Many are
     exactly $5 or $10 off: feed errors, not trades. The least clear-cut cases are 3-4% wicks during the October 2008

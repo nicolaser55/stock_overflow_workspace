@@ -129,6 +129,13 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
   with different design-folder code, a first run of a new version without a `preregister` last commit or without the
   required protocol sections and "Derived from:" line, and a fourth version of an experiment.
+- **Queue and runner account (audit S3 / S4, 2026-10-26):** `scripts/run_queue.py`. A job names a commit; the
+  runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`) fetches origin, runs
+  `scripts/run_development.py` from a detached worktree at that commit, under a time limit (default 24 h, the whole
+  process tree is killed), appends one `run_index.csv` row per attempt and removes the worktree. A failed job is
+  emailed and can be retried under the same run id (it resumes from the checkpoints). A stale lock from a dead
+  process is replaced. Agents can only add job files. A finished run deletes its bar and source pickles, checkpoints
+  and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
