@@ -45,19 +45,24 @@ Environment variables: `SO_DATA_PATH` (the data root, required). Nicolas only: `
 |---|---|
 | Fast tests (after an edit, a few minutes) | `tests\run_all_tests.py --fast` |
 | Full tests (before a merge) | `tests\run_all_tests.py` |
-| One development run | `scripts\run_development.py experiments\<exp> --note "<why>"` |
-| Several runs in a row | `scripts\run_all_development.py --all` (or a list of folders) |
-| Queue a run / run the queue / state | `scripts\run_queue.py add experiments\<exp> --note "<why>"`, `scripts\run_queue.py run`, `scripts\run_queue.py status` |
-| Resume a stopped run | `scripts\run_development.py experiments\<exp> --run-id <run id>` |
+| Queue a run at the current (pushed, clean) commit | `scripts\run_queue.py add experiments\<exp> --note "<why>"` |
+| Queue state / retry a failed job | `scripts\run_queue.py status`, `scripts\run_queue.py retry <job id>` |
+| Run the queue (so_runner; normally the scheduled task `SO queue runner`) | `scripts\run_queue.py watch` (or `run` for one pass) |
+| Append finished runs to `docs/RESULTS_LOG.md` (then a pull request) | `scripts\append_results_log.py` |
+| One development run by hand (so_runner, or Nicolas) | `scripts\run_development.py experiments\<exp> --note "<why>"` |
+| Set up the agent / runner accounts (Nicolas, administrator) | `scripts\setup_so_agent.ps1`, `scripts\setup_so_runner.ps1`, then `scripts\check_agent_access.py [--role runner]` |
 | Protected files changed by a branch | `scripts\check_protected_paths.py --base main` |
 | Modules protected code imports but the list misses | `scripts\check_protected_paths.py --closure` |
 | Refresh the development view after a download (Nicolas) | `scripts\refresh_development_view.py` |
 | Register or slide the holdout window (Nicolas) | `scripts\holdout_window.py` |
 | Evaluate a frozen design on the holdout (Nicolas) | `scripts\holdout_evaluate.py --design experiments\<exp> --token-file <file>` |
 
-A development run writes `store04_experiments/runs/<run id>/` (report.md, report.json, lookahead.json, manifest.json),
-appends its rows to the trial log (`store04_experiments/trial_log.csv`) and one row to `docs/RESULTS_LOG.md`. A run
-refuses uncommitted changes in `so/` or its experiment folder.
+Agents (`so_agent`) add jobs; the runner account (`so_runner`) runs each job at its commit in a temporary worktree and
+alone writes results. A run writes `store04_experiments/runs/<run id>/` (report.md, report.json, lookahead.json,
+manifest.json, and per candidate the decisions and scores; the large pickles are deleted once the manifest exists),
+appends its rows to the trial log (`store04_experiments/trial_log.csv`), and the queue appends one row per attempt to
+`store04_experiments/run_index.csv`. `docs/RESULTS_LOG.md` gets the finished runs through `scripts/append_results_log.py`.
+A run refuses uncommitted changes in `so/` or its experiment folder, and a version that breaks pre-registration.
 
 ## Data folders (under `SO_DATA_PATH`)
 
@@ -65,7 +70,7 @@ refuses uncommitted changes in `so/` or its experiment folder.
 |---|---|---|
 | `store01_rawzone/` | raw IBKR SPY minute bars (bad ticks corrected once, `records/bad_tick_corrections.csv`) and the VIX family | downloads; never edited |
 | `store02_workzone/`, `store03_goldzone/` | pipeline caches: TSIND, TSSEG, TSCTX, TSBAR (barrier labels), TSDAY | pipeline notebooks |
-| `store04_experiments/` | `runs/`, `trial_log.csv` (append-only), `queue/`, `state.json` | runs and the queue |
+| `store04_experiments/` | `runs/`, `trial_log.csv` (append-only), `run_index.csv` (append-only), `queue/`, `state.json` | so_runner (agents may only add files to `queue/pending/`) |
 
 The development view stops before the registered holdout window (embargo included). A design reads data only through
 the point-in-time layer (`so.core.point_in_time`, `docs/DATA_SOURCES.md`).

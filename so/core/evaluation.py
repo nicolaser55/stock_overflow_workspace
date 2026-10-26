@@ -14,7 +14,7 @@ Success criteria (decided by Nicolas, 2026-10-04; the same for every experiment 
     Information  the strategy must also beat its uninformed baselines (same rule with random / fixed choices); otherwise
                  the rule, not the information, does the work
 
-Honest reporting (added 2026-10-05 after the audit, docs/history/AUDIT_2026-10-05.md):
+Honest reporting (added 2026-10-05 after that day's audit; the audit document was deleted on 2026-10-22):
     - Prior-only selection: the candidate chosen at fold f (with the experiment's selection rule, using only validation
       quarters up to fold f) is evaluated on the validation quarter of fold f+1. Chained over the folds, this is the
       honest validation estimate. The best candidate chosen after the fact is reported too, but it is optimistic.

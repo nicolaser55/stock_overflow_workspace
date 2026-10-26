@@ -15,8 +15,9 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
 ## How work is done
 
 - Account and folders: you run as `so_agent` in your own clone. You can write only in that clone and in
-  `store04_experiments/`. You cannot read the quarantine or the holdout results. An "access denied" is a boundary:
-  stop that action and report it; never work around it.
+  `store04_experiments/queue/pending/` (new jobs). Runs, the trial log and the run index are written by the runner
+  account `so_runner`, never by you. You cannot read the quarantine or the holdout results. An "access denied" is a
+  boundary: stop that action and report it; never work around it.
 - Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
 - Protected files (`protected_paths.txt`): the guards, the runner, the rules, the records, the guard tests, the
   environment. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
@@ -27,9 +28,11 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
 - Design code runs behind a guard (`so/runner/guard.py`): it may not open, list or write anything under the data
   root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
   view only; keep experiment constants in the experiment's `config.py`.
-- Runs: commit first (a run refuses uncommitted changes in `so/` or the experiment folder), then
-  `scripts\run_queue.py add experiments\<exp> --note "<why>"` and `scripts\run_queue.py run`. Each run writes a
-  report, a manifest and a results-log row. Read results from those files, never from memory.
+- Runs: commit and push your branch first, then `scripts\run_queue.py add experiments\<exp> --note "<why>"` (it
+  records the commit; uncommitted code in `so/` or the experiment folder is refused). The runner runs it at that
+  commit and writes the report, the manifest and a `run_index.csv` row. Read results from those files
+  (`scripts\run_queue.py status`, `store04_experiments/runs/<run id>/report.md`), never from memory. A failed job
+  emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id.
 - A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
   selection rule, stopping rule, trial budget) and commit it with `config.py`, `design.py` and tests before the first
   run (message `preregister expNN`). Any change after a run is a new protocol version. The runner enforces this

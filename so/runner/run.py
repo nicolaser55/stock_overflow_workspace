@@ -30,7 +30,7 @@ from so.runner.periods import (check_quarantine_refused, get_development_run_per
 from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_period_score_dict,
                                  get_runner_selection_pdf, get_governing_candidate_dict,
                                  run_prior_only_from_decisions_dict)
-from so.runner.checkpoint import (get_run_folder_str, make_folder, write_pickle, read_pickle, get_file_exists_bool,
+from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str, make_folder, write_pickle, read_pickle, get_file_exists_bool,
                                   write_checkpoint_dict, read_checkpoint_dict, write_decisions_list, read_decisions_list,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
@@ -907,6 +907,8 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in,
         extra_report_dict_in={"cost_sensitivity_list": cost_sensitivity_list,
                               "preregistration_dict": stream_dict.get("preregistration_dict")})
+    # THE MANIFEST EXISTS: THE PICKLES AND CHECKPOINTS ARE NO LONGER NEEDED (AUDIT S11)
+    finish_dict["pruned_bytes"] = prune_finished_run_folder(stream_dict["run_folder_str"])
     return {**stream_dict, **finish_dict}
 
 

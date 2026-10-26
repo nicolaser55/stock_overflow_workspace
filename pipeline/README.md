@@ -1,4 +1,4 @@
-# Pipeline (shared data, steps 00-06)
+# Pipeline (shared data, steps 00-07)
 
 The pipeline turns the raw IBKR minute bars into per-day features and targets that every experiment can use. Its outputs
 are **kept across experiments**: re-running an experiment never requires re-running the pipeline.

@@ -15,7 +15,7 @@ models/
 GCS_key.json
 *.json.key
 .env
-# DATA FILES (THE DATA LIVES IN C:/Users/nico/Desktop/stock_overflow_data/, NEVER IN THE WORKSPACE)
+# DATA FILES (THE DATA LIVES UNDER SO_DATA_PATH, NEVER IN THE WORKSPACE)
 *.csv
 *.parquet
 # EXCEPTION: RESEARCH RECORDS (CORRECTION LOGS, TRIAL LOG SNAPSHOTS) ARE VERSIONED, INCLUDING SUB-FOLDERS
@@ -25,3 +25,5 @@ GCS_key.json
 # OS FILES
 .DS_Store
 Thumbs.db
+# QUEUE JOB WORKTREES (scripts/run_queue.py)
+.worktrees/

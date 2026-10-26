@@ -6,7 +6,8 @@
 #
 # What it does (it can be run again; it only adds or replaces so_agent's own entries):
 #   1. Creates the local standard user so_agent if it does not exist (asks for a password).
-#   2. Data root: so_agent may read everything, may write only in store04_experiments.
+#   2. Data root: so_agent may read everything and may write only store04_experiments\queue\pending (it adds jobs;
+#      the runner account so_runner runs them and alone writes runs, the trial log and the run index).
 #      store01_rawzone, store02_workzone and store03_goldzone: write and delete denied.
 #   3. Quarantine root and holdout results folder: every access denied.
 #   4. Nicolas's workspace: read and run (venv-main) allowed, write and delete denied. records\ is only read.
@@ -60,20 +61,22 @@ function Set-Acl-Entry([string]$Path, [string[]]$Arguments) {
     Write-Host "icacls $Path $($Arguments -join ' ')"
 }
 
-# START FROM NO so_agent ENTRIES ON THESE FOLDERS
-foreach ($folder in @($DataRoot, $NicolasWorkspace, $QuarantineRoot, $AgentWorkspace)) {
+# START FROM NO so_agent ENTRIES ON THESE FOLDERS (store04 TOO: AN EARLIER VERSION GRANTED IT MODIFY THERE)
+$experimentZone = Join-Path $DataRoot "store04_experiments"
+$pendingFolder = Join-Path $experimentZone "queue\pending"
+New-Item -ItemType Directory -Force -Path $pendingFolder | Out-Null
+foreach ($folder in @($DataRoot, $NicolasWorkspace, $QuarantineRoot, $AgentWorkspace, $experimentZone, $pendingFolder)) {
     Set-Acl-Entry $folder @("/remove:g", $Agent, "/remove:d", $Agent)
 }
 
-# 2. DATA ROOT: READ EVERYTHING, WRITE ONLY store04_experiments
+# 2. DATA ROOT: READ EVERYTHING, WRITE ONLY THE PENDING QUEUE
 Set-Acl-Entry $DataRoot @("/grant", "${Agent}:(OI)(CI)RX")
-foreach ($zone in @("store01_rawzone", "store02_workzone", "store03_goldzone")) {
+foreach ($zone in @("store01_rawzone", "store02_workzone", "store03_goldzone", "store04_experiments")) {
     $zonePath = Join-Path $DataRoot $zone
     if (Test-Path $zonePath) { Set-Acl-Entry $zonePath @("/deny", "${Agent}:(OI)(CI)(W,D,DC)") }
 }
-$experimentZone = Join-Path $DataRoot "store04_experiments"
-New-Item -ItemType Directory -Force -Path $experimentZone | Out-Null
-Set-Acl-Entry $experimentZone @("/grant", "${Agent}:(OI)(CI)M")
+# THE PENDING FOLDER: CREATE AND WRITE NEW JOB FILES (THE store04 DENY ABOVE COVERS DELETE)
+Set-Acl-Entry $pendingFolder @("/grant", "${Agent}:(OI)(CI)(RX,W)")
 
 # 3. QUARANTINE AND HOLDOUT RESULTS: NO ACCESS
 Set-Acl-Entry $QuarantineRoot @("/deny", "${Agent}:(OI)(CI)F")

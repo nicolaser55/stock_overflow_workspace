@@ -430,7 +430,7 @@ def add_tsday_fwd_label_known_ts_pdf(label_pdf_in):
     for column_str in label_column_list:
         cell_series = stamped_pdf[column_str]
         if cell_series.dtype == object:
-            cell_series = cell_series.replace("", np.nan).infer_objects(copy=False)
+            cell_series = cell_series.where(cell_series.astype(str) != "", np.nan)
         stamped_pdf[column_str] = pd.to_numeric(cell_series, errors="coerce")
     # AN UNFINISHED ROW HAS NO CLOCK AND MUST NOT ENTER THE FEED
     keep_mask = [pd.notna(label_ts) for label_ts in stamped_pdf["label_known_ts"]]
