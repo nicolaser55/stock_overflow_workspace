@@ -95,8 +95,14 @@ def get_last_folder_commit_subject_str(design_folder_str_in, git_func_in=None):
     def run_git(arg_list_in):
         return subprocess.check_output(["git"] + arg_list_in, cwd=paths.WORKSPACE_PATH_STR, text=True, encoding="utf-8")
     git_func = git_func_in or run_git
-    rel_str = os.path.relpath(os.path.abspath(design_folder_str_in), paths.WORKSPACE_PATH_STR).replace("\\", "/")
-    return str(git_func(["log", "-1", "--format=%s", "--", rel_str])).strip()
+    # A FOLDER ON ANOTHER WINDOWS DRIVE THAN THE WORKSPACE HAS NO RELATIVE PATH: PASS IT ABSOLUTE (GIT THEN FINDS NO
+    # COMMIT FOR IT, SO THE GUARD REFUSES THE FIRST RUN, WHICH IS THE SAFE ANSWER)
+    abs_folder_str = os.path.abspath(design_folder_str_in)
+    try:
+        path_str = os.path.relpath(abs_folder_str, paths.WORKSPACE_PATH_STR).replace("\\", "/")
+    except ValueError:
+        path_str = abs_folder_str.replace("\\", "/")
+    return str(git_func(["log", "-1", "--format=%s", "--", path_str])).strip()
 
 
 # FUNCTION: REFUSE A DEVELOPMENT RUN THAT BREAKS PRE-REGISTRATION
