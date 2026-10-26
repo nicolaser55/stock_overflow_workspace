@@ -121,7 +121,21 @@ def test_preregistration_guard():
     assert get_protocol_missing_list(open(os.path.join(WORKSPACE_PATH_STR, "experiments", "_template", "PROTOCOL.md"),
                                           encoding="utf-8").read()) == []
     assert get_protocol_missing_list("## Question\n## Rules\n") != []
-    passed("pre-registration: rerun of logged code, changed code refused, lint, preregister commit, at most three versions")
+    # A DESIGN FOLDER ON ANOTHER WINDOWS DRIVE (relpath RAISES THERE): THE CHECK STILL ANSWERS
+    import so.runner.preregistration as preregistration_module
+    original_relpath = preregistration_module.os.path.relpath
+
+    def raising_relpath(*arg_tuple_in, **kwarg_dict_in):
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+    preregistration_module.os.path.relpath = raising_relpath
+    try:
+        seen_list = []
+        subject_str = preregistration_module.get_last_folder_commit_subject_str(
+            folder_str, lambda arg_list_in: seen_list.append(arg_list_in) or "preregister expZZ\n")
+        assert subject_str == "preregister expZZ" and seen_list[0][-1] == os.path.abspath(folder_str).replace("\\", "/")
+    finally:
+        preregistration_module.os.path.relpath = original_relpath
+    passed("pre-registration: rerun of logged code, changed code refused, lint, preregister commit, at most three versions, other drive")
 
 
 # FUNCTION: THE REPORT CARRIES THE COST SENSITIVITY
