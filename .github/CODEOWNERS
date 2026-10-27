@@ -1,10 +1,15 @@
 # Code owners (audit B4, 2026-10-25). Generated from protected_paths.txt; tests/test_tools.py checks they match.
 # With branch protection's "Require review from Code Owners", a pull request that changes any of these paths
-# cannot be merged until Nicolas approves it. docs/RESULTS_LOG.md (append-only) is checked by CI instead.
+# cannot be merged until Nicolas approves it. docs/RESULTS_LOG.md is owned too, and CI also refuses an edited row.
 /AGENTS.md @nicolaser55
 /README.md @nicolaser55
 /.cursor/ @nicolaser55
 /protected_paths.txt @nicolaser55
+/docs/AGENTIC_DESIGN.md @nicolaser55
+/docs/AGENTIC_DESIGN.drawio @nicolaser55
+/docs/RUNNER_DESIGN.md @nicolaser55
+/docs/DATA_SOURCES.md @nicolaser55
+/pipeline/ @nicolaser55
 /records/ @nicolaser55
 /so/paths.py @nicolaser55
 /so/config.py @nicolaser55
@@ -62,3 +67,4 @@
 /requirements/ @nicolaser55
 /pyproject.toml @nicolaser55
 /setup_venv.py @nicolaser55
+/docs/RESULTS_LOG.md @nicolaser55

@@ -139,6 +139,10 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
+- **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected
+  `.py` file under `so/` and `scripts/` (paths and LF-normalized contents). The report (`judge_hash_str`), the
+  manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge hash were scored by
+  identical rules; a core change changes the hash, so results judged by different rules are never mixed silently.
 - **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) random cut dates
   (one from each third of the span, fixed seed), plus, for each candidate, up to `RUNNER_LOOKAHEAD_CHANGE_CUT_MAX` (10)
   sessions where its own decision changed (`RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE`, 2, in minute mode), spread

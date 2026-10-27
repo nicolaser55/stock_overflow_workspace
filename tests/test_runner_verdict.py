@@ -605,6 +605,7 @@ def test_crashed_run_leaves_no_manifest():
         manifest_dict = json.load(manifest_file)
     assert manifest_dict["status"] == "finished" and manifest_dict["run_id"] == "verdict_finish"
     assert manifest_dict["commit"] == "testcommit" and manifest_dict["code_hash"] == "testhash"
+    assert len(manifest_dict["judge_hash"]) == 64 and manifest_dict["judge_file_count"] > 20, manifest_dict["judge_hash"]
     assert manifest_dict["verdict"]["label"] == NOT_EMAIL_WORTHY_STR
     assert manifest_dict["verdict"]["look_ahead"] == LOOK_AHEAD_PASS_STR
     assert "look-ahead" not in manifest_dict["verdict"]["failed_list"]

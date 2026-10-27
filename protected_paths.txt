@@ -7,6 +7,15 @@ README.md
 .cursor/**
 protected_paths.txt
 
+# Design and judge documents (design 2026-10-27: agents may read, not change, what defines the system and the judge)
+docs/AGENTIC_DESIGN.md
+docs/AGENTIC_DESIGN.drawio
+docs/RUNNER_DESIGN.md
+docs/DATA_SOURCES.md
+
+# Pipeline notebooks: Nicolas's view refresh executes copies of them against the quarantine (complete data tree)
+pipeline/**
+
 # Records (holdout registry and ledger, bad-tick corrections)
 records/**
 
@@ -81,5 +90,7 @@ requirements/**
 pyproject.toml
 setup_venv.py
 
-# Results: rows are only appended (by scripts/run_development.py)
+# Results: rows are only appended, and only from the run index (scripts/append_results_log.py); the plain entry makes
+# CODEOWNERS require Nicolas's review, the append: entry makes CI refuse an edited row (design 2026-10-27)
+docs/RESULTS_LOG.md
 append:docs/RESULTS_LOG.md
