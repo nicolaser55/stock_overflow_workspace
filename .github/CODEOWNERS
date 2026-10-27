@@ -48,6 +48,7 @@
 /scripts/run_development.py @nicolaser55
 /scripts/append_results_log.py @nicolaser55
 /scripts/setup_so_runner.ps1 @nicolaser55
+/scripts/deploy_runner.ps1 @nicolaser55
 /scripts/run_queue.py @nicolaser55
 /scripts/check_protected_paths.py @nicolaser55
 /scripts/check_environment.py @nicolaser55

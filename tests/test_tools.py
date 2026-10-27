@@ -40,6 +40,39 @@ if hasattr(sys.stdout, "reconfigure"):
 DESIGN_STR = "experiments/exp13_e1m1_robustness"
 
 
+# FIXED 40-CHARACTER COMMITS FOR THE FAKE GIT (A JOB FILE MUST HOLD A FULL HASH)
+FAKE_COMMIT_STR = "c0ffee" + "0" * 34
+FAKE_JUDGE_STR = "babe00" + "0" * 34
+FAKE_RUN_COMMIT_STR = "feed00" + "0" * 34
+
+
+# FUNCTION: A FAKE GIT THAT ACCEPTS EVERYTHING (EXISTENCE CHECKS OF THE VALIDATION)
+def fake_accepting_git_func(arg_list_in, **kwarg_dict_in):
+    """
+    Returns:
+        str: Empty output (success)
+    """
+    # NOTHING IS CHECKED
+    return ""
+
+
+# FUNCTION: RUN THE QUEUE WITH THE FAKES THAT KEEP IT OFF GIT
+def run_fake_queue_list(path_dict_in, run_func_in, send_func_in, **kwarg_dict_in):
+    """
+    Args:
+        path_dict_in (dict): Queue paths
+        run_func_in, send_func_in (callable): Fake run and send
+        **kwarg_dict_in: Overrides of judge_func_in, git_func_in, prepare_func_in, pid_alive_func_in
+
+    Returns:
+        list[dict]: Results
+    """
+    # THE JUDGE, THE EXISTENCE CHECKS AND THE RUN COMMIT ARE FIXED
+    defaults_dict = {"judge_func_in": lambda: FAKE_JUDGE_STR, "git_func_in": fake_accepting_git_func,
+                     "prepare_func_in": lambda job_in: FAKE_RUN_COMMIT_STR}
+    return run_queue.run_queue_list(path_dict_in, run_func_in, send_func_in, **{**defaults_dict, **kwarg_dict_in})
+
+
 # FUNCTION: A FAKE GIT FOR add (status output, then a fixed HEAD)
 def get_git_func(status_str_in=""):
     """
@@ -51,7 +84,7 @@ def get_git_func(status_str_in=""):
     """
     # status, THEN rev-parse
     def git_func(arg_list_in):
-        return status_str_in if arg_list_in[0] == "status" else "c0ffee\n"
+        return status_str_in if arg_list_in[0] == "status" else FAKE_COMMIT_STR + "\n"
     return git_func
 
 
@@ -142,7 +175,7 @@ def test_queue_runs_files_and_emails():
         pass
     # A CLONE WITH UNCOMMITTED CODE CANNOT QUEUE ITS HEAD
     try:
-        run_queue.add_job_dict(path_dict, DESIGN_STR, "dirty", git_func_in=get_git_func(" M so/config.py\n"))
+        run_queue.add_job_dict(path_dict, DESIGN_STR, "dirty", git_func_in=get_git_func(" M experiments/exp13_e1m1_robustness/design.py\n"))
         raise AssertionError("a dirty clone was queued")
     except ValueError as error:
         assert "uncommitted" in str(error)
@@ -160,7 +193,7 @@ def test_queue_runs_files_and_emails():
     assert twin_dict["job_id"] != twin_two_dict["job_id"]
     for job_dict in (twin_dict, twin_two_dict):
         os.remove(os.path.join(path_dict["pending"], f"{job_dict['job_id']}.json"))
-    assert first_dict["commit"] == "c0ffee" and first_dict["attempt"] == 1
+    assert first_dict["commit"] == FAKE_COMMIT_STR and first_dict["attempt"] == 1
     assert [job["job_id"] for job in run_queue.get_pending_job_list(path_dict)] == [first_dict["job_id"], second_dict["job_id"]]
     # THE FIRST IS EMAIL-WORTHY, THE SECOND IS NOT
     sent_list = []
@@ -171,7 +204,7 @@ def test_queue_runs_files_and_emails():
     def run_func(job_dict_in, run_id_str_in, log_path_str_in):
         order_list.append(job_dict_in["note"])
         return get_fake_run_func(path_dict, job_dict_in["note"] == "first")(job_dict_in, run_id_str_in, log_path_str_in)
-    result_list = run_queue.run_queue_list(path_dict, run_func, send_func)
+    result_list = run_fake_queue_list(path_dict, run_func, send_func)
     assert order_list == ["first", "second"]
     assert [result["status"] for result in result_list] == ["done", "done"]
     assert sent_list == ["Stock Overflow: exp13_e1m1_robustness is email-worthy"]
@@ -184,28 +217,30 @@ def test_queue_runs_files_and_emails():
     assert [row["note"] for row in state_dict["recent"]] == ["second", "first"]
     # A FAILING RUN EMAILS AND IS FILED; A RETRY KEEPS ITS RUN ID AND COUNTS THE ATTEMPT
     third_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "third", git_func_in=CLEAN_GIT_FUNC)
-    failed_list = run_queue.run_queue_list(path_dict, get_fake_run_func(path_dict, True, 1), send_func)
+    failed_list = run_fake_queue_list(path_dict, get_fake_run_func(path_dict, True, 1), send_func)
     assert failed_list[0]["status"] == "failed" and failed_list[0]["log_tail"][-1] == "ValueError: boom"
     assert len(os.listdir(path_dict["failed"])) == 1 and sent_list[-1].endswith("run failed")
     retry_dict = run_queue.add_retry_job_dict(path_dict, third_dict["job_id"])
     assert retry_dict["run_id"] == failed_list[0]["run_id"] and retry_dict["attempt"] == 2
-    retry_result_list = run_queue.run_queue_list(path_dict, get_fake_run_func(path_dict, False), send_func)
+    assert retry_dict["judge_commit"] == FAKE_JUDGE_STR
+    retry_result_list = run_fake_queue_list(path_dict, get_fake_run_func(path_dict, False), send_func)
     assert retry_result_list[0]["run_id"] == failed_list[0]["run_id"] and retry_result_list[0]["status"] == "done"
     # THE RUN INDEX HAS ONE ROW PER ATTEMPT
     import pandas as pd
     index_pdf = pd.read_csv(path_dict["run_index"], dtype=str)
     assert list(index_pdf["status"]) == ["done", "done", "failed", "done"], list(index_pdf["status"])
-    assert list(index_pdf["attempt"]) == ["1", "1", "1", "2"] and set(index_pdf["commit"]) == {"c0ffee"}
-    passed("queue (commit pinned, dirty clone refused, oldest first, filing, failure email, retry under the same run id, run index)")
+    assert list(index_pdf["attempt"]) == ["1", "1", "1", "2"] and set(index_pdf["commit"]) == {FAKE_COMMIT_STR} and set(index_pdf["judge_commit"]) == {FAKE_JUDGE_STR}
+    assert os.path.isdir(path_dict["running"]) and not os.listdir(path_dict["running"]) and not os.listdir(path_dict["rejected"])
+    passed("queue (commit pinned, dirty clone refused, oldest first, filing, failure email, retry under the same run id and judge, run index)")
     # A SECOND RUNNER IS REFUSED WHILE A LIVE LOCK EXISTS; A STALE LOCK (DEAD PROCESS, SAME HOST) IS REPLACED
     import socket
     Path(path_dict["lock"]).write_text(json.dumps({"pid": 4242, "host": socket.gethostname()}), encoding="utf-8")
     try:
-        run_queue.run_queue_list(path_dict, run_func, send_func, pid_alive_func_in=lambda pid_in: True)
+        run_fake_queue_list(path_dict, run_func, send_func, pid_alive_func_in=lambda pid_in: True)
         raise AssertionError("a second runner started")
     except SystemExit as error:
         assert "another queue runner" in str(error)
-    assert run_queue.run_queue_list(path_dict, run_func, send_func, pid_alive_func_in=lambda pid_in: False) == []
+    assert run_fake_queue_list(path_dict, run_func, send_func, pid_alive_func_in=lambda pid_in: False) == []
     assert not os.path.exists(path_dict["lock"])
     passed("queue lock (a live runner refuses a second one; a stale lock is replaced)")
 
@@ -468,9 +503,393 @@ def test_every_python_file_compiles():
     passed(f"every Python file compiles ({len(file_list)}), the script modules import, and run_development loads {len(experiment_list)} experiments")
 
 
+# FUNCTION: A VALID PENDING JOB FILE FOR THE VALIDATION TESTS
+def get_valid_job_dict(suffix_str_in="aaaaaa", extra_dict_in=None):
+    """
+    Args:
+        suffix_str_in (str): Six hex characters (keeps job ids apart)
+        extra_dict_in (dict | None): Fields added or replaced
+
+    Returns:
+        dict: A job that passes get_clean_job_dict
+    """
+    # THE FIELDS add WRITES
+    job_dict = {"job_id": f"20261027120000000000_{suffix_str_in}_exp13_e1m1_robustness", "design": DESIGN_STR, "note": "n",
+                "commit": FAKE_COMMIT_STR, "n_jobs": None, "added_ts": "2026-10-27T12:00:00", "added_by": "so_agent", "attempt": 1}
+    job_dict.update(extra_dict_in or {})
+    return job_dict
+
+
+# FUNCTION: A PENDING FILE IS UNTRUSTED
+def test_queue_rejects_bad_pending_files():
+    """
+    Fields are patterns, unknown fields and a run id or judge commit without a matching failed record are refused,
+    and a rejected file is moved to rejected/ with its reason without stopping the valid job behind it.
+
+    Returns:
+        None
+    """
+    # THE FIELD CHECKS
+    base_dict = get_valid_job_dict()
+    assert run_queue.get_clean_job_dict(base_dict, base_dict["job_id"])["attempt"] == 1
+    bad_case_list = [
+        ("job_id traversal", {"job_id": "..\\..\\victim"}), ("job_id slash", {"job_id": "20261027120000000000_aaaaaa_a/b"}),
+        ("design outside experiments", {"design": "so/runner"}), ("design traversal", {"design": "experiments/../so"}),
+        ("design nested", {"design": "experiments/a/b"}), ("commit name", {"commit": "HEAD"}), ("commit short", {"commit": "c0ffee"}),
+        ("commit upper", {"commit": FAKE_COMMIT_STR.upper()}), ("unknown field", {"env": {"A": "b"}}),
+        ("note too long", {"note": "x" * 501}), ("note not text", {"note": ["a"]}), ("n_jobs zero", {"n_jobs": 0}),
+        ("n_jobs huge", {"n_jobs": 1000}), ("n_jobs bool", {"n_jobs": True}), ("attempt text", {"attempt": "1"}),
+        ("run_id traversal", {"run_id": "..\\..\\victim", "retry_of": "20261027120000000000_bbbbbb_x"}),
+        ("retry_of traversal", {"retry_of": "..\\x", "run_id": "r1"}), ("added_by odd", {"added_by": "a;b"})]
+    for label_str, change_dict in bad_case_list:
+        try:
+            run_queue.get_clean_job_dict({**base_dict, **change_dict}, base_dict["job_id"])
+            raise AssertionError(f"accepted: {label_str}")
+        except ValueError:
+            pass
+    try:
+        run_queue.get_clean_job_dict(base_dict, "20261027120000000000_zzzzzz_other")
+        raise AssertionError("a job id that differs from the file name was accepted")
+    except ValueError:
+        pass
+    assert "\n" not in run_queue.get_clean_job_dict({**base_dict, "note": "a\nb\tc"}, base_dict["job_id"])["note"]
+    # PENDING FILES: SEVERAL BAD ONES, THEN A VALID ONE
+    import time as time_module
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    def write_pending(job_dict_in, age_seconds_in=0):
+        file_str = os.path.join(path_dict["pending"], f"{job_dict_in['job_id']}.json")
+        Path(file_str).write_text(json.dumps(job_dict_in), encoding="utf-8")
+        if age_seconds_in:
+            os.utime(file_str, (time_module.time() - age_seconds_in,) * 2)
+        return file_str
+    write_pending(get_valid_job_dict("000001", {"commit": "main"}))
+    write_pending(get_valid_job_dict("000002", {"env": "x"}))
+    write_pending(get_valid_job_dict("000003", {"run_id": "run_forged"}))
+    write_pending(get_valid_job_dict("000004", {"judge_commit": FAKE_JUDGE_STR}))
+    write_pending(get_valid_job_dict("000005", {"retry_of": "20261027110000000000_cccccc_exp13_e1m1_robustness", "run_id": "run_forged"}))
+    Path(path_dict["pending"], "20261027120000000000_000006_exp13_e1m1_robustness.json").write_text("{not json", encoding="utf-8")
+    old_broken_str = Path(path_dict["pending"], "20261027120000000000_000007_exp13_e1m1_robustness.json")
+    old_broken_str.write_text("{not json", encoding="utf-8")
+    os.utime(old_broken_str, (time_module.time() - 7200,) * 2)
+    Path(path_dict["pending"], "20261027120000000000_000008_exp13_e1m1_robustness.json").write_text(" " * 70000, encoding="utf-8")
+    good_dict = get_valid_job_dict("000009")
+    write_pending(good_dict)
+    next_dict = run_queue.get_next_job_dict(path_dict, fake_accepting_git_func)
+    assert next_dict is not None and next_dict["job_id"] == good_dict["job_id"], next_dict
+    rejected_list = sorted(os.listdir(path_dict["rejected"]))
+    assert len(rejected_list) == 7, rejected_list
+    assert sorted(os.listdir(path_dict["pending"])) == sorted([f"{good_dict['job_id']}.json",
+                                                              "20261027120000000000_000006_exp13_e1m1_robustness.json"])
+    reason_str = run_queue.read_json(os.path.join(path_dict["rejected"], rejected_list[0]))["reason"]
+    assert reason_str
+    state_recent_list = run_queue.read_json(path_dict["state"])["recent"]
+    assert len(state_recent_list) == 7 and all(row["status"] == "rejected" and row["reason"] for row in state_recent_list)
+    # A COMMIT THAT GIT DOES NOT HAVE
+    import subprocess as subprocess_module
+    def missing_git_func(arg_list_in, **kwarg_dict_in):
+        raise subprocess_module.CalledProcessError(128, "git", output="fatal: Not a valid object name")
+    try:
+        run_queue.get_validated_job_dict(path_dict, good_dict, good_dict["job_id"], missing_git_func)
+        raise AssertionError("a commit git does not have was accepted")
+    except ValueError as error:
+        assert "push it to origin" in str(error)
+    # A RETRY MUST MATCH THE RUNNER'S RECORD OF THE FAILED JOB
+    failed_id_str = "20261027110000000000_cccccc_exp13_e1m1_robustness"
+    run_queue.write_json_atomic(os.path.join(path_dict["failed"], f"{failed_id_str}.json"), {
+        "job_id": failed_id_str, "run_id": "run_real", "design": DESIGN_STR, "commit": FAKE_COMMIT_STR,
+        "judge_commit": FAKE_JUDGE_STR, "attempt": 1})
+    retry_base_dict = get_valid_job_dict("00000a", {"retry_of": failed_id_str, "run_id": "run_real", "attempt": 5})
+    accepted_dict = run_queue.get_validated_job_dict(path_dict, retry_base_dict, retry_base_dict["job_id"], fake_accepting_git_func)
+    assert accepted_dict["judge_commit"] == FAKE_JUDGE_STR and accepted_dict["attempt"] == 2
+    for label_str, change_dict in [("other run id", {"run_id": "run_other"}), ("other design", {"design": "experiments/exp12_vix_fear_reentry"}),
+                                   ("other commit", {"commit": "1" * 40}), ("other judge", {"judge_commit": "2" * 40})]:
+        try:
+            run_queue.get_validated_job_dict(path_dict, {**retry_base_dict, **change_dict}, retry_base_dict["job_id"], fake_accepting_git_func)
+            raise AssertionError(f"forged retry accepted: {label_str}")
+        except ValueError:
+            pass
+    passed("pending files are untrusted (patterns, unknown fields, forged run id / judge / retry, missing commit; rejected/ keeps the reason)")
+
+
+# FUNCTION: A CRASH OR REBOOT RESUMES THE JOB UNDER ITS RUN ID AND ITS JUDGE
+def test_queue_claim_resume_and_give_up():
+    """
+    A claimed job lives in running/. After a crash the next runner resumes it with the same run id and the judge
+    commit of the first start (the judge moved on meanwhile), counts the interruption, and files a job interrupted
+    too often as failed without starting a process. A refused run commit rejects the job without an email.
+
+    Returns:
+        None
+    """
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    sent_list = []
+    def send_func(path_dict_in, run_id_str_in, subject_str_in, body_str_in):
+        sent_list.append(subject_str_in)
+        return {"sent_bool": True, "detail": "fake"}
+    # CLAIM, THEN "CRASH"
+    first_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "crashy", git_func_in=CLEAN_GIT_FUNC)
+    claimed_dict = run_queue.claim_job_dict(path_dict, first_dict, lambda: FAKE_JUDGE_STR)
+    assert os.path.isfile(os.path.join(path_dict["running"], f"{first_dict['job_id']}.json"))
+    assert not os.path.isfile(os.path.join(path_dict["pending"], f"{first_dict['job_id']}.json"))
+    assert claimed_dict["judge_commit"] == FAKE_JUDGE_STR and claimed_dict["run_id"].startswith("exp13_e1m1_robustness_")
+    seen_list = []
+    def run_func(job_dict_in, run_id_str_in, log_path_str_in):
+        seen_list.append(dict(job_dict_in))
+        return get_fake_run_func(path_dict, False)(job_dict_in, run_id_str_in, log_path_str_in)
+    result_list = run_fake_queue_list(path_dict, run_func, send_func, judge_func_in=lambda: "d" * 40)
+    assert len(result_list) == 1 and result_list[0]["status"] == "done"
+    assert seen_list[0]["run_id"] == claimed_dict["run_id"] and seen_list[0]["judge_commit"] == FAKE_JUDGE_STR
+    assert seen_list[0]["attempt"] == 2 and seen_list[0]["resume_count"] == 1 and seen_list[0]["run_commit"] == FAKE_RUN_COMMIT_STR
+    assert result_list[0]["log"].endswith(f"{claimed_dict['run_id']}_attempt2.log")
+    assert not os.listdir(path_dict["running"]) and not os.listdir(path_dict["pending"])
+    # INTERRUPTED TOO OFTEN: FILED AS FAILED, NO PROCESS, ONE FAILURE EMAIL
+    second_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "unlucky", git_func_in=CLEAN_GIT_FUNC)
+    run_queue.claim_job_dict(path_dict, second_dict, lambda: FAKE_JUDGE_STR)
+    running_path_str = os.path.join(path_dict["running"], f"{second_dict['job_id']}.json")
+    running_dict = run_queue.read_json(running_path_str)
+    run_queue.write_json_atomic(running_path_str, {**running_dict, "resume_count": run_queue.MAX_RESUME_COUNT_INT})
+    seen_list.clear()
+    result_list = run_fake_queue_list(path_dict, run_func, send_func)
+    assert seen_list == [] and result_list[0]["status"] == "failed" and "gave up" in result_list[0]["log_tail"][-1]
+    assert sent_list[-1].endswith("run failed") and os.path.isfile(os.path.join(path_dict["failed"], f"{second_dict['job_id']}.json"))
+    # A REFUSED RUN COMMIT IS A REJECTED JOB, NOT A FAILED ONE, AND NOBODY IS EMAILED
+    third_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "refused", git_func_in=CLEAN_GIT_FUNC)
+    email_count_int = len(sent_list)
+    def refusing_prepare_func(job_in):
+        raise ValueError("the job commit changes files outside experiments/: so/config.py")
+    result_list = run_fake_queue_list(path_dict, run_func, send_func, prepare_func_in=refusing_prepare_func)
+    assert result_list == [] and len(sent_list) == email_count_int and not os.listdir(path_dict["running"])
+    rejected_dict = run_queue.read_json(os.path.join(path_dict["rejected"], f"{third_dict['job_id']}.json"))
+    assert "outside experiments/" in rejected_dict["reason"]
+    passed("queue claim and resume (same run id and judge after a crash, give-up after too many interruptions, refused commit rejected without email)")
+
+
+# FUNCTION: THE HEARTBEAT, THE CHILD ENVIRONMENT
+def test_queue_heartbeat_and_child_environment():
+    """
+    state.json is refreshed while a job runs; the child process environment lacks SMTP settings, tokens and keys.
+
+    Returns:
+        None
+    """
+    # A SLOW FAKE RUN WITH A SHORT HEARTBEAT
+    import time as time_module
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    run_queue.add_job_dict(path_dict, DESIGN_STR, "slow", git_func_in=CLEAN_GIT_FUNC)
+    seen_dict = {}
+    def slow_run_func(job_dict_in, run_id_str_in, log_path_str_in):
+        seen_dict["before_ns"] = os.stat(path_dict["state"]).st_mtime_ns
+        time_module.sleep(0.8)
+        seen_dict["after_ns"] = os.stat(path_dict["state"]).st_mtime_ns
+        seen_dict["running"] = run_queue.read_json(path_dict["state"])["running"]
+        return get_fake_run_func(path_dict, False)(job_dict_in, run_id_str_in, log_path_str_in)
+    os.environ["SO_QUEUE_HEARTBEAT_SECONDS"] = "0.1"
+    try:
+        result_list = run_fake_queue_list(path_dict, slow_run_func, lambda *args_in: {"sent_bool": True, "detail": ""})
+    finally:
+        os.environ.pop("SO_QUEUE_HEARTBEAT_SECONDS", None)
+    assert result_list[0]["status"] == "done" and seen_dict["after_ns"] > seen_dict["before_ns"]
+    assert seen_dict["running"]["run_id"] == result_list[0]["run_id"]
+    # SECRETS DO NOT REACH THE CHILD; THE REST DOES
+    child_dict = run_queue.get_child_environment_dict({
+        "PATH": "/bin", "SystemRoot": "C:\\Windows", "SO_DATA_PATH": "d", "SO_QUEUE_PYTHON": "py", "HOME": "/h",
+        "SO_SMTP_PASSWORD": "p", "SO_SMTP_HOST": "h", "SO_EMAIL_TO": "a@b", "so_email_extra": "x", "GITHUB_TOKEN": "t",
+        "GH_TOKEN": "t", "MY_API_KEY": "k", "db_password": "q", "ANTHROPIC_API_KEY": "a", "SO_HOLDOUT_EVALUATION_TOKEN": "h",
+        "AWS_SECRET_ACCESS_KEY": "s"})
+    assert sorted(child_dict) == ["HOME", "PATH", "SO_DATA_PATH", "SO_QUEUE_PYTHON", "SystemRoot"], sorted(child_dict)
+    passed("queue heartbeat (state.json refreshed during a job) and child environment (no SMTP, token or key variables)")
+
+
+# FUNCTION: A GIT REPOSITORY WITH A JUDGE ON MAIN AND TWO BRANCHES
+def make_judge_test_repo():
+    """
+    main: so/helper.py (v1), scripts/run_development.py, experiments/exp_a. Branch design: changes experiments only.
+    Then main moves on (helper v2). Branch bad_outside changes so/helper.py. Branch bad_link adds a symbolic link
+    under experiments/. Branch bad_none deletes experiments/.
+
+    Returns:
+        dict: repo path, git function, commits (judge1, judge2, design, bad_outside, bad_link, bad_none)
+    """
+    # A SCRIPT THAT PRINTS WHAT THE RUN SEES
+    repo_str = tempfile.mkdtemp(prefix="so_judge_repo_")
+    def git_func(arg_list_in, **kwarg_dict_in):
+        return run_queue.run_git_str(arg_list_in, repo_str, **kwarg_dict_in)
+    def write_file(relative_str_in, text_str_in):
+        file_path = Path(repo_str, relative_str_in)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(text_str_in, encoding="utf-8")
+    for arg_list in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"]):
+        git_func(arg_list)
+    script_str = (
+        "import json, os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "run_id = sys.argv[sys.argv.index('--run-id') + 1]\n"
+        "print('secret_visible', bool(os.environ.get('SO_SMTP_PASSWORD')))\n"
+        "print('judge', Path('so/helper.py').read_text().strip())\n"
+        "print('design', Path('experiments/exp_a/design.py').read_text().strip())\n"
+        "print('head', subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip())\n"
+        "print('dirty', repr(subprocess.check_output(['git', 'status', '--porcelain'], text=True)))\n"
+        "folder = Path(os.environ['SO_TEST_RUNS_PATH'], run_id); folder.mkdir(parents=True, exist_ok=True)\n"
+        "(folder / 'manifest.json').write_text(json.dumps({'status': 'finished', 'verdict': {'email_worthy': False, 'label': 'x', 'failed_list': [], 'look_ahead': 'pass'}}))\n"
+        "print('results_row | ok |')\n")
+    write_file("so/helper.py", "judge v1\n")
+    write_file("scripts/run_development.py", script_str)
+    write_file("experiments/exp_a/design.py", "design v1\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "judge1"])
+    judge1_str = git_func(["rev-parse", "HEAD"]).strip()
+    commit_dict = {"judge1": judge1_str}
+    git_func(["checkout", "-q", "-b", "design"])
+    write_file("experiments/exp_a/design.py", "design v2\n"); write_file("experiments/exp_b/design.py", "design b\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "design"])
+    commit_dict["design"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "-b", "bad_outside", judge1_str])
+    write_file("so/helper.py", "judge forged\n"); write_file("experiments/exp_a/design.py", "design v2\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "bad outside"])
+    commit_dict["bad_outside"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "-b", "bad_link", judge1_str])
+    link_blob_str = git_func(["hash-object", "-w", "--stdin"], input_str_in="../so/helper.py").strip()
+    git_func(["update-index", "--add", "--cacheinfo", f"120000,{link_blob_str},experiments/exp_a/link.py"])
+    git_func(["commit", "-q", "-m", "bad link"])
+    commit_dict["bad_link"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "-b", "unicode_ok", judge1_str])
+    write_file("experiments/exp_a/é.py", "x = 1\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "unicode inside"])
+    commit_dict["unicode_ok"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "-b", "unicode_outside", judge1_str])
+    write_file("so/é.py", "x = 1\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "unicode outside"])
+    commit_dict["unicode_outside"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "-b", "bad_none", judge1_str])
+    git_func(["rm", "-r", "-q", "experiments"]); git_func(["commit", "-q", "-m", "bad none"])
+    commit_dict["bad_none"] = git_func(["rev-parse", "HEAD"]).strip()
+    git_func(["checkout", "-q", "main"])
+    write_file("so/helper.py", "judge v2\n")
+    git_func(["add", "-A"]); git_func(["commit", "-q", "-m", "judge2"])
+    commit_dict["judge2"] = git_func(["rev-parse", "HEAD"]).strip()
+    return {"repo": repo_str, "git": git_func, "commit": commit_dict}
+
+
+# FUNCTION: THE RUN COMMIT TAKES THE JUDGE FROM MAIN AND THE DESIGN FROM THE JOB
+def test_queue_judge_from_main_run_commit():
+    """
+    In a throwaway repository: the run commit has main's so/ and the branch's experiments/ (even though main moved on
+    after the branch point), the same pair always gives the same commit, a job commit that changes anything outside
+    experiments/, holds a link, or has no experiments/ is refused, a full queue run executes the script of the
+    judge in a clean worktree with no secret variables, refs/runs/<run id> keeps the run commit, and the worktree is
+    removed.
+
+    Returns:
+        None
+    """
+    repo_dict = make_judge_test_repo()
+    git_func, commit_dict = repo_dict["git"], repo_dict["commit"]
+    run_commit_str = run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict["design"], git_func)
+    assert git_func(["show", f"{run_commit_str}:so/helper.py"]).strip() == "judge v2"
+    assert git_func(["show", f"{run_commit_str}:experiments/exp_a/design.py"]).strip() == "design v2"
+    assert git_func(["show", f"{run_commit_str}:experiments/exp_b/design.py"]).strip() == "design b"
+    assert git_func(["rev-parse", f"{run_commit_str}^@"]).split() == [commit_dict["judge2"], commit_dict["design"]]
+    assert run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict["design"], git_func) == run_commit_str
+    run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict["unicode_ok"], git_func)
+    for key_str, fragment_str in [("bad_outside", "outside experiments/"), ("bad_link", "symbolic link"), ("bad_none", "no experiments/"),
+                                  ("unicode_outside", "outside experiments/")]:
+        try:
+            run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict[key_str], git_func)
+            raise AssertionError(f"{key_str} was accepted")
+        except ValueError as error:
+            assert fragment_str in str(error), (key_str, str(error))
+    same_commit_str = run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict["judge2"], git_func)
+    assert git_func(["rev-parse", f"{same_commit_str}^@"]).split() == [commit_dict["judge2"]]
+    # THE JUDGE COMMIT OF A NEW JOB: A FAILED FETCH FALLS BACK TO THE LOCAL REF; THE REF CAN BE CHANGED
+    import subprocess as subprocess_module
+    call_list = []
+    def fake_git_func(arg_list_in, **kwarg_dict_in):
+        call_list.append(list(arg_list_in))
+        if arg_list_in[0] == "fetch":
+            raise subprocess_module.CalledProcessError(128, "git", output="no network")
+        return FAKE_JUDGE_STR + "\n"
+    assert run_queue.get_judge_commit_str(fake_git_func) == FAKE_JUDGE_STR and call_list[-1][-1] == "origin/main^{commit}"
+    os.environ["SO_QUEUE_JUDGE_REF"] = "origin/other"
+    try:
+        run_queue.get_judge_commit_str(fake_git_func)
+    finally:
+        os.environ.pop("SO_QUEUE_JUDGE_REF", None)
+    assert call_list[-1][-1] == "origin/other^{commit}"
+    # A FULL QUEUE RUN WITH THE REAL SCRIPT ENTRY: JOB FILE -> VALIDATION -> CLAIM -> RUN COMMIT -> WORKTREE -> PROCESS
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    job_dict = get_valid_job_dict("00000b", {"design": "experiments/exp_a", "commit": commit_dict["design"]})
+    run_queue.write_job_file(os.path.join(path_dict["pending"], f"{job_dict['job_id']}.json"), job_dict)
+    worktree_root_str = tempfile.mkdtemp(prefix="so_worktrees_")
+    environment_update_dict = {"SO_QUEUE_WORKTREE_ROOT": worktree_root_str, "SO_TEST_RUNS_PATH": path_dict["runs"],
+                               "SO_SMTP_PASSWORD": "hunter2"}
+    os.environ.update(environment_update_dict)
+    try:
+        result_list = run_queue.run_queue_list(
+            path_dict, lambda job_in, run_id_in, log_in: run_queue.run_development_process_dict(job_in, run_id_in, log_in, git_func),
+            lambda *args_in: {"sent_bool": True, "detail": ""}, judge_func_in=lambda: commit_dict["judge2"], git_func_in=git_func)
+    finally:
+        for name_str in environment_update_dict:
+            os.environ.pop(name_str, None)
+    assert len(result_list) == 1 and result_list[0]["status"] == "done", result_list
+    log_str = Path(result_list[0]["log"]).read_text(encoding="utf-8")
+    assert "secret_visible False" in log_str and "judge judge v2" in log_str and "design design v2" in log_str, log_str
+    assert f"head {run_commit_str}" in log_str and "dirty ''" in log_str, log_str
+    assert result_list[0]["run_commit"] == run_commit_str and result_list[0]["judge_commit"] == commit_dict["judge2"]
+    assert git_func(["rev-parse", f"refs/runs/{result_list[0]['run_id']}"]).strip() == run_commit_str
+    assert not os.listdir(worktree_root_str) and not os.listdir(path_dict["running"])
+    passed("judge from main (run commit = main's tree + the job's experiments/, deterministic, parents kept by refs/runs; "
+           "outside changes, links and missing experiments/ refused; clean worktree, no secrets, removed afterwards)")
+
+
+# FUNCTION: AN OLD run_index.csv IS BROUGHT TO THE CURRENT COLUMNS BEFORE THE NEXT APPEND
+def test_queue_run_index_upgrade():
+    """
+    The append refuses a header that differs from the column list, so a new column would stop every append to an
+    existing index. The runner rewrites an index that only lacks columns (keeping a copy) and leaves other files alone.
+
+    Returns:
+        None
+    """
+    import pandas as pd
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    assert run_queue.upgrade_run_index_file(path_dict) is False
+    old_column_list = [name_str for name_str in run_queue.RUN_INDEX_COLUMN_LIST if name_str not in ("judge_hash", "judge_commit", "run_commit")]
+    pd.DataFrame([{name_str: f"v_{name_str}" for name_str in old_column_list}]).to_csv(path_dict["run_index"], index=False)
+    assert run_queue.upgrade_run_index_file(path_dict) is True
+    upgraded_pdf = pd.read_csv(path_dict["run_index"], dtype=str, keep_default_na=False)
+    assert list(upgraded_pdf.columns) == run_queue.RUN_INDEX_COLUMN_LIST
+    assert upgraded_pdf.loc[0, "run_id"] == "v_run_id" and upgraded_pdf.loc[0, "judge_commit"] == ""
+    assert len([name_str for name_str in os.listdir(zone_str) if name_str.startswith("run_index.csv.before_")]) == 1
+    assert run_queue.upgrade_run_index_file(path_dict) is False
+    run_queue.append_run_index_row(path_dict, {"run_id": "run_new", "job_id": "job_new", "design": DESIGN_STR, "status": "done",
+                                               "judge_commit": FAKE_JUDGE_STR})
+    final_pdf = pd.read_csv(path_dict["run_index"], dtype=str, keep_default_na=False)
+    assert list(final_pdf["run_id"]) == ["v_run_id", "run_new"] and final_pdf.loc[1, "judge_commit"] == FAKE_JUDGE_STR
+    # A FILE WITH A COLUMN THE LIST DOES NOT KNOW IS NOT TOUCHED
+    other_str = os.path.join(tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"]), "run_index.csv")
+    Path(other_str).write_text("run_id,mystery\nx,y\n", encoding="utf-8")
+    assert run_queue.upgrade_run_index_file({"run_index": other_str}) is False
+    assert Path(other_str).read_text(encoding="utf-8") == "run_id,mystery\nx,y\n"
+    passed("run index upgrade (missing columns added with a copy of the old file, unknown columns left alone, appends work afterwards)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
+    test_queue_rejects_bad_pending_files()
+    test_queue_claim_resume_and_give_up()
+    test_queue_heartbeat_and_child_environment()
+    test_queue_judge_from_main_run_commit()
+    test_queue_run_index_upgrade()
     test_every_python_file_compiles()
     test_queue_timeout_kills_tree()
     test_queue_worktree_and_results_rows()

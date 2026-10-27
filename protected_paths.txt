@@ -64,6 +64,7 @@ scripts/refresh_development_view.py
 scripts/run_development.py
 scripts/append_results_log.py
 scripts/setup_so_runner.ps1
+scripts/deploy_runner.ps1
 scripts/run_queue.py
 scripts/check_protected_paths.py
 scripts/check_environment.py

@@ -29,8 +29,10 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
   view only; keep experiment constants in the experiment's `config.py`.
 - Runs: commit and push your branch first, then `scripts\run_queue.py add experiments\<exp> --note "<why>"` (it
-  records the commit; uncommitted code in `so/` or the experiment folder is refused). The runner runs it at that
-  commit and writes the report, the manifest and a `run_index.csv` row. Read results from those files
+  records the commit; uncommitted changes in the experiment folder are refused). A job brings only `experiments/**`:
+  the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the tip of `main`, so a commit that
+  changes other files is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
+  The runner writes the report, the manifest and a `run_index.csv` row. Read results from those files
   (`scripts\run_queue.py status`, `store04_experiments/runs/<run id>/report.md`), never from memory. A failed job
   emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id.
 - A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
