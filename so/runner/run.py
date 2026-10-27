@@ -36,6 +36,7 @@ from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict
 from so.runner.preregistration import check_preregistration_dict
+from so.runner.judge_identity import get_judge_hash_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
                                write_run_report_dict, write_run_manifest_dict, get_view_stamp_dict, get_json_value,
@@ -755,11 +756,14 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
         verdict_dict["look_ahead_dict"]["elapsed_seconds"] = lookahead_dict.get("elapsed_seconds")
     extra_report_dict = dict(extra_report_dict_in or {})
+    # THE JUDGE THAT SCORED THIS RUN (HASH OF THE PROTECTED CORE CODE; DESIGN 2026-10-27)
+    judge_dict = get_judge_hash_dict()
     view_stamp_dict = extra_report_dict.pop("view_stamp_dict", get_view_stamp_dict())
     report_dict = get_report_payload_dict(verdict_dict, {
         "run_id_str": stream_dict_in["run_id_str"], "experiment_name_str": stream_dict_in["experiment_name_str"],
         "protocol_version_str": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
         "commit_str": stream_dict_in["commit_str"], "code_hash_str": stream_dict_in["code_hash_str"],
+        "judge_hash_str": judge_dict["judge_hash"], "judge_file_count": judge_dict["judge_file_count"],
         "view_stamp_dict": view_stamp_dict, "candidate_list": list(stream_dict_in["candidate_list"]),
         "trial_id_list": list(stream_dict_in["trial_id_list"]), "date1": str(date1_in), "date2": str(date2_in),
         **extra_report_dict,
@@ -769,6 +773,7 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, LOOKAHEAD_FILE_STR, MANIFEST_FILE_STR]
     manifest_dict = {"status": "finished", "run_id": stream_dict_in["run_id_str"],
                      "commit": stream_dict_in["commit_str"], "code_hash": stream_dict_in["code_hash_str"],
+                     "judge_hash": judge_dict["judge_hash"], "judge_file_count": judge_dict["judge_file_count"],
                      "view_stamp": view_stamp_dict,
                      "design": {"experiment_name": stream_dict_in["experiment_name_str"],
                                 "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),

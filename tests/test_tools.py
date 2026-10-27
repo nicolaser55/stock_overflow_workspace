@@ -280,6 +280,11 @@ def test_protected_paths():
     for path_str in ["experiments/exp99_new/design.py", "so/features/rule_design.py", "tests/test_experiments.py", "docs/notes.md"]:
         assert not get_protected_bool(path_str, protected_dict["glob_list"]), path_str
     assert "docs/RESULTS_LOG.md" in protected_dict["append_list"]
+    # DESIGN 2026-10-27: DESIGN DOCUMENTS, PIPELINE NOTEBOOKS AND THE RESULTS LOG ARE CORE; THE JUDGE IDENTITY IS PROTECTED
+    for path_str in ["docs/AGENTIC_DESIGN.md", "docs/AGENTIC_DESIGN.drawio", "docs/RUNNER_DESIGN.md", "docs/DATA_SOURCES.md",
+                     "pipeline/step05_TSBAR_data_collection.ipynb", "docs/RESULTS_LOG.md", "so/runner/judge_identity.py",
+                     "tests/test_runner_judge.py"]:
+        assert get_protected_bool(path_str, protected_dict["glob_list"]), path_str
     assert get_append_only_bool("--- a/x\n+++ b/x\n@@ -10,0 +11 @@\n+| new row |")
     assert not get_append_only_bool("--- a/x\n+++ b/x\n@@ -3 +3 @@\n-| old |\n+| edited |")
     # A BRANCH THAT CHANGES A GUARD, AN EXPERIMENT AND APPENDS A RESULT ROW

@@ -20,8 +20,8 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   boundary: stop that action and report it; never work around it.
 - Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
 - Protected files (`protected_paths.txt`): the guards, the runner, the rules, the records, the guard tests, the
-  environment. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
-  `docs/RESULTS_LOG.md` only grows (runs append rows).
+  environment, the design documents (`docs/AGENTIC_DESIGN.md`, `docs/RUNNER_DESIGN.md`) and the pipeline notebooks. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
+  `docs/RESULTS_LOG.md` only grows, and only from the run index (`scripts/append_results_log.py`); never write a row.
 - Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
 - Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never
   commit failing tests. New tests go in a new `tests/test_*.py` added to `tests/run_all_tests.py` (synthetic data only).

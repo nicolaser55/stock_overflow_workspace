@@ -60,7 +60,8 @@ WORKSPACE_PATH = Path(__file__).resolve().parents[1]
 # THE RUN INDEX COLUMNS
 RUN_INDEX_COLUMN_LIST = ["run_id", "attempt", "job_id", "design", "commit", "note", "status", "return_code",
                          "verdict_label", "email_worthy", "failed_list", "strategy_total_return",
-                         "buy_hold_total_return", "look_ahead", "design_count", "added_by", "added_ts", "finished_ts"]
+                         "buy_hold_total_return", "look_ahead", "design_count", "judge_hash", "added_by", "added_ts",
+                         "finished_ts"]
 # THE CODE add REQUIRES TO BE COMMITTED (WITH THE DESIGN FOLDER)
 GUARDED_ADD_FOLDER_LIST = ["so"]
 # DEFAULT TIME LIMIT OF ONE JOB (exp01 TAKES 11-14 HOURS)
@@ -569,17 +570,18 @@ def get_report_number_dict(path_dict_in, run_id_str_in):
         run_id_str_in (str): Run id
 
     Returns:
-        dict: strategy_total_return, buy_hold_total_return, design_count (empty strings when absent)
+        dict: strategy_total_return, buy_hold_total_return, design_count, judge_hash (empty strings when absent)
     """
     # report.json HOLDS EVERY NUMBER BEHIND THE VERDICT
     report_path_str = os.path.join(path_dict_in["runs"], run_id_str_in, "report.json")
     if not os.path.isfile(report_path_str):
-        return {"strategy_total_return": "", "buy_hold_total_return": "", "design_count": ""}
+        return {"strategy_total_return": "", "buy_hold_total_return": "", "design_count": "", "judge_hash": ""}
     report_dict = read_json(report_path_str)
     return_dict = report_dict.get("return_dict") or {}
     return {"strategy_total_return": return_dict.get("strategy_total_return", ""),
             "buy_hold_total_return": return_dict.get("buy_hold_total_return", ""),
-            "design_count": (report_dict.get("multiple_testing_dict") or {}).get("design_count", "")}
+            "design_count": (report_dict.get("multiple_testing_dict") or {}).get("design_count", ""),
+            "judge_hash": report_dict.get("judge_hash_str", "")}
 
 
 # FUNCTION: APPEND ONE ROW TO run_index.csv
