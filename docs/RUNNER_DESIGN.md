@@ -129,12 +129,25 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
 - **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
   with different design-folder code, a first run of a new version without a `preregister` last commit or without the
   required protocol sections and "Derived from:" line, and a fourth version of an experiment.
-- **Queue and runner account (audit S3 / S4, 2026-10-26):** `scripts/run_queue.py`. A job names a commit; the
-  runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`) fetches origin, runs
-  `scripts/run_development.py` from a detached worktree at that commit, under a time limit (default 24 h, the whole
-  process tree is killed), appends one `run_index.csv` row per attempt and removes the worktree. A failed job is
-  emailed and can be retried under the same run id (it resumes from the checkpoints). A stale lock from a dead
-  process is replaced. Agents can only add job files. A finished run deletes its bar and source pickles, checkpoints
+- **Queue and runner account (audit S3 / S4, 2026-10-26; hardened A2, 2026-10-27):** `scripts/run_queue.py`. A job
+  names a design commit. The runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`)
+  fetches origin and builds the run commit from two sources: everything except `experiments/` from the tip of
+  `origin/main` (the judge; `SO_QUEUE_JUDGE_REF` overrides the ref), `experiments/` from the job's commit. The run
+  commit has both as parents, a fixed author and date (the same pair always gives the same hash, which a resumed run
+  needs) and is kept by `refs/runs/<run id>`. A job commit that changes any other file, holds a symbolic link or a
+  submodule under `experiments/`, or has no `experiments/` is rejected, not failed, and nothing is emailed. The runner
+  runs `scripts/run_development.py` from a detached worktree at the run commit, under a time limit (default 24 h, the
+  whole process tree is killed), with an environment that lacks SMTP settings, tokens and keys, appends one
+  `run_index.csv` row per attempt (`judge_commit`, `run_commit` included) and removes the worktree. A pending file is
+  untrusted input: only the fields of a job with pattern-checked values are accepted, and a run id, a judge commit or
+  a retry marker only when it matches the runner's record of the failed job; anything else is moved to
+  `queue/rejected/` with the reason. A claimed job lives in `queue/running/` with its run id and judge commit; after a
+  crash or reboot it is resumed under the same run id and judge (at most twice, then filed as failed). A thread
+  refreshes `state.json` every 60 s while a job runs; `state.json` also shows the commit of the queue script.
+  `run_index.csv` is rewritten with the current columns (a copy is kept) when it only lacks columns. A failed job is
+  emailed and can be retried under the same run id and judge (it resumes from the checkpoints). A stale lock from a
+  dead process is replaced. Agents can only add job files. `scripts/deploy_runner.ps1` moves the runner clone (the
+  queue script itself) to `origin/main` and restarts the task when no job is running. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
