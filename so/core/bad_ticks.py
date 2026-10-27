@@ -58,8 +58,6 @@ from so.core.local_file_management import get_path_file_list, write_csv_file_to_
 # IMPORT PATHS
 from so import paths
 
-# DEFINE THE DEFAULT RAW FOLDER (THE NETWORK SHARE OF NICODESKTOP; FORWARD SLASHES WORK ON WINDOWS)
-DEFAULT_RAW_PATH_STR = "//100.123.162.2/stock_overflow_data/store01_rawzone/ibkr_spy_1min/"
 # DEFINE THE BAD TICK THRESHOLD (DISTANCE BEYOND THE REFERENCE PRICE)
 BAD_TICK_THRESHOLD = 0.03
 # DEFINE THE PRICE COLUMNS USED BY THE RULE
