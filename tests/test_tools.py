@@ -719,6 +719,8 @@ def make_judge_test_repo():
     # A SCRIPT THAT PRINTS WHAT THE RUN SEES
     repo_str = tempfile.mkdtemp(prefix="so_judge_repo_")
     def git_func(arg_list_in, **kwarg_dict_in):
+        # WINDOWS TURNS "\n" INTO "\r\n" ON A TEXT PIPE; NO GIT INPUT OF THE QUEUE MAY DEPEND ON A NEWLINE
+        assert "\n" not in (kwarg_dict_in.get("input_str_in") or ""), "git input must not contain a newline"
         return run_queue.run_git_str(arg_list_in, repo_str, **kwarg_dict_in)
     def write_file(relative_str_in, text_str_in):
         file_path = Path(repo_str, relative_str_in)

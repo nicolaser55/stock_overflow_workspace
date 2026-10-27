@@ -789,10 +789,12 @@ def make_composite_commit_str(judge_commit_str_in, design_commit_str_in, git_fun
         if line_str.split(" ", 1)[0] in ("120000", "160000"):
             raise ValueError(f"experiments/ holds a symbolic link or a submodule: {line_str.split(chr(9), 1)[-1][:200]}")
     # THE JUDGE'S ROOT TREE WITH THE experiments ENTRY REPLACED
-    entry_list = [line_str for line_str in git_func(["ls-tree", judge_commit_str_in]).splitlines()
+    # NUL-SEPARATED, NOT NEWLINE-SEPARATED: A TEXT-MODE PIPE ON WINDOWS TURNS "\n" INTO "\r\n" AND GIT WOULD READ
+    # THE CARRIAGE RETURN AS PART OF EVERY ENTRY NAME
+    entry_list = [line_str for line_str in git_func(["ls-tree", "-z", judge_commit_str_in]).split("\0")
                   if line_str.strip() and line_str.split("\t", 1)[-1] != "experiments"]
     entry_list.append(f"040000 tree {experiments_tree_str}\texperiments")
-    tree_str = git_func(["mktree"], input_str_in="\n".join(entry_list) + "\n").strip()
+    tree_str = git_func(["mktree", "-z"], input_str_in="\0".join(entry_list) + "\0").strip()
     parent_list = [judge_commit_str_in] if judge_commit_str_in == design_commit_str_in else [judge_commit_str_in, design_commit_str_in]
     argument_list = ["commit-tree", tree_str]
     for parent_str in parent_list:
