@@ -18,9 +18,11 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   `store04_experiments/queue/pending/` (new jobs). Runs, the trial log and the run index are written by the runner
   account `so_runner`, never by you. You cannot read the quarantine or the holdout results. An "access denied" is a
   boundary: stop that action and report it; never work around it.
+- Kill switch: if the file `<data root>\control\STOP` exists, start nothing new (no run, no search, no screening) and
+  report that you stopped. Only Nicolas creates or removes it.
 - Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
 - Protected files (`protected_paths.txt`): the guards, the runner, the rules, the records, the guard tests, the
-  environment, the design documents (`docs/AGENTIC_DESIGN.md`, `docs/RUNNER_DESIGN.md`) and the pipeline notebooks. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
+  environment, the design documents (`docs/AGENTIC_DESIGN.md`, `docs/AGENTIC_ROADMAP.md`, `docs/RUNNER_DESIGN.md`) and the pipeline notebooks. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
   `docs/RESULTS_LOG.md` only grows, and only from the run index (`scripts/append_results_log.py`); never write a row.
 - Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
 - Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never

@@ -207,9 +207,9 @@ def test_queue_runs_files_and_emails():
     result_list = run_fake_queue_list(path_dict, run_func, send_func)
     assert order_list == ["first", "second"]
     assert [result["status"] for result in result_list] == ["done", "done"]
-    assert sent_list == ["Stock Overflow: exp13_e1m1_robustness is email-worthy"]
+    assert sent_list == ["Stock Overflow: PASS, audit pending - exp13_e1m1_robustness", "Stock Overflow: exp13_e1m1_robustness - x"], sent_list
     assert result_list[0]["results_row"].startswith("| row of exp13_e1m1_robustness_")
-    assert result_list[1]["email"] is None
+    assert result_list[1]["email"]["sent_bool"]
     assert not os.listdir(path_dict["pending"]) and len(os.listdir(path_dict["done"])) == 2
     assert not os.path.exists(path_dict["lock"])
     state_dict = run_queue.read_json(path_dict["state"])
@@ -884,6 +884,108 @@ def test_queue_run_index_upgrade():
     passed("run index upgrade (missing columns added with a copy of the old file, unknown columns left alone, appends work afterwards)")
 
 
+# FUNCTION: ONE EMAIL PER FINISHED RUN, WITH THE NUMBERS BEHIND THE VERDICT
+def test_run_email_content():
+    """
+    A negative and a positive run both get an email; the body carries the verdict, failed parts, returns, the number
+    of designs tried, the judge hash, the commits and the paths; a missing number reads "n/a".
+
+    Returns:
+        None
+    """
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    Path(path_dict["runs"], "run_p").mkdir()
+    Path(path_dict["runs"], "run_p", "report.json").write_text(json.dumps({
+        "return_dict": {"strategy_total_return": 0.1234, "buy_hold_total_return": 0.05},
+        "multiple_testing_dict": {"design_count": 12}, "judge_hash_str": "abcdef0123456789abcdef"}), encoding="utf-8")
+    result_dict = {"run_id": "run_p", "design": DESIGN_STR, "note": "why", "commit": FAKE_COMMIT_STR, "judge_commit": FAKE_JUDGE_STR,
+                   "run_commit": FAKE_RUN_COMMIT_STR, "log": "L.log", "results_row": "| row |"}
+    negative_dict = {"verdict": {"label": "not email-worthy", "email_worthy": False, "failed_list": ["return", "baselines"], "look_ahead": "pass"}}
+    subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, result_dict, negative_dict)
+    assert subject_str == "Stock Overflow: exp13_e1m1_robustness - not email-worthy"
+    for fragment_str in ["Run run_p", "Failed parts return, baselines", "Look-ahead check pass", "Total return +12.34% vs buy-and-hold +5.00%",
+                         "Designs tried (the multiple-testing N) 12", "Judge hash abcdef0123456789", f"run {FAKE_RUN_COMMIT_STR}",
+                         "report.md", "Log L.log", "| row |"]:
+        assert fragment_str in body_str, (fragment_str, body_str)
+    assert "audit" not in body_str
+    positive_dict = {"verdict": {"label": "match or beat", "email_worthy": True, "failed_list": [], "look_ahead": "pass"}}
+    subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, result_dict, positive_dict)
+    assert subject_str == "Stock Overflow: PASS, audit pending - exp13_e1m1_robustness"
+    assert "Failed parts none" in body_str and "not rejected" in body_str
+    subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, {**result_dict, "run_id": "run_none"}, negative_dict)
+    assert "Total return n/a vs buy-and-hold n/a" in body_str and "Judge hash n/a" in body_str
+    assert "\n" not in run_queue.get_finished_run_email_tuple(
+        path_dict, result_dict, {"verdict": {"label": "a\nBcc: x@y", "failed_list": []}})[0]
+    passed("run email (one per finished run: verdict, failed parts, returns, N, judge hash, commits, paths; PASS subject; no header injection)")
+
+
+# FUNCTION: THE KILL SWITCH STOPS NEW WORK AND FAILS CLOSED
+def test_queue_kill_switch():
+    """
+    While the STOP file exists no job starts and an interrupted job is not resumed (its counters stay); the running job
+    is not touched; removing the file lets the work go on. An unreadable flag counts as set, a missing one (or a missing
+    control folder) does not.
+
+    Returns:
+        None
+    """
+    control_str = tempfile.mkdtemp(prefix="so_control_")
+    flag_str = os.path.join(control_str, "control", "STOP")
+    os.environ["SO_STOP_FLAG_PATH"] = flag_str
+    try:
+        zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+        path_dict = run_queue.get_queue_path_dict(zone_str)
+        run_queue.make_runner_folder_list(path_dict)
+        assert path_dict["stop_flag"] == flag_str and run_queue.get_stop_flag_bool(path_dict) is False
+        sent_list = []
+        send_func = lambda *args_in: sent_list.append(args_in[2]) or {"sent_bool": True, "detail": ""}
+        pending_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "waits", git_func_in=CLEAN_GIT_FUNC)
+        crashed_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "crashed", git_func_in=CLEAN_GIT_FUNC)
+        run_queue.claim_job_dict(path_dict, crashed_dict, lambda: FAKE_JUDGE_STR)
+        running_path_str = os.path.join(path_dict["running"], f"{crashed_dict['job_id']}.json")
+        running_before_str = Path(running_path_str).read_text(encoding="utf-8")
+        # SET: NOTHING STARTS, NOTHING IS TOUCHED, THE STATE SAYS SO
+        os.makedirs(os.path.dirname(flag_str))
+        Path(flag_str).write_text("stop", encoding="utf-8")
+        assert run_queue.get_stop_flag_bool(path_dict) is True
+        called_list = []
+        def run_func(job_dict_in, run_id_str_in, log_path_str_in):
+            called_list.append(job_dict_in["note"])
+            return get_fake_run_func(path_dict, False)(job_dict_in, run_id_str_in, log_path_str_in)
+        assert run_fake_queue_list(path_dict, run_func, send_func) == [] and called_list == []
+        assert Path(running_path_str).read_text(encoding="utf-8") == running_before_str
+        assert os.path.isfile(os.path.join(path_dict["pending"], f"{pending_dict['job_id']}.json"))
+        assert run_queue.read_json(path_dict["state"])["stopped"] is True
+        assert run_queue.watch_queue(path_dict, 0, 2, run_func, send_func, judge_func_in=lambda: FAKE_JUDGE_STR,
+                                     git_func_in=fake_accepting_git_func, prepare_func_in=lambda job_in: FAKE_RUN_COMMIT_STR) == 0
+        assert called_list == [] and run_queue.read_json(path_dict["state"])["stopped"] is True
+        # REMOVED: THE INTERRUPTED JOB RESUMES FIRST, THEN THE PENDING ONE
+        os.remove(flag_str)
+        result_list = run_fake_queue_list(path_dict, run_func, send_func)
+        assert called_list == ["crashed", "waits"] and [result["status"] for result in result_list] == ["done", "done"]
+        assert run_queue.read_json(path_dict["state"])["stopped"] is False
+        # FAILS CLOSED: A FLAG THAT CANNOT BE CHECKED COUNTS AS SET
+        real_stat_func = os.stat
+        def denying_stat_func(path_in, *args_in, **kwarg_dict_in):
+            if str(path_in) == flag_str:
+                raise PermissionError(13, "Access is denied")
+            return real_stat_func(path_in, *args_in, **kwarg_dict_in)
+        os.stat = denying_stat_func
+        try:
+            assert run_queue.get_stop_flag_bool(path_dict) is True
+        finally:
+            os.stat = real_stat_func
+        assert run_queue.get_stop_flag_bool({"stop_flag": os.path.join(control_str, "no_such_folder", "STOP")}) is False
+        assert run_queue.get_stop_flag_bool({"stop_flag": ""}) is False and run_queue.get_stop_flag_bool({}) is False
+    finally:
+        os.environ.pop("SO_STOP_FLAG_PATH", None)
+    # THE DEFAULT PLACE IS <SO_DATA_PATH>/control/STOP
+    assert run_queue.get_stop_flag_path_str() == os.path.join(os.environ["SO_DATA_PATH"], "control", "STOP")
+    passed("kill switch (no job starts or resumes while STOP exists, state says stopped, work resumes after removal, unreadable flag counts as set)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
@@ -892,6 +994,8 @@ if __name__ == "__main__":
     test_queue_heartbeat_and_child_environment()
     test_queue_judge_from_main_run_commit()
     test_queue_run_index_upgrade()
+    test_run_email_content()
+    test_queue_kill_switch()
     test_every_python_file_compiles()
     test_queue_timeout_kills_tree()
     test_queue_worktree_and_results_rows()
