@@ -36,6 +36,7 @@ and known design code, whatever is checked out anywhere.
     python scripts/run_queue.py run                 # runner: run every pending job, then exit
     python scripts/run_queue.py watch               # runner: run jobs as they arrive, forever (the scheduled task)
     python scripts/run_queue.py status              # print state.json
+    python scripts/run_queue.py test-email          # runner: send one test email with the runner's SMTP settings
 
 add refuses a clone with uncommitted changes in the design folder, and records the commit; the commit must be pushed
 (the runner fetches origin before each job). Files, all under <SO_DATA_PATH>/store04_experiments/:
@@ -68,6 +69,17 @@ child process gets the runner's environment without secrets (get_child_environme
 refreshes the heartbeat in state.json every SO_QUEUE_HEARTBEAT_SECONDS (default 60). An email-worthy verdict and a
 failed job send an email (SMTP from SO_SMTP_HOST, SO_SMTP_PORT, SO_SMTP_USER, SO_SMTP_PASSWORD, SO_EMAIL_TO; without
 them the message goes to the outbox). The queue never runs a holdout evaluation.
+
+Email (design 2026-10-27, section 9): one email per finished full run, positive or negative (subject: the design and the
+verdict label; a run that passes every part has the subject "PASS, audit pending" until an auditor exists), and one per
+failed, timed-out or abandoned job. The body holds the run id, verdict, failed parts, look-ahead status, the strategy's
+and buy-and-hold total returns, the number of designs tried, the judge hash and the three commits, and the paths of
+the report and the log. A rejected job sends nothing.
+
+Kill switch (section 10): a file named STOP in <SO_DATA_PATH>/control (SO_STOP_FLAG_PATH overrides the path). While it
+exists the runner starts no job, resumes no interrupted job, and the job that is running finishes; state.json shows
+"stopped": true. Nicolas creates and deletes the file (every other account can only read it). A flag that cannot be
+read (access denied) counts as set; a flag that does not exist, including a missing control folder, does not.
 """
 
 # THE NUMBER OF RECENT RESULTS IN state.json AND OF LOG LINES KEPT FOR A FAILED JOB
@@ -116,6 +128,47 @@ COMPOSITE_ENVIRONMENT_DICT = {"GIT_AUTHOR_NAME": "so_queue", "GIT_AUTHOR_EMAIL":
 # state.json IS WRITTEN BY THE MAIN THREAD AND THE HEARTBEAT THREAD
 STATE_LOCK = threading.Lock()
 QUEUE_COMMIT_CACHE_STR = None
+# THE KILL-SWITCH FILE NAME INSIDE <SO_DATA_PATH>/control
+STOP_FLAG_FOLDER_STR = "control"
+STOP_FLAG_FILE_STR = "STOP"
+
+
+# FUNCTION: WHERE THE KILL-SWITCH FILE IS
+def get_stop_flag_path_str():
+    """
+    Returns:
+        str: SO_STOP_FLAG_PATH, else <SO_DATA_PATH>/control/STOP, else "" (no data root: no kill switch to read)
+    """
+    # EVERY ACCOUNT CAN READ THE DATA ROOT AND NONE EXCEPT NICOLAS CAN WRITE ITS control FOLDER
+    explicit_str = os.environ.get("SO_STOP_FLAG_PATH", "").strip()
+    if explicit_str:
+        return explicit_str
+    data_str = os.environ.get("SO_DATA_PATH", "").strip()
+    return os.path.join(data_str, STOP_FLAG_FOLDER_STR, STOP_FLAG_FILE_STR) if data_str else ""
+
+
+# FUNCTION: WHETHER THE KILL SWITCH IS SET
+def get_stop_flag_bool(path_dict_in):
+    """
+    Args:
+        path_dict_in (dict): Queue paths
+
+    Returns:
+        bool: True when the flag file exists or cannot be checked. A missing file (or a missing control folder) is
+        "not set". Any other error (access denied, a file where the folder should be) counts as set, because a kill
+        switch that opens when it cannot be read is no kill switch.
+    """
+    # NO PATH: NOTHING TO READ
+    flag_str = path_dict_in.get("stop_flag") or ""
+    if not flag_str:
+        return False
+    try:
+        os.stat(flag_str)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 # FUNCTION: THE QUEUE PATHS (NOTHING IS CREATED)
@@ -125,7 +178,8 @@ def get_queue_path_dict(experiment_zone_str_in=None):
         experiment_zone_str_in (str | None): store04_experiments folder (None = from SO_DATA_PATH)
 
     Returns:
-        dict: root, pending, running, rejected, done, failed, outbox, logs, lock, state, runs, run_index (paths as str)
+        dict: root, pending, running, rejected, done, failed, outbox, logs, lock, state, runs, run_index, stop_flag
+        (paths as str; stop_flag is "" when no data root is set)
     """
     # PATHS ONLY: AN AGENT CANNOT CREATE FOLDERS HERE, AND add NEEDS ONLY pending
     zone_str = experiment_zone_str_in or get_named_data_path_str("LOCAL_EXPERIMENTZONE_PATH_STR")
@@ -135,7 +189,7 @@ def get_queue_path_dict(experiment_zone_str_in=None):
             "failed": os.path.join(root_str, "failed"), "outbox": os.path.join(root_str, "outbox"),
             "logs": os.path.join(root_str, "logs"), "lock": os.path.join(root_str, "runner.lock"),
             "state": os.path.join(zone_str, "state.json"), "runs": os.path.join(zone_str, "runs"),
-            "run_index": os.path.join(zone_str, "run_index.csv")}
+            "run_index": os.path.join(zone_str, "run_index.csv"), "stop_flag": get_stop_flag_path_str()}
 
 
 # FUNCTION: CREATE THE RUNNER'S FOLDERS
@@ -614,7 +668,8 @@ def write_state_dict(path_dict_in, running_job_in, result_dict_in=None):
             recent_list = [result_dict_in] + recent_list
         state_dict = {"updated_ts": datetime.datetime.now().isoformat(timespec="seconds"), "running": running_job_in,
                       "pending_count": len(get_pending_job_list(path_dict_in)), "host": socket.gethostname(),
-                      "queue_commit": get_queue_commit_str(), "recent": recent_list[:STATE_RECENT_COUNT_INT]}
+                      "queue_commit": get_queue_commit_str(), "stopped": get_stop_flag_bool(path_dict_in),
+                      "recent": recent_list[:STATE_RECENT_COUNT_INT]}
         write_json_atomic(path_dict_in["state"], state_dict)
     return state_dict
 
@@ -1053,6 +1108,61 @@ def append_run_index_row(path_dict_in, result_dict_in):
     return append_csv_record_pdf(pd.DataFrame([row_dict]), path_dict_in["run_index"], RUN_INDEX_COLUMN_LIST)
 
 
+# FUNCTION: A NUMBER AS A PERCENT FOR THE EMAIL
+def get_percent_str(value_in):
+    """
+    Args:
+        value_in (object): A fraction, or "" / None when the report has none
+
+    Returns:
+        str: "+12.34%", or "n/a"
+    """
+    # THE INDEX HOLDS EMPTY STRINGS WHEN A NUMBER IS MISSING
+    try:
+        return f"{float(value_in):+.2%}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+# FUNCTION: THE EMAIL OF A FINISHED RUN (ONE PER FULL RUN, POSITIVE OR NEGATIVE)
+def get_finished_run_email_tuple(path_dict_in, result_dict_in, manifest_dict_in):
+    """
+    Args:
+        path_dict_in (dict): Queue paths
+        result_dict_in (dict): The job's result (run_id, design, commit, judge_commit, run_commit, note, results_row, log)
+        manifest_dict_in (dict): The run's manifest (verdict)
+
+    Returns:
+        tuple[str, str]: Subject and body
+    """
+    # THE VERDICT COMES FROM THE MANIFEST, THE NUMBERS FROM report.json
+    verdict_dict = manifest_dict_in.get("verdict") or {}
+    number_dict = get_report_number_dict(path_dict_in, result_dict_in["run_id"])
+    design_name_str = Path(result_dict_in["design"]).name
+    label_str = re.sub(r"[\x00-\x1f\x7f]+", " ", str(verdict_dict.get("label", ""))).strip()[:80]
+    passed_bool = bool(verdict_dict.get("email_worthy"))
+    subject_str = (f"Stock Overflow: PASS, audit pending - {design_name_str}" if passed_bool
+                   else f"Stock Overflow: {design_name_str} - {label_str or 'finished'}")
+    failed_list = verdict_dict.get("failed_list") or []
+    line_list = [f"Run {result_dict_in['run_id']}", f"Design {result_dict_in['design']}",
+                 f"Note {result_dict_in.get('note', '')}", f"Verdict {label_str}",
+                 f"Failed parts {', '.join(failed_list) if failed_list else 'none'}",
+                 f"Look-ahead check {verdict_dict.get('look_ahead', '')}",
+                 f"Total return {get_percent_str(number_dict['strategy_total_return'])} vs buy-and-hold "
+                 f"{get_percent_str(number_dict['buy_hold_total_return'])}",
+                 f"Designs tried (the multiple-testing N) {number_dict['design_count'] or 'n/a'}",
+                 f"Judge hash {str(number_dict['judge_hash'])[:16] or 'n/a'}",
+                 f"Commits: design {result_dict_in.get('commit')}, judge {result_dict_in.get('judge_commit')}, "
+                 f"run {result_dict_in.get('run_commit')}",
+                 f"Report {os.path.join(path_dict_in['runs'], result_dict_in['run_id'], 'report.md')}",
+                 f"Log {result_dict_in.get('log')}", f"Results row {result_dict_in.get('results_row')}"]
+    if passed_bool:
+        line_list += ["", "This run passed every part of the verdict. No auditor exists yet, so nothing vetoed it. "
+                          "Treat it as a candidate: the design is evaluated on data the system has not seen "
+                          "(docs/AGENTIC_DESIGN.md, section 11). The language is 'not rejected', not 'proven'."]
+    return subject_str, "\n".join(line_list) + "\n"
+
+
 # FUNCTION: TAKE A JOB OUT OF pending/ INTO running/
 def claim_job_dict(path_dict_in, job_dict_in, judge_func_in=None, now_in=None):
     """
@@ -1221,12 +1331,8 @@ def run_job_dict(path_dict_in, job_dict_in, run_func_in=None, send_func_in=None,
                     f"Log {log_path_str}\n\nLast lines:\n" + "\n".join(result_dict["log_tail"]) +
                     f"\n\nRetry: python scripts/run_queue.py retry {job_dict_in['job_id']}\n")
         result_dict["email"] = send_func(path_dict_in, run_id_str, subject_str, body_str)
-    elif bool((manifest_dict.get("verdict") or {}).get("email_worthy")):
-        subject_str = f"Stock Overflow: {Path(job_dict_in['design']).name} is email-worthy"
-        body_str = (f"Run {run_id_str}\nDesign {job_dict_in['design']}\nCommit {job_dict_in.get('commit')}\n"
-                    f"Note {job_dict_in.get('note', '')}\nResults row {result_dict['results_row']}\n"
-                    f"Report {os.path.join(path_dict_in['runs'], run_id_str, 'report.md')}\n"
-                    f"Manifest verdict {json.dumps(manifest_dict.get('verdict'))}\n")
+    else:
+        subject_str, body_str = get_finished_run_email_tuple(path_dict_in, result_dict, manifest_dict)
         result_dict["email"] = send_func(path_dict_in, run_id_str, subject_str, body_str)
     target_folder_str = path_dict_in["done"] if ok_bool else path_dict_in["failed"]
     os.makedirs(target_folder_str, exist_ok=True)
@@ -1299,9 +1405,14 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
 
     try:
         upgrade_run_index_file(path_dict_in)
-        for job_dict in recover_running_job_list(path_dict_in):
-            run_one_func(job_dict)
+        # THE KILL SWITCH IS CHECKED BEFORE EVERY JOB; A RECOVERED JOB STAYS IN running/ UNTIL THE FLAG IS GONE
+        if not get_stop_flag_bool(path_dict_in):
+            for job_dict in recover_running_job_list(path_dict_in):
+                run_one_func(job_dict)
         while True:
+            if get_stop_flag_bool(path_dict_in):
+                print(f"stop flag set ({path_dict_in['stop_flag']}); no further job is started", flush=True)
+                break
             job_dict = get_next_job_dict(path_dict_in, git_func_in)
             if job_dict is None:
                 break
@@ -1332,7 +1443,7 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
     # A JOB THAT FAILS DOES NOT STOP THE WATCH
     job_count_int, loop_count_int = 0, 0
     while max_loop_count_in is None or loop_count_int < int(max_loop_count_in):
-        if get_has_work_bool(path_dict_in):
+        if get_has_work_bool(path_dict_in) and not get_stop_flag_bool(path_dict_in):
             job_count_int += len(run_queue_list(path_dict_in, run_func_in, send_func_in, judge_func_in=judge_func_in,
                                                 git_func_in=git_func_in, prepare_func_in=prepare_func_in))
         else:
@@ -1360,6 +1471,7 @@ if __name__ == "__main__":
     watch_parser = sub_parser.add_parser("watch", help="Run jobs as they arrive (runner account)")
     watch_parser.add_argument("--interval", type=float, default=DEFAULT_WATCH_INTERVAL_SECONDS, help="Seconds between looks")
     sub_parser.add_parser("status", help="Print state.json")
+    sub_parser.add_parser("test-email", help="Send one test email with this account's SMTP settings (runner account)")
     arg_dict = parser.parse_args()
     path_dict = get_queue_path_dict()
     if arg_dict.command == "add":
@@ -1374,6 +1486,11 @@ if __name__ == "__main__":
             print(f"{result_dict['job_id']} {result_dict['status']}: {result_dict['results_row'] or result_dict['log']}")
     elif arg_dict.command == "watch":
         watch_queue(path_dict, arg_dict.interval)
+    elif arg_dict.command == "test-email":
+        make_runner_folder_list(path_dict)
+        stamp_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        print(json.dumps(send_email_dict(path_dict, f"test_email_{stamp_str}", "Stock Overflow: test email",
+                                         f"The queue on {socket.gethostname()} can send email. Sent {stamp_str}.\n"), indent=2))
     else:
         if os.path.isfile(path_dict["state"]):
             print(json.dumps(read_json(path_dict["state"]), indent=2))

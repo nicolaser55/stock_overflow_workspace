@@ -146,7 +146,11 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   refreshes `state.json` every 60 s while a job runs; `state.json` also shows the commit of the queue script.
   `run_index.csv` is rewritten with the current columns (a copy is kept) when it only lacks columns. A failed job is
   emailed and can be retried under the same run id and judge (it resumes from the checkpoints). A stale lock from a
-  dead process is replaced. Agents can only add job files. `scripts/deploy_runner.ps1` moves the runner clone (the
+  dead process is replaced. Agents can only add job files. **Email (A3):** one email per finished run, positive or
+  negative (verdict, failed parts, returns, N, judge hash, commits, paths; "PASS, audit pending" when every part
+  passed), one per failed, timed-out or abandoned job, none for a rejected job. **Kill switch (A3):** while
+  `<SO_DATA_PATH>/control/STOP` exists (or the file named by `SO_STOP_FLAG_PATH`) the runner starts and resumes
+  nothing; a running job finishes; `state.json` shows `"stopped"`; an unreadable flag counts as set. `scripts/deploy_runner.ps1` moves the runner clone (the
   queue script itself) to `origin/main` and restarts the task when no job is running. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
