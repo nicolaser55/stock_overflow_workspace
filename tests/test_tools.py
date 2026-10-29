@@ -807,21 +807,32 @@ def test_queue_judge_from_main_run_commit():
             assert fragment_str in str(error), (key_str, str(error))
     same_commit_str = run_queue.make_composite_commit_str(commit_dict["judge2"], commit_dict["judge2"], git_func)
     assert git_func(["rev-parse", f"{same_commit_str}^@"]).split() == [commit_dict["judge2"]]
-    # THE JUDGE COMMIT OF A NEW JOB: A FAILED FETCH FALLS BACK TO THE LOCAL REF; THE REF CAN BE CHANGED
-    import subprocess as subprocess_module
+    # THE JUDGE COMMIT OF A NEW JOB: THE LOCAL REF refs/deployed, NO FETCH; THE REF CAN BE CHANGED
     call_list = []
     def fake_git_func(arg_list_in, **kwarg_dict_in):
         call_list.append(list(arg_list_in))
-        if arg_list_in[0] == "fetch":
-            raise subprocess_module.CalledProcessError(128, "git", output="no network")
         return FAKE_JUDGE_STR + "\n"
-    assert run_queue.get_judge_commit_str(fake_git_func) == FAKE_JUDGE_STR and call_list[-1][-1] == "origin/main^{commit}"
-    os.environ["SO_QUEUE_JUDGE_REF"] = "origin/other"
+    assert run_queue.get_judge_commit_str(fake_git_func) == FAKE_JUDGE_STR and call_list[-1][-1] == "refs/deployed^{commit}"
+    assert not any(call[0] == "fetch" for call in call_list)
+    os.environ["SO_QUEUE_JUDGE_REF"] = "refs/other"
     try:
         run_queue.get_judge_commit_str(fake_git_func)
     finally:
         os.environ.pop("SO_QUEUE_JUDGE_REF", None)
-    assert call_list[-1][-1] == "origin/other^{commit}"
+    assert call_list[-1][-1] == "refs/other^{commit}"
+    # A MERGE TO main WITHOUT A DEPLOY CHANGES NO JUDGE: main IS AT judge2, refs/deployed AT judge1
+    try:
+        run_queue.get_judge_commit_str(git_func)
+        raise AssertionError("a judge resolved before anything was deployed")
+    except run_queue.NoDeployedJudgeError:
+        pass
+    assert run_queue.get_deployed_commit_str(git_func) == ""
+    git_func(["update-ref", "refs/deployed", commit_dict["judge1"]])
+    assert git_func(["rev-parse", "main"]).strip() == commit_dict["judge2"]
+    assert run_queue.get_judge_commit_str(git_func) == commit_dict["judge1"]
+    assert run_queue.get_deployed_commit_str(git_func) == commit_dict["judge1"]
+    git_func(["update-ref", "refs/deployed", commit_dict["judge2"]])
+    assert run_queue.get_judge_commit_str(git_func) == commit_dict["judge2"]
     # A FULL QUEUE RUN WITH THE REAL SCRIPT ENTRY: JOB FILE -> VALIDATION -> CLAIM -> RUN COMMIT -> WORKTREE -> PROCESS
     zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
     path_dict = run_queue.get_queue_path_dict(zone_str)
@@ -846,8 +857,48 @@ def test_queue_judge_from_main_run_commit():
     assert result_list[0]["run_commit"] == run_commit_str and result_list[0]["judge_commit"] == commit_dict["judge2"]
     assert git_func(["rev-parse", f"refs/runs/{result_list[0]['run_id']}"]).strip() == run_commit_str
     assert not os.listdir(worktree_root_str) and not os.listdir(path_dict["running"])
-    passed("judge from main (run commit = main's tree + the job's experiments/, deterministic, parents kept by refs/runs; "
+    passed("judge = the deployed commit (refs/deployed, not main: a merge without a deploy changes nothing; run commit = "
+           "the judge's tree + the job's experiments/, deterministic, parents kept by refs/runs; "
            "outside changes, links and missing experiments/ refused; clean worktree, no secrets, removed afterwards)")
+
+
+# FUNCTION: WITHOUT A DEPLOYED JUDGE NO JOB STARTS; EACH PASS FETCHES BEFORE IT VALIDATES
+def test_queue_waits_for_deployed_judge():
+    """
+    Returns:
+        None
+    """
+    # A PENDING JOB, NO DEPLOYED JUDGE: IT STAYS PENDING, NOTHING IS CLAIMED OR RUN
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    job_dict = get_valid_job_dict("00000d")
+    run_queue.write_job_file(os.path.join(path_dict["pending"], f"{job_dict['job_id']}.json"), job_dict)
+    def no_judge_func():
+        raise run_queue.NoDeployedJudgeError("no deployed judge (test)")
+    run_list = []
+    result_list = run_fake_queue_list(path_dict, lambda *args_in: run_list.append(args_in), lambda *args_in: None,
+                                      judge_func_in=no_judge_func)
+    assert result_list == [] and run_list == []
+    assert os.listdir(path_dict["pending"]) == [f"{job_dict['job_id']}.json"] and not os.listdir(path_dict["running"])
+    state_dict = run_queue.read_json(path_dict["state"])
+    assert "deployed_commit" in state_dict and state_dict["pending_count"] == 1
+    # ONCE DEPLOYED, THE SAME JOB RUNS UNDER THAT JUDGE; THE FETCH COMES BEFORE THE FIRST EXISTENCE CHECK
+    call_list = []
+    def recording_git_func(arg_list_in, **kwarg_dict_in):
+        call_list.append(list(arg_list_in))
+        return ""
+    def fake_run_func(job_in, run_id_in, log_in):
+        Path(log_in).write_text("ok\n", encoding="utf-8")
+        return {"return_code": 1, "log_line_list": ["ok"], "timed_out_bool": False}
+    result_list = run_fake_queue_list(path_dict, fake_run_func, lambda *args_in: {"sent_bool": False, "detail": ""},
+                                      git_func_in=recording_git_func)
+    assert len(result_list) == 1 and result_list[0]["judge_commit"] == FAKE_JUDGE_STR
+    first_fetch_int = next(index for index, call in enumerate(call_list) if call[0] == "fetch")
+    first_check_int = next(index for index, call in enumerate(call_list) if call[0] == "cat-file")
+    assert first_fetch_int < first_check_int, call_list
+    passed("no deployed judge: pending jobs wait, nothing is claimed; after a deploy the job runs under it; each pass "
+           "fetches origin before it validates pending files")
 
 
 # FUNCTION: AN OLD run_index.csv IS BROUGHT TO THE CURRENT COLUMNS BEFORE THE NEXT APPEND
@@ -993,6 +1044,7 @@ if __name__ == "__main__":
     test_queue_claim_resume_and_give_up()
     test_queue_heartbeat_and_child_environment()
     test_queue_judge_from_main_run_commit()
+    test_queue_waits_for_deployed_judge()
     test_queue_run_index_upgrade()
     test_run_email_content()
     test_queue_kill_switch()

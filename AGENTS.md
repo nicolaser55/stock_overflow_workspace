@@ -32,8 +32,8 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   view only; keep experiment constants in the experiment's `config.py`.
 - Runs: commit and push your branch first, then `scripts\run_queue.py add experiments\<exp> --note "<why>"` (it
   records the commit; uncommitted changes in the experiment folder are refused). A job brings only `experiments/**`:
-  the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the tip of `main`, so a commit that
-  changes other files is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
+  the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the commit Nicolas last deployed,
+  so a commit that changes other files, or is based on `main` commits not deployed yet, is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
   The runner writes the report, the manifest and a `run_index.csv` row. Read results from those files
   (`scripts\run_queue.py status`, `store04_experiments/runs/<run id>/report.md`), never from memory. A failed job
   emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id.

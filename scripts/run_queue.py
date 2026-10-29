@@ -25,8 +25,9 @@ Run Queue (development runs, one at a time; the judge from main, the design from
 
 Agents (so_agent) add jobs; only the runner account (so_runner) runs them and writes results (audit S3 / S4,
 2026-10-25; trust boundaries, design 2026-10-27). A job names a commit, and the runner builds the code of the run from
-two sources: everything except experiments/ comes from the tip of origin/main (the judge: so/, scripts/, tests/,
-the rules), and experiments/ comes from the job's commit (the design). A job commit that changes anything else is
+two sources: everything except experiments/ comes from the commit Nicolas last deployed (the judge: so/, scripts/,
+tests/, the rules; the ref refs/deployed that scripts/deploy_runner.ps1 sets in the runner's clone), and experiments/
+comes from the job's commit (the design). A merge to main changes no run until it is deployed (design 4.2, roadmap R2). A job commit that changes anything else is
 refused. The run executes that combination in a temporary git worktree, so a result always belongs to known judge code
 and known design code, whatever is checked out anywhere.
 
@@ -63,8 +64,10 @@ A job runs scripts/run_development.py from a worktree at <SO_QUEUE_WORKTREE_ROOT
 with the Python in SO_QUEUE_PYTHON (default: this interpreter), under a time limit (SO_QUEUE_JOB_TIMEOUT_HOURS,
 default 24); a timeout kills the whole process tree. The worktree is a commit made from the judge commit and the
 job's experiments/ tree (fixed author and date, so the same pair always gives the same commit); a ref
-refs/runs/<run_id> keeps it, and both parents, in the runner's clone. The judge commit is origin/main at the time the
-job starts (SO_QUEUE_JUDGE_REF overrides the ref) and is pinned for the run, its retries and its crash resumes. The
+refs/runs/<run_id> keeps it, and both parents, in the runner's clone. The judge commit is refs/deployed at the time
+the job starts (SO_QUEUE_JUDGE_REF overrides the ref) and is pinned for the run, its retries and its crash resumes.
+Without a deployed commit no new job starts (the jobs wait in pending/; state.json shows "deployed_commit": "").
+Each pass fetches origin once before it validates pending files, so a job can name any pushed commit. The
 child process gets the runner's environment without secrets (get_child_environment_dict). While a job runs, a thread
 refreshes the heartbeat in state.json every SO_QUEUE_HEARTBEAT_SECONDS (default 60). An email-worthy verdict and a
 failed job send an email (SMTP from SO_SMTP_HOST, SO_SMTP_PORT, SO_SMTP_USER, SO_SMTP_PASSWORD, SO_EMAIL_TO; without
@@ -93,7 +96,7 @@ RUN_INDEX_COLUMN_LIST = ["run_id", "attempt", "job_id", "design", "commit", "jud
                          "verdict_label", "email_worthy", "failed_list", "strategy_total_return",
                          "buy_hold_total_return", "look_ahead", "design_count", "judge_hash", "added_by", "added_ts",
                          "finished_ts"]
-# THE CODE add REQUIRES TO BE COMMITTED (ONLY THE DESIGN FOLDER: THE JUDGE CODE OF A RUN COMES FROM origin/main)
+# THE CODE add REQUIRES TO BE COMMITTED (ONLY THE DESIGN FOLDER: THE JUDGE CODE OF A RUN IS THE DEPLOYED COMMIT)
 GUARDED_ADD_FOLDER_LIST = []
 # DEFAULT TIME LIMIT OF ONE JOB (exp01 TAKES 11-14 HOURS)
 DEFAULT_JOB_TIMEOUT_HOURS = 24.0
@@ -128,6 +131,13 @@ COMPOSITE_ENVIRONMENT_DICT = {"GIT_AUTHOR_NAME": "so_queue", "GIT_AUTHOR_EMAIL":
 # state.json IS WRITTEN BY THE MAIN THREAD AND THE HEARTBEAT THREAD
 STATE_LOCK = threading.Lock()
 QUEUE_COMMIT_CACHE_STR = None
+# THE REF scripts/deploy_runner.ps1 SETS TO THE COMMIT NICOLAS DEPLOYED (THE JUDGE OF NEW JOBS)
+DEPLOYED_REF_STR = "refs/deployed"
+
+
+# CLASS: NO DEPLOYED JUDGE YET (NEW JOBS WAIT)
+class NoDeployedJudgeError(ValueError):
+    """The judge ref does not resolve: nothing has been deployed with scripts/deploy_runner.ps1."""
 # THE KILL-SWITCH FILE NAME INSIDE <SO_DATA_PATH>/control
 STOP_FLAG_FOLDER_STR = "control"
 STOP_FLAG_FILE_STR = "STOP"
@@ -632,8 +642,8 @@ def get_next_job_dict(path_dict_in, git_func_in=None, now_in=None):
 def get_queue_commit_str():
     """
     Returns:
-        str: git HEAD of the folder holding this script, or "" when git cannot say. state.json shows it, so a stale
-        runner clone (an old queue script) is visible next to origin/main.
+        str: git HEAD of the folder holding this script, or "" when git cannot say. state.json shows it next to the
+        deployed commit; deploy_runner.ps1 moves both together.
     """
     # CACHED: THE CODE OF A RUNNING PROCESS DOES NOT CHANGE
     global QUEUE_COMMIT_CACHE_STR
@@ -668,7 +678,8 @@ def write_state_dict(path_dict_in, running_job_in, result_dict_in=None):
             recent_list = [result_dict_in] + recent_list
         state_dict = {"updated_ts": datetime.datetime.now().isoformat(timespec="seconds"), "running": running_job_in,
                       "pending_count": len(get_pending_job_list(path_dict_in)), "host": socket.gethostname(),
-                      "queue_commit": get_queue_commit_str(), "stopped": get_stop_flag_bool(path_dict_in),
+                      "queue_commit": get_queue_commit_str(), "deployed_commit": get_deployed_commit_str(),
+                      "stopped": get_stop_flag_bool(path_dict_in),
                       "recent": recent_list[:STATE_RECENT_COUNT_INT]}
         write_json_atomic(path_dict_in["state"], state_dict)
     return state_dict
@@ -784,27 +795,64 @@ def acquire_runner_lock(path_dict_in, pid_alive_func_in=None):
 # FUNCTION: THE JUDGE COMMIT OF A NEW JOB
 def get_judge_commit_str(git_func_in=None):
     """
-    The tip of origin/main (SO_QUEUE_JUDGE_REF overrides the ref) after a fetch. Everything except experiments/ in a
-    run comes from this commit. It is resolved when the job starts and pinned in the job's running record, so the
-    run, its retries and its crash resumes use the same judge.
+    The commit Nicolas deployed: refs/deployed in the runner's clone, set by scripts/deploy_runner.ps1
+    (SO_QUEUE_JUDGE_REF overrides the ref). It is a local ref, so a merge to main (and a fetch) never changes it.
+    Everything except experiments/ in a run comes from this commit. It is resolved when the job starts and pinned in
+    the job's running record, so the run, its retries and its crash resumes use the same judge.
 
     Args:
         git_func_in (callable | None): Injected git (tests)
 
     Returns:
-        str: Full commit hash
+        str: Full commit hash (NoDeployedJudgeError when the ref does not resolve)
     """
-    # FETCH (A FAILURE FALLS BACK TO THE LOCAL COPY OF THE REF), THEN RESOLVE
+    # RESOLVE THE LOCAL REF; NO FETCH
     git_func = git_func_in or run_git_str
-    ref_str = os.environ.get("SO_QUEUE_JUDGE_REF", "").strip() or "origin/main"
+    ref_str = os.environ.get("SO_QUEUE_JUDGE_REF", "").strip() or DEPLOYED_REF_STR
+    try:
+        commit_str = git_func(["rev-parse", "--verify", "--quiet", f"{ref_str}^{{commit}}"]).strip()
+    except subprocess.CalledProcessError:
+        commit_str = ""
+    if not COMMIT_PATTERN.match(commit_str):
+        raise NoDeployedJudgeError(f"no deployed judge: {ref_str} does not resolve; deploy with scripts/deploy_runner.ps1 "
+                                   f"(as so_runner) before jobs can start")
+    return commit_str
+
+
+# FUNCTION: THE DEPLOYED COMMIT FOR state.json
+def get_deployed_commit_str(git_func_in=None):
+    """
+    Args:
+        git_func_in (callable | None): Injected git (tests)
+
+    Returns:
+        str: The judge commit new jobs would get, or "" when nothing is deployed
+    """
+    # THE SAME RESOLUTION AS A CLAIM
+    try:
+        return get_judge_commit_str(git_func_in)
+    except (ValueError, OSError):
+        return ""
+
+
+# FUNCTION: FETCH origin (A FAILURE IS A WARNING: LOCAL OBJECTS ARE USED)
+def fetch_origin(git_func_in=None):
+    """
+    Args:
+        git_func_in (callable | None): Injected git (tests)
+
+    Returns:
+        bool: True when the fetch worked
+    """
+    # PENDING JOBS NAME PUSHED COMMITS; THE RUNNER'S CLONE MUST HAVE THEM BEFORE VALIDATION
+    git_func = git_func_in or run_git_str
     try:
         git_func(["fetch", "--quiet", "origin"])
-    except subprocess.CalledProcessError as error:
-        print(f"warning: git fetch origin failed ({(error.output or '').strip() or error}); using local {ref_str}")
-    commit_str = git_func(["rev-parse", "--verify", f"{ref_str}^{{commit}}"]).strip()
-    if not COMMIT_PATTERN.match(commit_str):
-        raise ValueError(f"{ref_str} did not resolve to a commit hash")
-    return commit_str
+        return True
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f"warning: git fetch origin failed ({(getattr(error, 'output', '') or '').strip() or error}); "
+              f"using local objects", flush=True)
+        return False
 
 
 # FUNCTION: THE COMMIT A RUN EXECUTES: THE JUDGE'S TREE WITH THE JOB'S experiments/ TREE
@@ -833,8 +881,10 @@ def make_composite_commit_str(judge_commit_str_in, design_commit_str_in, git_fun
         raise ValueError(f"the job commit cannot be compared with the judge commit ({(error.output or '').strip()[:200]})")
     outside_list = sorted(path_str for path_str in changed_list if path_str.strip() and not path_str.startswith("experiments/"))
     if outside_list:
-        raise ValueError("the job commit changes files outside experiments/ (the judge comes from main; open a core "
-                         "change for these): " + ", ".join(outside_list[:10]) + (" ..." if len(outside_list) > 10 else ""))
+        raise ValueError("the job commit changes files outside experiments/ compared with the deployed judge "
+                         f"{judge_commit_str_in[:8]} (core changes need a pull request; main commits that are not deployed "
+                         "yet need scripts/deploy_runner.ps1 first): " + ", ".join(outside_list[:10])
+                         + (" ..." if len(outside_list) > 10 else ""))
     # THE DESIGN SIDE: A TREE WITHOUT LINKS
     try:
         experiments_tree_str = git_func(["rev-parse", "--verify", f"{design_commit_str_in}:experiments"]).strip()
@@ -1409,14 +1459,22 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
         if not get_stop_flag_bool(path_dict_in):
             for job_dict in recover_running_job_list(path_dict_in):
                 run_one_func(job_dict)
+        # NEW COMMITS FIRST, SO A PENDING JOB THAT NAMES A JUST-PUSHED COMMIT IS NOT REJECTED AS MISSING
+        fetch_origin(git_func_in)
         while True:
             if get_stop_flag_bool(path_dict_in):
                 print(f"stop flag set ({path_dict_in['stop_flag']}); no further job is started", flush=True)
                 break
+            # THE JUDGE OF THE NEXT JOB: THE DEPLOYED COMMIT NOW (A DEPLOY BETWEEN JOBS APPLIES TO THE NEXT ONE)
+            try:
+                judge_commit_str = (judge_func_in or get_judge_commit_str)()
+            except NoDeployedJudgeError as error:
+                print(f"{error}; pending jobs wait", flush=True)
+                break
             job_dict = get_next_job_dict(path_dict_in, git_func_in)
             if job_dict is None:
                 break
-            run_one_func(claim_job_dict(path_dict_in, job_dict, judge_func_in))
+            run_one_func(claim_job_dict(path_dict_in, job_dict, lambda: judge_commit_str))
     finally:
         write_state_dict(path_dict_in, None)
         os.remove(path_dict_in["lock"])
