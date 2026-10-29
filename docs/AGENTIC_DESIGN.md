@@ -118,9 +118,9 @@ lock, both of which change verdicts.
 
 ### 4.2 The referee is the commit Nicolas deployed (decided 2026-10-28)
 The runner scores runs only with the commit Nicolas last deployed with `scripts/deploy_runner.ps1` (the "deploy
-button"), not with whatever is newest on GitHub. A merge to `main` changes nothing until Nicolas deploys. **Today the
-code still takes the tip of `origin/main`** (`scripts/run_queue.py`, `get_judge_commit_str`); changing that is roadmap
-R2. A job supplies only `experiments/**` from its own commit; a job commit that changes anything else is refused
+button"), not with whatever is newest on GitHub. A merge to `main` changes nothing until Nicolas deploys. **Built
+(R2, 2026-10-29):** the deploy script sets the ref `refs/deployed` in the runner's clone (with a reflog entry), and the
+queue takes the judge of every new job from it; without a deployed commit no new job starts. A job supplies only `experiments/**` from its own commit; a job commit that changes anything else is refused
 (built, A2). Manifests record judge, design and run commits.
 
 ### 4.3 Shared helpers used by designs (proposed)

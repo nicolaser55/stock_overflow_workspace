@@ -64,9 +64,15 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
 
 ## R2. The referee is the deployed commit (decided)
 
-- [ ] `deploy_runner.ps1` records the deployed commit (for example a ref `refs/deployed` in the runner clone).
-- [ ] `run_queue.py` takes the judge commit from that ref, not from `origin/main`; `status` shows it.
-- [ ] Tests; `docs/RUNNER_DESIGN.md` and `AGENTS.md` updated.
+- [x] `deploy_runner.ps1` records the deployed commit: ref `refs/deployed` in the runner clone, with a reflog entry
+  (time and account).
+- [x] `run_queue.py` takes the judge commit from that ref, not from `origin/main`; `status` shows `deployed_commit`;
+  without a deployed commit new jobs wait in `pending/`.
+- [x] Found while building it: the queue validated a pending job's commit before any fetch, so a commit pushed from
+  another clone was rejected as missing on the first pass. Each pass now fetches origin first.
+- [x] Tests (a merge to `main` without a deploy changes no judge; no deployed judge: jobs wait; fetch before
+  validation); `docs/RUNNER_DESIGN.md`, `AGENTS.md`, design 4.2 updated.
+- [ ] On nicodesktop: merge, deploy, `status` shows `deployed_commit` equal to `queue_commit`.
 
 **Done when** a merge to `main` without a deploy changes no judge commit.
 
