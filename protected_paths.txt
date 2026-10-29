@@ -11,6 +11,7 @@ protected_paths.txt
 docs/AGENTIC_DESIGN.md
 docs/AGENTIC_DESIGN.drawio
 docs/AGENTIC_ROADMAP.md
+docs/STAGE1_RESEARCH_PLAN.md
 docs/RUNNER_DESIGN.md
 docs/DATA_SOURCES.md
 
