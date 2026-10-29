@@ -20,36 +20,47 @@ is on. A result produced without one is discarded and rerun.
 - [x] Decisions on the audit (design revision 2026-10-28).
 - [x] exp02's removed `import pandas as pd` line restored (`b39bd9b`); its folder fingerprint again equals the one it
   last ran with (`02cbcfe3…`).
+- [x] Stage-1 research plan: idea list, family budget ledger, data to collect (`docs/STAGE1_RESEARCH_PLAN.md`,
+  2026-10-29). Nicolas edits it before R5.
 
 ---
 
 ## R1. Apply A3 (notifier and kill switch) and this design revision
 
-- [ ] Merge the package (A3 code, tests, documents, this roadmap); `tests\run_all_tests.py --fast` passes.
-- [ ] Create `D:\stock_overflow\data\control` with an ACL where only Nicolas may write (every other account reads).
+- [x] Merge the package (A3 code, tests, documents, this roadmap); `tests\run_all_tests.py --fast` passes (PR #12).
+- [x] Create `D:\stock_overflow\data\control` with an ACL where only Nicolas may write (every other account reads).
   Add this to `setup_so_runner.ps1` / `setup_so_agent.ps1` when they are next updated (R7).
-- [ ] Deploy (`deploy_runner.ps1` as so_runner).
-- [ ] `run_queue.py test-email` as so_runner: the email arrives (SMTP never verified end to end).
-- [ ] Create `control\STOP`: `run_queue.py status` shows `"stopped": true`; remove it: `false`.
+- [x] Deploy (`deploy_runner.ps1` as so_runner): runner clone at `cc094bd`.
+- [x] `run_queue.py test-email` as so_runner: the email arrived (2026-10-28 17:21; first end-to-end check).
+- [x] Create `control\STOP`: `run_queue.py status` shows `"stopped": true`; remove it: `false`.
 
-**Done when** the test email arrived and the STOP file stops and releases the queue.
+**Done when** the test email arrived and the STOP file stops and releases the queue. **Done 2026-10-28** (the ACL
+was checked: so_agent's write was refused).
 
 ## R1b. Pre-check for phase C (read-only, on nicodesktop)
 
-- [ ] For each of the nine experiments: the protocol versions and design-folder hashes in `trial_log.csv` against the
+- [x] For each of the nine experiments: the protocol versions and design-folder hashes in `trial_log.csv` against the
   current folder hash. Expected: every one matches a logged 1.0 hash (exp02 matches since `b39bd9b`).
-- [ ] exp13: do **not** edit its PROTOCOL.md (decided); its origin goes into the results-log note.
+- [x] exp13: do **not** edit its PROTOCOL.md (decided); its origin goes into a results-log note row (from the git
+  history; `docs/STAGE1_RESEARCH_PLAN.md` section 7).
 
-**Done when** all nine are confirmed as 1.0 reruns, or a mismatch is reported to Nicolas.
+**Done when** all nine are confirmed as 1.0 reruns, or a mismatch is reported to Nicolas. **Done 2026-10-28**: all nine
+"OK rerun" (Windows hashes; they differ from Linux checkouts because of line endings, as expected).
 
 ## C. Rerun the nine existing experiments (first valid baseline)
 
-- [ ] Copy `trial_log.csv` and `run_index.csv` aside (no NAS yet).
-- [ ] Queue the eight daily experiments; then exp01 alone (11-14 hours).
-- [ ] Read each email and report; add the results-log rows.
+- [x] Copy `trial_log.csv` aside (`D:\stock_overflow\backup_records\before_phaseC_20261028_173636`; `run_index.csv`
+  did not exist yet).
+- [x] Queue the eight daily experiments; then exp01 (exp13 re-queued last with a corrected note).
+- [x] Read each email and the exp02 report; add the results-log rows and the exp13 origin note.
 
-**Done when** nine runs are in the run index under the current judge hash. Expected: R2, R3 and R4 change the judge,
-so the daily experiments are rerun once more after them (about one hour; accepted 2026-10-28).
+**Done when** nine runs are in the run index under the current judge hash. **Done 2026-10-29**: judge hash
+`ad4a601ec218bc09`, every return identical to the withdrawn rows of 2026-10-23..25; all nine fail the verdict
+(exp13 beats buy-and-hold on return, +273.85% vs +199.04%, but fails consistency and multiple testing; it is an
+after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp02 54 minutes), exp01 about 11.5 hours.
+
+**Next full rerun:** after R2, R3, R4 and R4b, all nine (exp01 included, since R4b changes every return): about
+3 hours plus 11-14 hours.
 
 ## R2. The referee is the deployed commit (decided)
 
@@ -81,12 +92,24 @@ so the daily experiments are rerun once more after them (about one hour; accepte
 
 **Done when** an agent account can read the grade of a run and nothing else about it.
 
+## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
+
+- [ ] Nicolas supplies SPY dividends (ex-date, pay date, amount) and the daily 3-month T-bill rate from 2005
+  (`docs/STAGE1_RESEARCH_PLAN.md` 5.1); both registered in `docs/DATA_SOURCES.md` with their availability clocks.
+- [ ] Engine and baselines: dividends credited to shares held at the ex-date open; cash earns the T-bill rate; buy-and-
+  hold, constant-exposure and random-timing baselines on the same basis; the report says "total return".
+- [ ] Tests on synthetic data; `docs/RUNNER_DESIGN.md` updated.
+- [ ] Then the full rerun of the nine (see C).
+
+**Done when** every verdict compares total returns on both sides.
+
 ## R5. Stage 1 build: planner and blind coder (decided)
 
-- [ ] Choose the agent runtime and model (requirements in design section 12); provider-side monthly spend limit of
-  **USD 25** on the system's own key (decided 2026-10-28; revised when the workload is known).
-- [ ] Idea list: Claude drafts 20-30 well-known SPY timing ideas with family and mechanism; Nicolas edits (decided:
-  after the design is final).
+- [ ] Choose the agent runtime and model (requirements in design section 12; options and a bake-off in
+  `claude/PROPOSAL_2026-10-29_models_and_setups.md`); provider-side monthly spend limit of **USD 25** on the system's
+  own key (decided 2026-10-28; revised when the workload is known).
+- [~] Idea list: drafted with sources, family ledger and data needs (`docs/STAGE1_RESEARCH_PLAN.md`, 2026-10-29);
+  Nicolas edits it; existing experiments count against their family (decided 2026-10-29).
 - [ ] File formats: idea entry, plan file, job, technical status, graded summary (design section 12).
 - [ ] Planner prompt and rules: most promising first; budget 5 variants per idea, 3 ideas per family; grades only;
   checks STOP before each step.
