@@ -187,7 +187,21 @@ def get_tail_summary_dict(return_list_in, path_return_in, design_count_int_in, a
     tail_float = alpha_float / max(1, int(design_count_int_in))
     critical_float = float(normal.inv_cdf(1.0 - tail_float)) if normal else float("nan")
     exceed_int = int(np.sum(value_arr >= critical_float)) if normal else 0
-    return {"draw_count": count_int, "mean": mean_float, "std": std_float, "skew": skew_float,
+    # THE SAME TEST ON THE LOG SCALE: log(1 + total return), WHERE COMPOUNDING'S RIGHT SKEW IS REMOVED (A CANDIDATE FIX)
+    log_arr = np.log1p(value_arr)
+    log_mean_float, log_std_float = float(log_arr.mean()), float(log_arr.std(ddof=1))
+    log_centered_arr = log_arr - log_mean_float
+    log_pop_std_float = float(np.sqrt(np.mean(log_centered_arr ** 2)))
+    log_skew_float = float(np.mean(log_centered_arr ** 3) / log_pop_std_float ** 3) if log_pop_std_float > 0 else float("nan")
+    log_normal = NormalDist(log_mean_float, log_std_float) if log_std_float > 0 else None
+    log_critical_float = float(log_normal.inv_cdf(1.0 - tail_float)) if log_normal else float("nan")
+    log_exceed_int = int(np.sum(log_arr >= log_critical_float)) if log_normal else 0
+    log_quantile_list = [{"level": level_float, "empirical": float(np.quantile(log_arr, level_float)),
+                          "normal": float(log_normal.inv_cdf(level_float)) if log_normal else float("nan")}
+                         for level_float in [0.95, 0.99, 0.999, 0.9999]]
+    return {"log_skew": log_skew_float, "log_normal_critical_return": float(np.expm1(log_critical_float)),
+            "log_draws_at_or_above_critical": log_exceed_int, "log_quantile_list": log_quantile_list,
+            "draw_count": count_int, "mean": mean_float, "std": std_float, "skew": skew_float,
             "excess_kurtosis": excess_kurtosis_float, "max": float(value_arr.max()), "quantile_list": quantile_list,
             "design_count": int(design_count_int_in), "alpha": alpha_float, "tail_probability": tail_float,
             "normal_critical_return": critical_float, "draws_at_or_above_critical": exceed_int,
@@ -225,6 +239,13 @@ def get_tail_markdown_str(run_id_str_in, summary_dict_in, reproduced_dict_in):
                   f"(expected if the normal were right: {s['draws_at_or_above_critical_expected']:.1f}).", "",
                   f"The run's own path: total return {s['path_return']:.4f}; p under the normal fit {s['path_p_normal']:.2e}; "
                   f"share of draws at or above it {s['path_p_empirical']:.4f}.", "",
+                  f"Log scale (candidate fix: the normal fitted to log(1 + return)): skewness {s['log_skew']:.3f}; critical "
+                  f"return {s['log_normal_critical_return']:.4f}; draws at or above it: **{s['log_draws_at_or_above_critical']}** "
+                  f"(expected {s['draws_at_or_above_critical_expected']:.1f}).", "",
+                  "| Level | Empirical log quantile | Normal-fit log quantile |", "|---|---|---|"]
+    for row_dict in s["log_quantile_list"]:
+        line_list.append(f"| {row_dict['level']:.4f} | {row_dict['empirical']:.4f} | {row_dict['normal']:.4f} |")
+    line_list += ["",
                   "Reading: many more draws above the critical value than expected (or empirical upper quantiles above the "
                   "normal ones) mean the normal approximation is too lenient for this kind of path; about as many or fewer "
                   "mean it is fair or conservative. With 10,000 draws, about 2 exceedances are expected at N = 260, so only "
@@ -255,7 +276,8 @@ if __name__ == "__main__":
     prior_only_dict, date1, date2 = get_rebuilt_prior_only_tuple(design_module, ohlcv_array_dict, run_folder_str, arg_dict.run_id)
     rebuilt_float = float(prior_only_dict["metric_dict"]["total_return"])
     reported_float = float(report_dict["return_dict"]["strategy_total_return"])
-    if not abs(rebuilt_float - reported_float) <= 1e-9:
+    # THE ENGINE ROUNDS metric_dict total_return TO 8 DECIMALS; THE REPORT KEEPS THE UNROUNDED VALUE
+    if not abs(rebuilt_float - reported_float) <= 1e-7:
         raise SystemExit(f"the rebuilt prior-only path returns {rebuilt_float} but the report says {reported_float}; "
                          f"is the workspace at the experiment code the run used? nothing written")
     from so.runner.baselines import get_exposure_weight_arr
