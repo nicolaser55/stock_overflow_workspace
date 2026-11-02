@@ -27,9 +27,15 @@ has a "multiple testing" part that raises the bar with N, the number of distinct
                       on the trial log's candidate-period excess returns (validation quarters); with fewer than
                       MT_MIN_DESIGN_COUNT designs of at least MT_MIN_PERIOD_COUNT quarters, it falls back to 1 / T, the
                       variance of a Sharpe estimate under the null. Pass at RUNNER_DSR_MIN_PROBABILITY (0.95) or more.
-    random timing     the path's total return against the random-timing draws, with a normal approximation of the
-                      draws (100 draws cannot resolve a tail of 0.05 / N directly). Pass when the one-sided p-value is
-                      at most RUNNER_MULTIPLE_TESTING_ALPHA / N (Bonferroni).
+    random timing     the path's total return against random-timing draws, COUNTED, not fitted (roadmap R3,
+                      2026-11-02). p = (k + 1) / (M + 1), k = draws at or above the path, M = draws; pass when p is at
+                      most RUNNER_MULTIPLE_TESTING_ALPHA / N (Bonferroni). The runner (so.runner.baselines) extends the
+                      100 registered draws to the budget M + 1 = ceil(RUNNER_RANDOM_TIMING_TAIL_FACTOR * N / alpha) in
+                      batches and stops as soon as k exceeds what the full budget would allow (then p at the budget
+                      already exceeds the threshold, so stopping cannot change the outcome). Until 2026-11-02 a normal
+                      fit of the 100 draws was used; the tail check (scripts/check_random_timing_tail.py, 10,000 draws)
+                      found 35 and 37 draws above its critical value where 1.9 were expected (exp04, exp02), and 6 and
+                      5 on the log scale: both fits are too lenient, so the test counts.
 
 Both must pass. Units: the deflated Sharpe uses non-annualized quarterly Sharpe ratios on both sides; the path's
 quarters are calendar quarters and the trial log's are validation quarters (both about 63 sessions).
@@ -288,30 +294,81 @@ def get_quarter_excess_arr(strategy_return_pdf_in, buy_hold_return_pdf_in):
     return np.asarray(strategy_arr - buy_hold_arr, dtype=float)
 
 
-# FUNCTION: ONE-SIDED P-VALUE AGAINST THE RANDOM-TIMING DRAWS (NORMAL APPROXIMATION)
-def get_random_timing_p_float(path_return_in, random_return_list_in):
+# FUNCTION: THE RANDOM-TIMING DRAW BUDGET FOR N DESIGNS
+def get_random_timing_draw_target_int(design_count_int_in, alpha_in=None, factor_in=None):
     """
     Args:
-        path_return_in (float): Path total return
-        random_return_list_in (list[float]): Random-timing total returns
+        design_count_int_in (int): N (at least 1)
+        alpha_in (float | None): Family-wise alpha (None = RUNNER_MULTIPLE_TESTING_ALPHA)
+        factor_in (int | None): Budget factor (None = RUNNER_RANDOM_TIMING_TAIL_FACTOR)
 
     Returns:
-        float: P(a random draw >= the path) under a normal fit of the draws (1.0 when undefined)
+        int: M, the number of draws such that M + 1 = ceil(factor * N / alpha)
     """
-    # A NORMAL FIT OF THE DRAWS
-    random_arr = np.asarray(random_return_list_in, dtype=float)
-    random_arr = random_arr[np.isfinite(random_arr)]
-    if len(random_arr) < 2 or not math.isfinite(float(path_return_in)):
-        return 1.0
-    std_float = float(random_arr.std(ddof=1))
-    if std_float <= 0:
-        return 0.0 if float(path_return_in) > float(random_arr.mean()) else 1.0
-    return float(1.0 - _STANDARD_NORMAL.cdf((float(path_return_in) - float(random_arr.mean())) / std_float))
+    # ROUNDED TO 9 DECIMALS BEFORE THE CEILING: 2 * 260 / 0.05 IS 10400 EXACTLY, NOT 10400.000000000002 (ONE TOO MANY)
+    alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA if alpha_in is None else alpha_in)
+    factor_int = int(config.RUNNER_RANDOM_TIMING_TAIL_FACTOR if factor_in is None else factor_in)
+    design_count = max(1, int(design_count_int_in))
+    return int(math.ceil(round(factor_int * design_count / alpha_float, 9))) - 1
+
+
+# FUNCTION: THE MOST DRAWS AT OR ABOVE THE PATH THAT STILL PASS, FOR M DRAWS AND N DESIGNS
+def get_random_timing_at_or_above_max_int(draw_count_int_in, design_count_int_in, alpha_in=None):
+    """
+    The largest k with (k + 1) / (M + 1) <= alpha / N; -1 when even k = 0 fails (too few draws to pass).
+
+    Args:
+        draw_count_int_in (int): M
+        design_count_int_in (int): N
+        alpha_in (float | None): Family-wise alpha (None = RUNNER_MULTIPLE_TESTING_ALPHA)
+
+    Returns:
+        int: k_max
+    """
+    # (k + 1) <= (M + 1) * alpha / N, WITH A SMALL ROUNDING ALLOWANCE IN THE PASSING DIRECTION ONLY FOR EXACT EQUALITY
+    alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA if alpha_in is None else alpha_in)
+    bound_float = (int(draw_count_int_in) + 1) * alpha_float / max(1, int(design_count_int_in))
+    return int(math.floor(round(bound_float, 9))) - 1
+
+
+# FUNCTION: THE EMPIRICAL RANDOM-TIMING TEST FROM GIVEN DRAWS (NO EXTRA DRAWS)
+def get_random_timing_count_dict(path_return_in, random_return_list_in, design_count_int_in, alpha_in=None):
+    """
+    The test on the draws given, without drawing more. With 100 draws it cannot pass once N > 5 (1 / 101 > 0.05 / N):
+    the runner extends the draws (so.runner.baselines.get_random_timing_tail_dict); a caller without them gets the
+    strict answer.
+
+    Args:
+        path_return_in (float): Path total return
+        random_return_list_in (list[float]): Random-timing total returns (a non-finite draw counts as at or above)
+        design_count_int_in (int): N
+        alpha_in (float | None): Family-wise alpha
+
+    Returns:
+        dict: the tail-dict fields (see get_random_timing_tail_dict) for these draws only
+    """
+    # COUNT; A NON-FINITE PATH NEVER PASSES
+    alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA if alpha_in is None else alpha_in)
+    design_count = max(1, int(design_count_int_in))
+    value_arr = np.asarray(list(random_return_list_in), dtype=float)
+    path_float = float(path_return_in)
+    path_finite_bool = math.isfinite(path_float)
+    at_or_above_int = int(np.sum(~(value_arr < path_float))) if path_finite_bool else int(len(value_arr))
+    draw_count = int(len(value_arr))
+    at_or_above_max = get_random_timing_at_or_above_max_int(draw_count, design_count, alpha_float)
+    p_float = float((at_or_above_int + 1) / (draw_count + 1))
+    return {"method_str": "empirical", "design_count": design_count, "alpha": alpha_float,
+            "p_max": alpha_float / design_count, "path_return_used": path_float,
+            "draw_target": draw_count, "draw_count": draw_count, "registered_draw_count": draw_count,
+            "at_or_above_count": at_or_above_int, "at_or_above_max": at_or_above_max, "p": p_float,
+            "stopped_early_bool": False, "budget_exceeded_bool": False, "extension_bool": False,
+            "pass_bool": bool(path_finite_bool and draw_count > 0 and at_or_above_int <= at_or_above_max)}
 
 
 # FUNCTION: THE MULTIPLE-TESTING PART OF THE VERDICT
 def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, path_return_in,
-                                      random_return_list_in, trial_log_path_str_in=None, legacy_path_list_in=None):
+                                      random_return_list_in, trial_log_path_str_in=None, legacy_path_list_in=None,
+                                      random_timing_tail_dict_in=None):
     """
     Both the deflated Sharpe ratio and the Bonferroni random-timing test must pass.
 
@@ -321,9 +378,11 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
         random_return_list_in (list[float]): Random-timing total returns
         trial_log_path_str_in (str | None): Trial log (None = the shared log)
         legacy_path_list_in (list[str] | None): Pre-reset records (None = records/legacy)
+        random_timing_tail_dict_in (dict | None): The runner's extended draw count
+            (so.runner.baselines.get_random_timing_tail_dict); None = count random_return_list_in only (strict)
 
     Returns:
-        dict: pass_bool, design counts, deflated Sharpe numbers, random-timing p-value and its threshold
+        dict: pass_bool, design counts, deflated Sharpe numbers, random-timing counts, p-value and its threshold
     """
     # N, THEN BOTH TESTS
     count_dict = get_tried_design_count_dict(trial_log_path_str_in, legacy_path_list_in)
@@ -335,10 +394,17 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
     dsr_dict = get_deflated_sharpe_dict(sharpe_float, len(excess_arr), skew_float, kurtosis_float,
                                         variance_dict["variance"], design_count)
     alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA)
-    random_p_float = get_random_timing_p_float(path_return_in, random_return_list_in)
+    # THE RUNNER'S COUNT MUST HAVE BEEN MADE FOR THIS N AND ALPHA; OTHERWISE THE STRICT COUNT OF THE GIVEN DRAWS
+    tail_dict = dict(random_timing_tail_dict_in or {})
+    tail_mismatch_bool = bool(tail_dict) and (int(tail_dict.get("design_count", -1)) != design_count
+                                              or abs(float(tail_dict.get("alpha", -1.0)) - alpha_float) > 1e-12)
+    if not tail_dict or tail_mismatch_bool:
+        tail_dict = get_random_timing_count_dict(path_return_in, random_return_list_in, design_count, alpha_float)
+    tail_dict["tail_mismatch_bool"] = tail_mismatch_bool
+    random_p_float = float(tail_dict["p"])
     random_threshold_float = alpha_float / design_count
     dsr_pass_bool = dsr_dict["probability"] >= float(config.RUNNER_DSR_MIN_PROBABILITY)
-    random_pass_bool = random_p_float <= random_threshold_float
+    random_pass_bool = bool(tail_dict["pass_bool"])
     return {"pass_bool": bool(dsr_pass_bool and random_pass_bool), "design_count": design_count,
             "current_design_count": int(count_dict["current_count"]),
             "legacy_design_count": int(count_dict["legacy_count"]),
@@ -350,4 +416,5 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
             "expected_max_sharpe": dsr_dict["expected_max_sharpe"], "trial_sharpe_variance": dsr_dict["variance_used"],
             "trial_sharpe_variance_source_str": dsr_dict["variance_source_str"], "dsr_pass_bool": bool(dsr_pass_bool),
             "random_timing_p": random_p_float, "random_timing_p_max": random_threshold_float,
+            "random_timing_tail_dict": tail_dict,
             "random_pass_bool": bool(random_pass_bool)}

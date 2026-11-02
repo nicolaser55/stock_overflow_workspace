@@ -319,8 +319,9 @@ def test_multiple_testing_parts():
         None
     """
     # BAILEY AND LOPEZ DE PRADO (2014): SR 2.5 A YEAR, 1,250 DAYS, SKEW -3, KURTOSIS 10, 100 TRIALS, V[SR] 0.5 A YEAR
-    from so.core.multiple_testing import (get_deflated_sharpe_dict, get_tried_design_count_dict,
-                                          get_random_timing_p_float, get_design_key_str)
+    from so.core.multiple_testing import (get_deflated_sharpe_dict, get_tried_design_count_dict, get_design_key_str,
+                                          get_random_timing_draw_target_int, get_random_timing_at_or_above_max_int,
+                                          get_random_timing_count_dict, get_multiple_testing_verdict_dict)
     paper_dict = get_deflated_sharpe_dict(2.5 / np.sqrt(250), 1250, -3.0, 10.0, 0.5 / 250, 100)
     assert abs(paper_dict["probability"] - 0.9004) < 1e-3, paper_dict
     assert get_deflated_sharpe_dict(0.3, 40, 0.0, 3.0, float("nan"), 1)["variance_source_str"] == "null_1_over_T"
@@ -340,11 +341,108 @@ def test_multiple_testing_parts():
     # THE RESTORED PRE-RESET RECORDS ARE IN THE REPOSITORY AND COUNT
     restored_dict = get_tried_design_count_dict(log_path_str)
     assert restored_dict["legacy_count"] >= 200, restored_dict
-    # RANDOM TIMING
+    # RANDOM TIMING, COUNTED (R3, 2026-11-02): THE BUDGET AND THE ALLOWED COUNT
+    assert get_random_timing_draw_target_int(260) == 10399 and get_random_timing_at_or_above_max_int(10399, 260) == 1
+    assert get_random_timing_draw_target_int(1) == 39 and get_random_timing_at_or_above_max_int(39, 1) == 1
+    assert get_random_timing_draw_target_int(1000) == 39999 and get_random_timing_at_or_above_max_int(39999, 1000) == 1
+    assert get_random_timing_at_or_above_max_int(100, 260) == -1          # 100 DRAWS CANNOT PASS AT N = 260
+    assert get_random_timing_at_or_above_max_int(100, 1) == 4              # (4 + 1) / 101 <= 0.05 < (5 + 1) / 101
+    assert get_random_timing_at_or_above_max_int(10398, 260) == 0          # ONE DRAW SHORT OF THE BUDGET: ONLY k = 0
+    # THE STRICT COUNT OF GIVEN DRAWS: TIES AND NON-FINITE DRAWS COUNT AGAINST THE PATH; A NaN PATH NEVER PASSES
     draw_list = list(np.linspace(0.0, 1.0, 100))
-    assert get_random_timing_p_float(2.0, draw_list) < get_random_timing_p_float(1.0, draw_list) < 0.5
-    assert get_random_timing_p_float(0.5, [0.1] * 10) == 0.0 and get_random_timing_p_float(0.05, [0.1] * 10) == 1.0
-    passed(f"multiple testing: deflated Sharpe matches the paper, designs counted once ({restored_dict['legacy_count']} pre-reset), random-timing p-value")
+    assert get_random_timing_count_dict(2.0, draw_list, 1)["pass_bool"]
+    tie_dict = get_random_timing_count_dict(1.0, draw_list, 1)
+    assert tie_dict["at_or_above_count"] == 1 and abs(tie_dict["p"] - 2 / 101) < 1e-15 and tie_dict["pass_bool"]
+    assert get_random_timing_count_dict(2.0, draw_list[:99] + [float("nan")], 1)["at_or_above_count"] == 1
+    assert not get_random_timing_count_dict(float("nan"), draw_list, 1)["pass_bool"]
+    assert not get_random_timing_count_dict(2.0, draw_list, 260)["pass_bool"]       # 1 / 101 > 0.05 / 260
+    assert get_random_timing_count_dict(0.95, draw_list, 1)["at_or_above_count"] == 5
+    assert not get_random_timing_count_dict(0.95, draw_list, 1)["pass_bool"]       # (5 + 1) / 101 > 0.05
+    # THE VERDICT USES THE RUNNER'S COUNT WHEN IT WAS MADE FOR THE SAME N; OTHERWISE THE STRICT COUNT
+    quarter_pdf = get_month_return_pdf("2010-01-01", [0.01] * 24)
+    flat_pdf = get_month_return_pdf("2010-01-01", [0.0] * 24)
+    empty_log_str = os.path.join(TEMP_ROOT_STR, "mt_empty_trial_log.csv")
+    good_tail_dict = {**get_random_timing_count_dict(2.0, draw_list, 1), "draw_count": 39, "draw_target": 39,
+                      "at_or_above_count": 0, "p": 1 / 40, "pass_bool": True, "extension_bool": True}
+    used_dict = get_multiple_testing_verdict_dict(quarter_pdf, flat_pdf, 2.0, draw_list, empty_log_str, [],
+                                                  random_timing_tail_dict_in=good_tail_dict)
+    assert used_dict["design_count"] == 1 and used_dict["random_pass_bool"]
+    assert used_dict["random_timing_tail_dict"]["draw_count"] == 39 and not used_dict["random_timing_tail_dict"]["tail_mismatch_bool"]
+    other_dict = get_multiple_testing_verdict_dict(quarter_pdf, flat_pdf, 2.0, draw_list, empty_log_str, [],
+                                                   random_timing_tail_dict_in={**good_tail_dict, "design_count": 7})
+    assert other_dict["random_timing_tail_dict"]["tail_mismatch_bool"]
+    assert other_dict["random_timing_tail_dict"]["draw_count"] == 100      # FELL BACK TO THE STRICT COUNT
+    passed(f"multiple testing: deflated Sharpe matches the paper, designs counted once ({restored_dict['legacy_count']} "
+           f"pre-reset); random timing counted: budget, allowed count, ties and NaN against the path, runner count only "
+           f"for the same N")
+
+
+# FUNCTION: THE EXTENDED RANDOM-TIMING COUNT (R3, 2026-11-02): EXACT, EARLY STOP, WORKERS, BUDGET, STRICT FALLBACKS
+def test_random_timing_tail_count():
+    """
+    On synthetic bars: the draws beyond the registered ones are the same seeds and the same code; the count stops
+    exactly where the batch rule says; worker processes give the same count; a budget above the maximum, a reduced
+    seed count and non-default seeds draw nothing extra.
+
+    Returns:
+        None
+    """
+    # A PATH IN THE MARKET EXCEPT A FEW SPELLS (REALIZED EXPOSURE), SIX REGISTERED DRAWS
+    from so.runner.baselines import (get_runner_baseline_dict, get_random_timing_tail_dict, get_exposure_weight_arr,
+                                     get_random_timing_draw_return_float)
+    from so.core.multiple_testing import get_random_timing_at_or_above_max_int
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-06-01", "2010-07-30", seed_in=11))
+    session_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_list[0], session_list[-1]
+    in_position_arr = np.ones(len(session_list), dtype=bool)
+    in_position_arr[[4, 5, 15, 16, 17, 30]] = False
+
+    def path_dict_for(return_float_in):
+        return {"daily_equity_pdf": pd.DataFrame({"in_position": in_position_arr}), "metric_dict": {"total_return": return_float_in}}
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, path_dict_for(0.0), seed_count_int_in=6,
+                                             realized_exposure_bool_in=True)
+    exposure_arr = get_exposure_weight_arr(path_dict_for(0.0), True)
+    # EVERY DRAW OF THE N = 1 BUDGET (39), ONE BY ONE; THE FIRST SIX ARE THE REGISTERED ONES
+    all_list = [get_random_timing_draw_return_float(42 + idx, ohlcv_array_dict, date1, date2, exposure_arr) for idx in range(39)]
+    assert np.allclose(all_list[:6], baseline_dict["random_timing_return_list"], rtol=0, atol=0)
+    ordered_arr = np.sort(np.asarray(all_list))[::-1]
+
+    def tail_for(path_float_in, **kwarg_dict_in):
+        return get_random_timing_tail_dict(ohlcv_array_dict, date1, date2, baseline_dict, path_dict_for(path_float_in), 1,
+                                           realized_exposure_bool_in=True, **{"process_count_int_in": 1, "batch_int_in": 5,
+                                                                              **kwarg_dict_in})
+    # ABOVE EVERY DRAW: THE FULL BUDGET IS DRAWN, k = 0, PASS
+    top_dict = tail_for(float(ordered_arr[0]) + 1.0)
+    assert top_dict["draw_count"] == 39 and top_dict["at_or_above_count"] == 0 and top_dict["pass_bool"]
+    assert top_dict["extension_bool"] and not top_dict["stopped_early_bool"] and abs(top_dict["p"] - 1 / 40) < 1e-15
+    # EQUAL TO THE SECOND-HIGHEST DRAW: k = 2 > 1 ALLOWED; IT STOPS AFTER THE BATCH IN WHICH k FIRST EXCEEDS 1
+    path_float = float(ordered_arr[1])
+    expected_count, k_int = 6, int(np.sum(~(np.asarray(all_list[:6]) < path_float)))
+    while expected_count < 39 and k_int <= 1:
+        next_count = min(expected_count + 5, 39)
+        k_int += int(np.sum(~(np.asarray(all_list[expected_count:next_count]) < path_float)))
+        expected_count = next_count
+    second_dict = tail_for(path_float)
+    assert second_dict["draw_count"] == expected_count and second_dict["at_or_above_count"] == k_int and not second_dict["pass_bool"]
+    assert second_dict["stopped_early_bool"] == (expected_count < 39)
+    # BELOW MOST REGISTERED DRAWS: NO EXTRA DRAW AT ALL
+    low_dict = tail_for(float(np.min(all_list)) - 1.0)
+    assert low_dict["draw_count"] == 6 and not low_dict["extension_bool"] and low_dict["stopped_early_bool"] and not low_dict["pass_bool"]
+    # WORKER PROCESSES: THE SAME COUNT
+    pool_dict = tail_for(float(ordered_arr[0]) + 1.0, process_count_int_in=2, batch_int_in=16)
+    assert pool_dict["draw_count"] == 39 and pool_dict["at_or_above_count"] == 0 and pool_dict["pass_bool"]
+    # STRICT FALLBACKS: BUDGET ABOVE THE MAXIMUM, EXTENSION OFF, NON-DEFAULT SEEDS
+    budget_dict = tail_for(float(ordered_arr[0]) + 1.0, max_draw_int_in=10)
+    assert budget_dict["budget_exceeded_bool"] and budget_dict["draw_count"] == 6 and not budget_dict["pass_bool"]
+    off_dict = tail_for(float(ordered_arr[0]) + 1.0, extend_bool_in=False)
+    assert off_dict["draw_count"] == 6 and not off_dict["extension_bool"]
+    assert off_dict["pass_bool"] == (0 <= get_random_timing_at_or_above_max_int(6, 1))
+    shifted_dict = get_random_timing_tail_dict(ohlcv_array_dict, date1, date2,
+                                               {**baseline_dict, "random_timing_seed_list": list(range(7, 13))},
+                                               path_dict_for(float(ordered_arr[0]) + 1.0), 1, realized_exposure_bool_in=True)
+    assert shifted_dict["draw_count"] == 6 and not shifted_dict["extension_bool"]
+    passed("random-timing count: extra draws are the same seeds and code, the stop point follows the batch rule exactly, "
+           "workers give the same count; budget above the maximum, extension off and other seeds draw nothing extra")
 
 
 # FUNCTION: RANDOM TIMING IS REPRODUCIBLE AND CONSTANT WEIGHT 1 EQUALS BUY-AND-HOLD
@@ -734,6 +832,7 @@ if __name__ == "__main__":
         test_baseline_verdict_parts()
         test_email_worthy_needs_every_part()
         test_multiple_testing_parts()
+        test_random_timing_tail_count()
         test_baselines_reproducible_and_constant_one_equals_buy_hold()
         test_random_timing_preserves_time_two_three_four_weights()
         test_random_timing_one_exit_spreads_over_the_window()

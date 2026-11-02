@@ -124,7 +124,14 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   windows; audit S1, a data-dependent amendment because exp13 failed only the old rule); baselines (constant exposure
   with a 0.05 dead band, random timing on the realized exposure); look-ahead; multiple testing (deflated Sharpe
   ratio of quarterly excess returns at 0.95 or more, and random-timing p-value at most 0.05 / N, N = designs tried on
-  the development data including the pre-reset records; `so.core.multiple_testing`, audit B5). The report also shows
+  the development data including the pre-reset records; `so.core.multiple_testing`, audit B5). **The random-timing
+  p-value is counted, not fitted (R3, 2026-11-02):** p = (k + 1) / (M + 1), k = draws at or above the path; the runner
+  extends the 100 registered draws (same seed sequence, same code, 4 worker processes, batches of 1,000) up to the
+  budget M + 1 = ceil(2 N / 0.05) (10,400 draws at N = 260; at most 1 draw at or above the path passes) and stops as
+  soon as k exceeds what the budget allows, which cannot change the outcome. A typical failing path stops after the
+  registered draws. A budget above 200,000 draws, a reduced seed count (tests) or other seeds draw nothing extra and
+  cannot pass. The normal fit used before was too lenient: 35 and 37 of 10,000 draws above its critical value where
+  1.9 were expected (exp04, exp02; `scripts/check_random_timing_tail.py`). The report also shows
   the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02 (not part of the verdict).
 - **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
   with different design-folder code, a first run of a new version without a `preregister` last commit or without the

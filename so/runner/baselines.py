@@ -1,6 +1,13 @@
+import math
+import multiprocessing
+import os
+import time
 import numpy as np
 # IMPORT THE SHARED CONFIGURATION (COSTS, CAPITAL, SEEDS, TOLERANCE)
 from so import config
+# IMPORT THE COUNTING RULES OF THE MULTIPLE-TESTING RANDOM-TIMING TEST
+from so.core.multiple_testing import (get_random_timing_draw_target_int, get_random_timing_at_or_above_max_int,
+                                      get_random_timing_count_dict)
 # IMPORT THE RANDOM-FAMILY SUMMARY ALREADY USED BY DEVELOPMENT REPORTS
 from so.core.baseline_report import get_random_family_stat_dict
 # IMPORT THE ENGINE-ONLY REPLAY OF RECORDED DECISIONS
@@ -22,6 +29,13 @@ and first and last gaps at least 0. Time at each weight is then the path's. The 
 path's only at the two window edges (a spell sitting at the start or the end has one side that does not touch
 base). A path with no spells is returned unchanged. Shuffling run lengths in place does not move one-exit paths
 and is not the baseline.
+
+The multiple-testing random-timing test (roadmap R3, 2026-11-02; so.core.multiple_testing) needs far more draws than
+the 100 registered ones when a path is near passing. get_random_timing_tail_dict continues the same seed sequence
+(config.RANDOM_SEED + 100, + 101, ...) with the same draw code, in batches of RUNNER_RANDOM_TIMING_TAIL_BATCH on
+RUNNER_RANDOM_TIMING_TAIL_PROCESS_COUNT spawned workers, up to the budget for N designs, and stops as soon as more draws
+are at or above the path than the full budget would allow. A typical failing path stops after the registered draws,
+with no extra draw. The count does not depend on the number of workers.
 """
 
 
@@ -479,3 +493,135 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
             "random_timing_unique_weight_list": get_unique_weight_list(target_arr),
             "exposure_source_str": "realized_position" if realized_exposure_bool_in else "decision_target",
             **family_dict}
+
+
+# THE PROCESS-LOCAL SPAN OF A TAIL-DRAW WORKER (SET BY THE POOL INITIALIZER)
+_TAIL_WORKER_STATE_DICT = {}
+
+
+# FUNCTION: SET A TAIL-DRAW WORKER'S BARS AND EXPOSURE PATH
+def init_tail_draw_worker(ohlcv_array_dict_in, date1_in, date2_in, exposure_arr_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Span
+        exposure_arr_in (np.ndarray): The path's exposure (as get_exposure_weight_arr returns it)
+
+    Returns:
+        None
+    """
+    # ONE COPY PER PROCESS
+    _TAIL_WORKER_STATE_DICT.update({"ohlcv": ohlcv_array_dict_in, "date1": date1_in, "date2": date2_in,
+                                    "exposure": exposure_arr_in})
+
+
+# FUNCTION: THE TOTAL RETURN OF ONE RANDOM-TIMING DRAW (THE LOOP BODY OF get_runner_baseline_dict)
+def get_random_timing_draw_return_float(seed_in, ohlcv_array_dict_in=None, date1_in=None, date2_in=None,
+                                        exposure_arr_in=None, initial_capital_in=config.INITIAL_CAPITAL,
+                                        entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
+                                        market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
+    """
+    Args:
+        seed_in (int): Seed
+        ohlcv_array_dict_in, date1_in, date2_in, exposure_arr_in: The span (None = the worker's)
+        initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine costs
+
+    Returns:
+        float: Total return of the draw
+    """
+    # THE SAME DRAW AND THE SAME ENGINE AS THE REGISTERED DRAWS
+    ohlcv = ohlcv_array_dict_in if ohlcv_array_dict_in is not None else _TAIL_WORKER_STATE_DICT["ohlcv"]
+    date1 = date1_in if date1_in is not None else _TAIL_WORKER_STATE_DICT["date1"]
+    date2 = date2_in if date2_in is not None else _TAIL_WORKER_STATE_DICT["date2"]
+    exposure_arr = exposure_arr_in if exposure_arr_in is not None else _TAIL_WORKER_STATE_DICT["exposure"]
+    random_arr = get_random_timing_weight_arr(exposure_arr, int(seed_in))
+    initial_weight = float(random_arr[0]) if len(random_arr) and np.isfinite(random_arr[0]) else 0.0
+    random_dict = run_weight_path_dict(ohlcv, date1, date2, random_arr, initial_weight, 0.0, initial_capital_in,
+                                       entry_slippage_in, market_exit_slippage_in)
+    return float(random_dict["metric_dict"]["total_return"])
+
+
+# FUNCTION: THE MULTIPLE-TESTING RANDOM-TIMING COUNT, WITH EXTRA DRAWS UP TO THE BUDGET FOR N DESIGNS
+def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baseline_dict_in, prior_only_dict_in,
+                                design_count_int_in, realized_exposure_bool_in=False, extend_bool_in=True,
+                                process_count_int_in=None, batch_int_in=None, max_draw_int_in=None, alpha_in=None):
+    """
+    k = draws at or above the path; the budget M + 1 = ceil(factor * N / alpha); after the registered draws, batches of
+    further seeds run while fewer than M draws are done and k is still at most k_max(M). Stopping early cannot change
+    the outcome: k only grows, so p at the budget already exceeds alpha / N. Extension is skipped (the strict count of
+    the registered draws is used) when extend_bool_in is False (a test configuration with a reduced seed count), when the
+    registered seeds are not the default sequence, or when the budget exceeds max_draw_int_in (budget_exceeded_bool):
+    all three can only make the test harder to pass.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Span of the baselines
+        baseline_dict_in (dict): Output of get_runner_baseline_dict (registered draws and seeds)
+        prior_only_dict_in (dict): The path (metric_dict total_return, and its exposure)
+        design_count_int_in (int): N (so.core.multiple_testing.get_tried_design_count_dict)
+        realized_exposure_bool_in (bool): Exposure from the realized position (as the baselines)
+        extend_bool_in (bool): Draw beyond the registered draws
+        process_count_int_in, batch_int_in, max_draw_int_in (int | None): None = the config values
+        alpha_in (float | None): Family-wise alpha (None = RUNNER_MULTIPLE_TESTING_ALPHA)
+
+    Returns:
+        dict: method_str, design_count, alpha, p_max, path_return_used, draw_target, draw_count,
+              registered_draw_count, at_or_above_count, at_or_above_max, p (at the budget: (k + 1) / (target + 1)),
+              stopped_early_bool, budget_exceeded_bool, extension_bool, process_count, extra_seconds, pass_bool
+    """
+    # THE REGISTERED DRAWS FIRST (THE PATH RETURN HAS THE ENGINE'S ROUNDING, LIKE EVERY DRAW)
+    alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA if alpha_in is None else alpha_in)
+    design_count = max(1, int(design_count_int_in))
+    path_float = float((prior_only_dict_in.get("metric_dict") or {}).get("total_return", float("nan")))
+    registered_list = [float(value) for value in list(baseline_dict_in.get("random_timing_return_list") or [])]
+    registered_seed_list = [int(value) for value in list(baseline_dict_in.get("random_timing_seed_list") or [])]
+    tail_dict = get_random_timing_count_dict(path_float, registered_list, design_count, alpha_float)
+    tail_dict.update({"process_count": 0, "extra_seconds": 0.0})
+    budget_int = get_random_timing_draw_target_int(design_count, alpha_float)
+    max_draw_int = int(config.RUNNER_RANDOM_TIMING_TAIL_MAX_DRAWS if max_draw_int_in is None else max_draw_int_in)
+    default_seed_bool = registered_seed_list == get_random_timing_seed_list(len(registered_seed_list))
+    if not (extend_bool_in and default_seed_bool and math.isfinite(path_float) and len(registered_list) > 0):
+        return tail_dict
+    if budget_int > max_draw_int:
+        tail_dict["budget_exceeded_bool"] = True
+        return tail_dict
+    # THE TARGET: THE BUDGET, OR THE REGISTERED DRAWS WHEN THEY ALREADY COVER IT
+    target_int = max(budget_int, len(registered_list))
+    at_or_above_max = get_random_timing_at_or_above_max_int(target_int, design_count, alpha_float)
+    at_or_above_int = int(tail_dict["at_or_above_count"])
+    draw_count = len(registered_list)
+    exposure_arr = get_exposure_weight_arr(prior_only_dict_in, realized_exposure_bool_in)
+    batch_int = max(1, int(config.RUNNER_RANDOM_TIMING_TAIL_BATCH if batch_int_in is None else batch_int_in))
+    process_count = max(1, int(config.RUNNER_RANDOM_TIMING_TAIL_PROCESS_COUNT if process_count_int_in is None
+                               else process_count_int_in))
+    process_count = min(process_count, max(1, (os.cpu_count() or 2) - 1))
+    start_float = time.time()
+    pool = None
+    try:
+        while draw_count < target_int and at_or_above_int <= at_or_above_max:
+            seed_list = [int(config.RANDOM_SEED) + idx for idx in range(draw_count, min(draw_count + batch_int, target_int))]
+            if process_count > 1 and pool is None:
+                pool = multiprocessing.get_context("spawn").Pool(
+                    processes=process_count, initializer=init_tail_draw_worker,
+                    initargs=(ohlcv_array_dict_in, date1_in, date2_in, exposure_arr))
+            if pool is not None:
+                return_list = pool.map(get_random_timing_draw_return_float, seed_list,
+                                       chunksize=max(1, len(seed_list) // (4 * process_count)))
+            else:
+                return_list = [get_random_timing_draw_return_float(seed_int, ohlcv_array_dict_in, date1_in, date2_in,
+                                                                   exposure_arr) for seed_int in seed_list]
+            value_arr = np.asarray(return_list, dtype=float)
+            at_or_above_int += int(np.sum(~(value_arr < path_float)))
+            draw_count += len(seed_list)
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+    stopped_early_bool = draw_count < target_int
+    tail_dict.update({"draw_target": target_int, "draw_count": draw_count, "at_or_above_count": at_or_above_int,
+                      "at_or_above_max": at_or_above_max, "p": float((at_or_above_int + 1) / (target_int + 1)),
+                      "stopped_early_bool": bool(stopped_early_bool), "extension_bool": draw_count > len(registered_list),
+                      "process_count": process_count if pool is not None else (1 if draw_count > len(registered_list) else 0),
+                      "extra_seconds": float(time.time() - start_float),
+                      "pass_bool": bool(not stopped_early_bool and at_or_above_int <= at_or_above_max)})
+    return tail_dict

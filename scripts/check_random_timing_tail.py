@@ -19,10 +19,12 @@ from so.runner.baselines import get_random_timing_seed_list, get_random_timing_w
 """
 Random-Timing Tail Check (one-off; roadmap R3, audit S4, 2026-10-29)
 
-The multiple-testing part of the verdict (so.core.multiple_testing.get_random_timing_p_float) fits a normal
-distribution to the 100 registered random-timing draws and asks whether the path's total return is beyond the
-1 - alpha / N point of that normal (alpha 0.05, N the designs tried: about 1.9e-4 for N = 260). 100 draws cannot show
-a tail that far out, so the normal shape is an assumption. If the true distribution has a heavier right tail (a few
+Until 2026-11-02 the multiple-testing part of the verdict fitted a normal distribution to the 100 registered
+random-timing draws and asked whether the path's total return is beyond the 1 - alpha / N point of that normal (alpha
+0.05, N the designs tried: about 1.9e-4 for N = 260). 100 draws cannot show a tail that far out, so the normal shape was
+an assumption. This script tested it (exp04: 35 draws above the critical value, exp02: 37, where 1.9 were expected; on
+the log scale 6 and 5), and the verdict now counts draws instead (so.core.multiple_testing). The script is kept to
+re-check other paths. If the true distribution has a heavier right tail (a few
 draws that happen to miss a crash), the normal is too lenient: a path could pass by luck more often than alpha / N.
 
 This script measures it for one finished run. A development run keeps no daily equity file, so the script rebuilds
@@ -234,7 +236,7 @@ def get_tail_markdown_str(run_id_str_in, summary_dict_in, reproduced_dict_in):
     for row_dict in s["quantile_list"]:
         line_list.append(f"| {row_dict['level']:.4f} | {row_dict['empirical']:.4f} | {row_dict['normal']:.4f} | "
                          f"{row_dict['draws_beyond_level_expected']:.1f} |")
-    line_list += ["", f"Critical value the verdict uses (alpha {s['alpha']} / N {s['design_count']} = {s['tail_probability']:.2e}): "
+    line_list += ["", f"Critical value of the former normal-fit test (alpha {s['alpha']} / N {s['design_count']} = {s['tail_probability']:.2e}): "
                   f"normal fit {s['normal_critical_return']:.4f}. Draws at or above it: **{s['draws_at_or_above_critical']}** "
                   f"(expected if the normal were right: {s['draws_at_or_above_critical_expected']:.1f}).", "",
                   f"The run's own path: total return {s['path_return']:.4f}; p under the normal fit {s['path_p_normal']:.2e}; "
