@@ -90,7 +90,12 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
   and retried (audit S8).
 - [x] `scripts/check_random_timing_tail.py` built: reproduces a run's 100 registered random-timing draws, extends them to
   10,000, compares the tail with the normal fit (audit S4).
-- [ ] On nicodesktop: merge, **deploy** (the judge changes), then run the tail check on exp04 and exp02 and read the
+- [x] On nicodesktop: merged and deployed (2026-11-02, judge `4a43f0e`).
+- [x] Fix (2026-11-02): the tail check read `strategy_daily_equity.csv`, which development runs never write (only holdout
+  runs do; the audit of 2026-10-28 had said otherwise, corrected in design 6.4). It now rebuilds the prior-only path from
+  the run folder (periods, decisions, scores) with the referee's own selection and engine, and checks its return
+  against the report. Works for the fractional engine (exp05) too.
+- [ ] Run the tail check on exp04 and exp02 and read the
   result. Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
 
 **Done when** the tail check has been read and its consequence decided.

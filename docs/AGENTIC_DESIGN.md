@@ -185,8 +185,10 @@ log) rather than a separate subsystem. Not needed for stage 1.
 | Results log (`docs/RESULTS_LOG.md`) | generated from the run index; grades only once agents run | everyone (it is in git) |
 | Idea list / strategy registry, lessons, failure log | planner (research agents later) | agents |
 
-Reason: today every run folder holds `buy_hold_daily_equity.csv`, which is SPY's daily price path. Any agent that can
-read it could test ideas without a trial row. Run folders become runner-only before the first agent works with real
+Reason: a run folder holds every candidate's daily decisions, the per-period returns of the strategy and of
+buy-and-hold (`scores.pkl`), and the report's numbers; from these an agent could learn about the market without a
+trial row. (Correction 2026-11-02: the audit of 2026-10-28 said development run folders hold `buy_hold_daily_equity.csv`;
+only holdout runs write the daily equity files.) Run folders become runner-only before the first agent works with real
 data (roadmap R4). Error messages passed to the coder are cleaned of performance numbers.
 
 **`docs/RESULTS_LOG.md`** is public in git and agents can read it, so once agents run it holds grades and identifiers

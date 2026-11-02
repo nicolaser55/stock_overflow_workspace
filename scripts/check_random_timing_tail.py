@@ -25,8 +25,10 @@ distribution to the 100 registered random-timing draws and asks whether the path
 a tail that far out, so the normal shape is an assumption. If the true distribution has a heavier right tail (a few
 draws that happen to miss a crash), the normal is too lenient: a path could pass by luck more often than alpha / N.
 
-This script measures it for one finished run. It reads the run's report.json and strategy_daily_equity.csv, loads the
-development bars, and
+This script measures it for one finished run. A development run keeps no daily equity file, so the script rebuilds
+the run's prior-only path from what the run folder keeps (period.pkl, each candidate's decisions.pkl and scores.pkl)
+with the referee's own selection and engine, checks that its total return equals report.json's, takes the exposure path
+exactly as the baselines do, and
 
     1. recomputes the 100 registered draws and checks they equal the report's (proof that it reproduces the referee);
     2. extends them to --draws draws (default 10,000; seeds config.RANDOM_SEED + 0 .. draws - 1);
@@ -35,8 +37,8 @@ development bars, and
 
 Many more exceedances than expected mean the normal approximation is too lenient for this path; about as many or fewer
 mean it is fair or conservative. Changes nothing; writes random_timing_tail_<run id>.md and .json to --output.
-Only runs whose exposure is the realized position (trailing-stop and barrier engines: every daily experiment except
-exp05) are supported, because their equity file holds that exposure.
+Daily experiments only (minute-mode exp01 is not supported). The design module is loaded from the current workspace,
+which must hold the same experiment code the run used (the script compares the rebuilt return with the report).
 
     python scripts/check_random_timing_tail.py exp04_trend_exit_20261028190530034569 --draws 10000 --processes 4
 
@@ -106,6 +108,53 @@ def get_draw_return_list(seed_list_in, ohlcv_array_dict_in, date1_in, date2_in, 
     with ctx.Pool(processes=int(process_count_int_in), initializer=init_worker,
                   initargs=(ohlcv_array_dict_in, date1_in, date2_in, exposure_arr_in)) as pool:
         return list(pool.map(get_draw_return_float, list(seed_list_in), chunksize=50))
+
+
+# FUNCTION: REBUILD A FINISHED RUN'S PRIOR-ONLY PATH FROM ITS FOLDER (THE STEPS OF so.runner.run, NO DESIGN CALL)
+def get_rebuilt_prior_only_tuple(design_module_in, ohlcv_array_dict_in, run_folder_str_in, run_id_str_in):
+    """
+    Args:
+        design_module_in (module): The experiment's design
+        ohlcv_array_dict_in (dict): Development bars (the run's embargo)
+        run_folder_str_in (str): Run folder (period.pkl, candidates/<token>/decisions.pkl and scores.pkl)
+        run_id_str_in (str): Run id
+
+    Returns:
+        tuple: (prior-only engine result, date1, date2)
+    """
+    # PERIODS, SPAN, EACH CANDIDATE'S DECISIONS AND SCORES, SELECTION, ONE ENGINE PASS
+    from so.core.reentry_simulation import get_window_session_idx_arr
+    from so.runner.checkpoint import read_pickle, read_decisions_list, read_score_row_list, set_runs_root_str
+    from so.runner.periods import get_period_date
+    from so.runner.run import get_candidate_token_str, get_candidate_engine
+    from so.runner.selection import (get_runner_selection_pdf, get_governing_candidate_dict,
+                                     run_prior_only_from_decisions_dict)
+    from so.runner.loop import get_design_mode_str, MODE_MINUTE_STR
+    if get_design_mode_str(design_module_in) == MODE_MINUTE_STR:
+        raise SystemExit("minute-mode runs are not supported")
+    set_runs_root_str(os.path.dirname(os.path.abspath(run_folder_str_in)))
+    period_pdf = read_pickle(os.path.join(run_folder_str_in, "period.pkl"))
+    sorted_pdf = period_pdf.sort_values("period_id")
+    date1 = get_period_date(sorted_pdf["period_start"].iloc[0])
+    date2 = get_period_date(sorted_pdf["period_end"].iloc[-1])
+    window_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1, date2)
+    window_date_list = [ohlcv_array_dict_in["session_date_list"][int(idx)] for idx in window_idx_arr]
+    candidate_list = list(design_module_in.CANDIDATE_LIST)
+    score_row_list, decision_dict = [], {}
+    for candidate in candidate_list:
+        token_str = get_candidate_token_str(candidate)
+        score_row_list.extend(read_score_row_list(run_id_str_in, token_str))
+        decision_list = read_decisions_list(run_id_str_in, token_str)
+        if decision_list is None:
+            raise SystemExit(f"candidate {candidate!r} has no decisions.pkl in {run_folder_str_in}")
+        decision_dict[candidate] = decision_list
+    selection_pdf = get_runner_selection_pdf(pd.DataFrame(score_row_list), design_module_in)
+    governing_dict = get_governing_candidate_dict(selection_pdf, period_pdf, candidate_list)
+    prior_only_dict = run_prior_only_from_decisions_dict(
+        ohlcv_array_dict_in, date1, date2, window_date_list, decision_dict, governing_dict, period_pdf,
+        float(getattr(design_module_in, "DEAD_BAND", 0.0)), float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0)),
+        engine_in=get_candidate_engine(design_module_in), design_module_in=design_module_in)
+    return prior_only_dict, date1, date2
 
 
 # FUNCTION: COMPARE THE EMPIRICAL TAIL WITH THE NORMAL FIT
@@ -196,16 +245,23 @@ if __name__ == "__main__":
     run_folder_str = os.path.join(zone_str, "runs", arg_dict.run_id)
     report_dict = json.loads(Path(run_folder_str, "report.json").read_text(encoding="utf-8"))
     baseline_dict = report_dict["baseline_dict"]
-    if baseline_dict.get("exposure_source_str") != "realized_position":
-        raise SystemExit("only runs whose exposure is the realized position are supported (not the fractional engine)")
-    equity_pdf = pd.read_csv(os.path.join(run_folder_str, "strategy_daily_equity.csv"))
-    exposure_arr = equity_pdf["in_position"].astype(bool).to_numpy().astype(float)
-    exposure_arr[-1] = np.nan
-    date1 = pd.Timestamp(report_dict["date1"]).date()
-    date2 = pd.Timestamp(report_dict["date2"]).date()
-    # THE DEVELOPMENT BARS (EMBARGO 1: A SUPERSET OF ANY RUN'S SPAN; THE ENGINE CUTS TO date1-date2)
+    experiment_str = str(report_dict["experiment_name_str"])
+    # THE DESIGN (CURRENT WORKSPACE) AND THE SAME DEVELOPMENT BARS AS THE RUN (ITS OWN EMBARGO)
+    sys.path.insert(1, str(Path(__file__).resolve().parent))
+    from run_development import load_design_module
     from so.core.development_span import get_development_ohlcv_dict
-    ohlcv_array_dict = get_development_ohlcv_dict(1)["ohlcv_array_dict"]
+    design_module = load_design_module(str(Path(__file__).resolve().parents[1] / "experiments" / experiment_str))
+    ohlcv_array_dict = get_development_ohlcv_dict(int(design_module.PERIOD_RULE["embargo_sessions"]))["ohlcv_array_dict"]
+    prior_only_dict, date1, date2 = get_rebuilt_prior_only_tuple(design_module, ohlcv_array_dict, run_folder_str, arg_dict.run_id)
+    rebuilt_float = float(prior_only_dict["metric_dict"]["total_return"])
+    reported_float = float(report_dict["return_dict"]["strategy_total_return"])
+    if not abs(rebuilt_float - reported_float) <= 1e-9:
+        raise SystemExit(f"the rebuilt prior-only path returns {rebuilt_float} but the report says {reported_float}; "
+                         f"is the workspace at the experiment code the run used? nothing written")
+    from so.runner.baselines import get_exposure_weight_arr
+    from so.runner.run import get_realized_exposure_bool
+    exposure_arr = get_exposure_weight_arr(prior_only_dict, get_realized_exposure_bool(design_module))
+    print(f"rebuilt the prior-only path: total return {rebuilt_float:.6f} (report {reported_float:.6f})", flush=True)
     # 1. THE REGISTERED DRAWS MUST BE REPRODUCED
     registered_list = [float(value) for value in baseline_dict["random_timing_return_list"]]
     seed_list = get_random_timing_seed_list(int(arg_dict.draws))

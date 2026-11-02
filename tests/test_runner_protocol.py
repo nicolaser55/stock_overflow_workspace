@@ -28,6 +28,7 @@ sys.path.insert(0, WORKSPACE_PATH_STR)
 sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "tests"))
 from temporary_data_root import assert_temporary_data_root
 assert_temporary_data_root()
+import numpy as np
 import pandas as pd
 from so import paths
 from so.core.trade_execution import get_ohlcv_array_dict
@@ -166,6 +167,25 @@ def test_cost_sensitivity_in_report():
     with open(os.path.join(result_dict["run_folder_str"], "report.md"), encoding="utf-8") as file_obj:
         assert "Cost sensitivity" in file_obj.read()
     passed("development report carries the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02")
+    # THE TAIL-CHECK SCRIPT REBUILDS THIS FINISHED RUN'S PRIOR-ONLY PATH FROM THE PRUNED FOLDER (R3B, 2026-11-02)
+    sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "scripts"))
+    import check_random_timing_tail as tail_script
+    from so.runner.baselines import get_exposure_weight_arr
+    from so.runner.run import get_realized_exposure_bool
+    from so.runner.checkpoint import set_runs_root_str
+    assert not os.path.isfile(os.path.join(result_dict["run_folder_str"], "strategy_daily_equity.csv"))
+    try:
+        rebuilt_dict, date1, date2 = tail_script.get_rebuilt_prior_only_tuple(cand_design, ohlcv_array_dict,
+                                                                              result_dict["run_folder_str"], "protocol_cost")
+    finally:
+        set_runs_root_str(None)
+    report_dict = result_dict["report_dict"]
+    assert abs(rebuilt_dict["metric_dict"]["total_return"] - report_dict["return_dict"]["strategy_total_return"]) <= 1e-9
+    exposure_arr = get_exposure_weight_arr(rebuilt_dict, get_realized_exposure_bool(cand_design))
+    draw_list = tail_script.get_draw_return_list([42, 43], ohlcv_array_dict, date1, date2, exposure_arr, 1)
+    assert np.allclose(draw_list, report_dict["baseline_dict"]["random_timing_return_list"][:2], rtol=0, atol=1e-12)
+    passed("tail-check script rebuilds a finished run's prior-only path from its pruned folder (same return) and "
+           "reproduces its registered random-timing draws")
 
 
 # FUNCTION: THE HELPER HASH: WHICH FILES, WHAT CHANGES IT, AND THE RERUN RULE (R3, 2026-10-29)
