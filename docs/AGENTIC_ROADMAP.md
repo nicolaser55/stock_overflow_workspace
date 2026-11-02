@@ -95,8 +95,11 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
   runs do; the audit of 2026-10-28 had said otherwise, corrected in design 6.4). It now rebuilds the prior-only path from
   the run folder (periods, decisions, scores) with the referee's own selection and engine, and checks its return
   against the report. Works for the fractional engine (exp05) too.
-- [ ] Run the tail check on exp04 and exp02 and read the
-  result. Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
+- [x] exp04, 10,000 draws (2026-11-02): skewness 0.84, excess kurtosis 1.36; **35 draws above the normal-fit critical
+  value where 1.9 were expected**. The normal approximation is too lenient (about 18 times at alpha / N) for this path.
+- [x] Fix: the rebuilt return is compared with a 1e-7 tolerance (the engine rounds total_return to 8 decimals; exp02
+  differed by 3.5e-9 and was refused). The script also reports the same test on log(1 + return).
+- [ ] Rerun the check on exp04 and exp02 with the log-scale section; then decide the referee change. Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
 
 **Done when** the tail check has been read and its consequence decided.
 
