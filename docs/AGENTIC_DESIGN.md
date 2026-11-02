@@ -112,9 +112,10 @@ lock; the tests of all of the above.
 
 ### 4.1 Judge versioning
 Every run records the hash of the judge that scored it (built, A1). Results by different judges are never mixed
-silently; when the judge changes, the runs that matter are rerun. Proposed additions (roadmap R3): the hash is taken
-from the run commit's git tree **before any design code runs**, and includes `records/legacy/*.csv` and the package
-lock, both of which change verdicts.
+silently; when the judge changes, the runs that matter are rerun. **Built (R3, 2026-10-29):** the hash includes
+`records/legacy/*.csv` and the package lock (both change verdicts), and the queue takes it from the fresh checkout
+before any design code runs and again after the run; a difference fails the run. A change that design code undoes
+before the run ends is only closed by the so_design account (3.2).
 
 ### 4.2 The referee is the commit Nicolas deployed (decided 2026-10-28)
 The runner scores runs only with the commit Nicolas last deployed with `scripts/deploy_runner.ps1` (the "deploy
@@ -123,10 +124,14 @@ button"), not with whatever is newest on GitHub. A merge to `main` changes nothi
 queue takes the judge of every new job from it; without a deployed commit no new job starts. A job supplies only `experiments/**` from its own commit; a job commit that changes anything else is refused
 (built, A2). Manifests record judge, design and run commits.
 
-### 4.3 Shared helpers used by designs (proposed)
-Unprotected modules that designs import (`so/features/rule_design.py`, `view_history.py`, `barrier_labels.py`) can
-change a pre-registered design without a new protocol version and without a new count. Proposed (roadmap R3): include
-a design's non-core import closure in its pre-registration fingerprint and in its design key.
+### 4.3 Shared helpers used by designs (built, R3, 2026-10-29)
+Unprotected modules that designs import (`so/features/rule_design.py`, `view_history.py`, `barrier_labels.py`) could
+change a pre-registered design without a new protocol version. Every run now records a helper hash of the unprotected
+`so/` files its design imports (transitively), and a logged version reruns only with its own helper hash: a changed
+helper needs a new protocol version. The helper hash is **not** part of the multiple-testing design key (decided when
+built): including it would count every rerun of an unchanged design as a new design; the forced new version records the
+change instead. A changed helper under a new version keeps the same design key, so N undercounts it; the 3-version
+limit bounds this.
 
 ---
 

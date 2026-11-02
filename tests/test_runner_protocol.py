@@ -32,7 +32,8 @@ import pandas as pd
 from so import paths
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.runner import run_development_dict
-from so.runner.preregistration import check_preregistration_dict, get_protocol_missing_list
+from so.runner.preregistration import (check_preregistration_dict, get_protocol_missing_list, get_design_helper_dict,
+                                      get_design_helper_file_list)
 from synthetic_data import get_synthetic_ohlcv_pdf
 import runner_candidate_design as cand_design
 
@@ -167,11 +168,70 @@ def test_cost_sensitivity_in_report():
     passed("development report carries the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02")
 
 
+# FUNCTION: THE HELPER HASH: WHICH FILES, WHAT CHANGES IT, AND THE RERUN RULE (R3, 2026-10-29)
+def test_helper_hash():
+    """
+    Returns:
+        None
+    """
+    # A SMALL WORKSPACE: ONE PROTECTED MODULE, THREE UNPROTECTED HELPERS (ONE REACHED BY A RELATIVE IMPORT), ONE UNUSED
+    root_str = tempfile.mkdtemp(prefix="so_helper_ws_", dir=TEMP_ROOT_STR)
+
+    def write(rel_str_in, text_bytes_in):
+        path_str = os.path.join(root_str, *rel_str_in.split("/"))
+        os.makedirs(os.path.dirname(path_str), exist_ok=True)
+        with open(path_str, "wb") as file_obj:
+            file_obj.write(text_bytes_in)
+    write("protected_paths.txt", b"so/__init__.py\nso/features/__init__.py\nso/runner/**\n")
+    write("so/__init__.py", b"")
+    write("so/features/__init__.py", b"")
+    write("so/runner/core_rule.py", b"R = 1\n")
+    write("so/features/h1.py", b"from so.features.h2 import f\nfrom so.runner.core_rule import R\n")
+    write("so/features/h2.py", b"from . import h3\ndef f():\n    return 1\n")
+    write("so/features/h3.py", b"Z = 3\n")
+    write("so/features/unused.py", b"U = 0\n")
+    write("experiments/expH/design.py", b"from so.features.h1 import f\nfrom so.features import h1\n")
+    design_str = os.path.join(root_str, "experiments", "expH", "design.py")
+    assert get_design_helper_file_list(design_str, root_str) == ["so/features/h1.py", "so/features/h2.py", "so/features/h3.py"]
+    base_dict = get_design_helper_dict(design_str, root_str)
+    # CRLF AND AN UNUSED OR PROTECTED FILE DO NOT CHANGE IT; A USED HELPER DOES
+    write("so/features/h3.py", b"Z = 3\r\n")
+    write("so/features/unused.py", b"U = 1\n")
+    write("so/runner/core_rule.py", b"R = 2\n")
+    assert get_design_helper_dict(design_str, root_str)["helper_hash"] == base_dict["helper_hash"]
+    write("so/features/h3.py", b"Z = 4\n")
+    changed_str = get_design_helper_dict(design_str, root_str)["helper_hash"]
+    assert changed_str != base_dict["helper_hash"]
+    # THE RERUN RULE: LOGGED WITHOUT A HELPER HASH (BEFORE R3) -> ANY; LOGGED WITH ONE -> ONLY THAT ONE
+    log_path_str = os.path.join(TEMP_ROOT_STR, "helper_trial_log.csv")
+    module = types.SimpleNamespace(EXPERIMENT_NAME="expH_test", PROTOCOL_VERSION="1.0")
+    row_dict = {"experiment": "expH_test", "protocol_version": "1.0", "stage": "validation", "metric_json": "{}",
+                "setting_json": json.dumps({"candidate": "A", "design_folder_hash": "f1"})}
+    pd.DataFrame([row_dict]).to_csv(log_path_str, index=False)
+    git_func = lambda arg_list_in: "anything\n"
+    assert check_preregistration_dict(module, root_str, "f1", log_path_str, git_func, helper_hash_str_in=changed_str)["status_str"] == "rerun"
+    pd.DataFrame([row_dict, {**row_dict, "setting_json": json.dumps({"candidate": "A", "design_folder_hash": "f1",
+                                                                     "helper_hash": base_dict["helper_hash"]})}]).to_csv(log_path_str, index=False)
+    assert check_preregistration_dict(module, root_str, "f1", log_path_str, git_func,
+                                      helper_hash_str_in=base_dict["helper_hash"])["helper_hash"] == base_dict["helper_hash"]
+    try:
+        check_preregistration_dict(module, root_str, "f1", log_path_str, git_func, helper_hash_str_in=changed_str)
+        raise AssertionError("a changed helper was accepted under a logged version")
+    except ValueError as error:
+        assert "shared helper code" in str(error)
+    # THE HELPER HASH IS BOOKKEEPING IN THE DESIGN KEY (A RERUN IS NOT A NEW DESIGN)
+    from so.core.multiple_testing import get_design_key_str
+    assert get_design_key_str("expH_test", {"candidate": "A", "helper_hash": "x"}) == get_design_key_str("expH_test", {"candidate": "A"})
+    passed("helper hash: unprotected so/ files a design imports (transitively, relative imports too), CRLF-neutral, "
+           "changes with a used helper; a logged version reruns only with its helper hash; not part of the design key")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY DATA ROOT
     try:
         test_preregistration_guard()
+        test_helper_hash()
         test_cost_sensitivity_in_report()
         print("\nAll runner protocol tests passed ✅")
     finally:

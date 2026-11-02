@@ -9,6 +9,7 @@
 # clone, which only this script sets. A merge to main changes nothing until it is deployed. This clone also holds the
 # queue script itself, so HEAD and refs/deployed always move together. state.json shows both ("queue_commit",
 # "deployed_commit"); "git reflog refs/deployed" in this clone lists every deployment with its time and account.
+# PowerShell reads this file before running it: when a merge changes this script itself, run it twice.
 param(
     [string]$RunnerWorkspace = "D:\stock_overflow\runner_workspace",
     [string]$DataRoot = "D:\stock_overflow\data",

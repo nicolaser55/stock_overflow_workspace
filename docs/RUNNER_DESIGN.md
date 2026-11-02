@@ -128,7 +128,11 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02 (not part of the verdict).
 - **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
   with different design-folder code, a first run of a new version without a `preregister` last commit or without the
-  required protocol sections and "Derived from:" line, and a fourth version of an experiment.
+  required protocol sections and "Derived from:" line, and a fourth version of an experiment. **Shared helpers (R3,
+  2026-10-29):** every run also records a helper hash (the unprotected `so/` files the design imports, followed
+  transitively, LF-normalized) in each trial row; a version whose rows carry helper hashes may rerun only with one of
+  them, so a changed helper needs a new protocol version. Rows from before R3 have none; the first run records it. The
+  helper hash is bookkeeping in the multiple-testing design key (a rerun of an unchanged design is not a new design).
 - **Queue and runner account (audit S3 / S4, 2026-10-26; hardened A2, 2026-10-27):** `scripts/run_queue.py`. A job
   names a design commit. The runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`)
   fetches origin once per pass (before it validates pending files) and builds the run commit from two sources:
@@ -149,23 +153,31 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   refreshes `state.json` every 60 s while a job runs; `state.json` also shows the commit of the queue script
   (`queue_commit`) and the judge new jobs would get (`deployed_commit`, empty when nothing is deployed).
   `run_index.csv` is rewritten with the current columns (a copy is kept) when it only lacks columns. A failed job is
-  emailed and can be retried under the same run id and judge (it resumes from the checkpoints). A stale lock from a
+  emailed and can be retried under the same run id and judge (it resumes from the checkpoints). On Windows a reader
+  that holds `state.json` open blocks its replacement for a moment: the write is retried for about 5 seconds, and a
+  failed watch loop is logged and retried after the pause instead of stopping the task (R3). A stale lock from a
   dead process is replaced. Agents can only add job files. **Email (A3):** one email per finished run, positive or
   negative (verdict, failed parts, returns, N, judge hash, commits, paths; "PASS, audit pending" when every part
   passed), one per failed, timed-out or abandoned job, none for a rejected job. **Kill switch (A3):** while
   `<SO_DATA_PATH>/control/STOP` exists (or the file named by `SO_STOP_FLAG_PATH`) the runner starts and resumes
   nothing; a running job finishes; `state.json` shows `"stopped"`; an unreadable flag counts as set. `scripts/deploy_runner.ps1` (the deploy button) moves the runner clone (the
   queue script itself) to `origin/main`, sets `refs/deployed` to that commit with a reflog entry (time and account;
-  `git reflog refs/deployed`), and restarts the task when no job is running. A job whose commit holds core changes
+  `git reflog refs/deployed`), and restarts the task when no job is running. PowerShell reads a script before running
+  it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). A job whose commit holds core changes
   that are on `main` but not deployed is rejected with that reason. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
 - **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected
-  `.py` file under `so/` and `scripts/` (paths and LF-normalized contents). The report (`judge_hash_str`), the
-  manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge hash were scored by
-  identical rules; a core change changes the hash, so results judged by different rules are never mixed silently.
+  `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (they enter the multiple-testing N) and the package
+  lock `requirements/venv_main_lock.txt` (R3, 2026-10-29), as paths and LF-normalized contents. The report
+  (`judge_hash_str`), the manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge
+  hash were scored by identical rules; a core change changes the hash, so results judged by different rules are never
+  mixed silently. **Checked around every queued run (R3):** the queue hashes the fresh worktree before the run process
+  starts and again after it ends; when the two differ, or the report shows another value, the run is filed as failed
+  ("judge changed during the run"): design code ran in between. This catches a judge file changed and left changed; a
+  change undone before the end is out of reach until design code runs in its own account (roadmap R7, A4).
 - **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) random cut dates
   (one from each third of the span, fixed seed), plus, for each candidate, up to `RUNNER_LOOKAHEAD_CHANGE_CUT_MAX` (10)
   sessions where its own decision changed (`RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE`, 2, in minute mode), spread

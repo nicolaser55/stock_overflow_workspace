@@ -93,10 +93,42 @@ def test_judge_hash_rules():
     passed("judge hash: CRLF-neutral; ignores unprotected helpers, .pyc and non-.py; changes on a rule, file added, removed or renamed")
 
 
+# TEST: THE EXTRA INPUTS (R3, 2026-10-29)
+def test_judge_extras():
+    root_str = tempfile.mkdtemp(prefix="so_judge_extra_")
+    try:
+        write_bytes(root_str, "protected_paths.txt", b"so/runner/**\n")
+        write_bytes(root_str, "so/runner/verdict.py", b"A = 1\n")
+        write_bytes(root_str, "so/features/helper.py", b"X = 1\n")
+        write_bytes(root_str, "records/legacy/old.csv", b"a,b\n1,2\n")
+        write_bytes(root_str, "records/other.csv", b"x\n")
+        write_bytes(root_str, "requirements/venv_main_lock.txt", b"numpy==2.1.3\n")
+        write_bytes(root_str, "requirements/ci_requirements.txt", b"numpy\n")
+        assert get_judge_file_list(root_str) == ["records/legacy/old.csv", "requirements/venv_main_lock.txt",
+                                                 "so/runner/verdict.py"], get_judge_file_list(root_str)
+        disk_dict = get_judge_hash_dict(root_str)
+        # CRLF GIVES THE SAME HASH
+        write_bytes(root_str, "so/runner/verdict.py", b"A = 1\r\n")
+        assert get_judge_hash_dict(root_str) == disk_dict
+        # THE LEGACY RECORDS AND THE LOCK ARE PART OF THE JUDGE; OTHER RECORDS AND REQUIREMENT FILES ARE NOT
+        write_bytes(root_str, "records/other.csv", b"y\n")
+        write_bytes(root_str, "requirements/ci_requirements.txt", b"pandas\n")
+        assert get_judge_hash_dict(root_str) == disk_dict
+        write_bytes(root_str, "records/legacy/old.csv", b"a,b\n1,3\n")
+        legacy_str = get_judge_hash_dict(root_str)["judge_hash"]
+        assert legacy_str != disk_dict["judge_hash"]
+        write_bytes(root_str, "requirements/venv_main_lock.txt", b"numpy==2.1.4\n")
+        assert get_judge_hash_dict(root_str)["judge_hash"] not in (legacy_str, disk_dict["judge_hash"])
+    finally:
+        shutil.rmtree(root_str, ignore_errors=True)
+    passed("judge includes records/legacy/*.csv and the package lock, not other records or requirement files")
+
+
 if __name__ == "__main__":
     try:
         test_workspace_judge()
         test_judge_hash_rules()
+        test_judge_extras()
     finally:
         shutil.rmtree(TEMP_ROOT_STR, ignore_errors=True)
     print("\nAll judge identity tests passed.")

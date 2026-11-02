@@ -67,7 +67,10 @@ job's experiments/ tree (fixed author and date, so the same pair always gives th
 refs/runs/<run_id> keeps it, and both parents, in the runner's clone. The judge commit is refs/deployed at the time
 the job starts (SO_QUEUE_JUDGE_REF overrides the ref) and is pinned for the run, its retries and its crash resumes.
 Without a deployed commit no new job starts (the jobs wait in pending/; state.json shows "deployed_commit": "").
-Each pass fetches origin once before it validates pending files, so a job can name any pushed commit. The
+Each pass fetches origin once before it validates pending files, so a job can name any pushed commit.
+The judge hash (so.runner.judge_identity) is taken from the fresh worktree of the run commit before the child process
+starts and again after it ends; a run whose report.json shows another judge hash, or whose worktree's judge changed, is
+filed as failed ("judge changed during the run"): design code ran in between (roadmap R3, audit S9). The
 child process gets the runner's environment without secrets (get_child_environment_dict). While a job runs, a thread
 refreshes the heartbeat in state.json every SO_QUEUE_HEARTBEAT_SECONDS (default 60). An email-worthy verdict and a
 failed job send an email (SMTP from SO_SMTP_HOST, SO_SMTP_PORT, SO_SMTP_USER, SO_SMTP_PASSWORD, SO_EMAIL_TO; without
@@ -130,6 +133,9 @@ COMPOSITE_ENVIRONMENT_DICT = {"GIT_AUTHOR_NAME": "so_queue", "GIT_AUTHOR_EMAIL":
                               "GIT_AUTHOR_DATE": "2000-01-01T00:00:00 +0000", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00 +0000"}
 # state.json IS WRITTEN BY THE MAIN THREAD AND THE HEARTBEAT THREAD
 STATE_LOCK = threading.Lock()
+# HOW OFTEN AND HOW LONG A REPLACE BLOCKED BY A READER (WINDOWS) IS RETRIED
+REPLACE_RETRY_COUNT_INT = 50
+REPLACE_RETRY_SECONDS = 0.1
 QUEUE_COMMIT_CACHE_STR = None
 # THE REF scripts/deploy_runner.ps1 SETS TO THE COMMIT NICOLAS DEPLOYED (THE JUDGE OF NEW JOBS)
 DEPLOYED_REF_STR = "refs/deployed"
@@ -226,11 +232,23 @@ def write_json_atomic(path_str_in, payload_in):
     Returns:
         None
     """
-    # REPLACE IN ONE STEP SO A READER NEVER SEES HALF A FILE
-    temp_path_str = f"{path_str_in}.{os.getpid()}.tmp"
+    # REPLACE IN ONE STEP SO A READER NEVER SEES HALF A FILE; ON WINDOWS A READER THAT HAS THE TARGET OPEN MAKES THE
+    # REPLACE FAIL WITH PermissionError FOR A MOMENT, SO IT IS RETRIED (ABOUT 5 SECONDS) BEFORE IT RAISES
+    temp_path_str = f"{path_str_in}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(temp_path_str, "w", encoding="utf-8") as file_obj:
         json.dump(payload_in, file_obj, indent=2, default=str)
-    os.replace(temp_path_str, path_str_in)
+    for attempt_int in range(REPLACE_RETRY_COUNT_INT):
+        try:
+            os.replace(temp_path_str, path_str_in)
+            return
+        except PermissionError:
+            if attempt_int == REPLACE_RETRY_COUNT_INT - 1:
+                try:
+                    os.remove(temp_path_str)
+                except OSError:
+                    pass
+                raise
+            time.sleep(REPLACE_RETRY_SECONDS)
 
 
 # FUNCTION: WRITE A NEW JOB FILE IN ONE CREATE
@@ -1059,16 +1077,26 @@ def run_development_process_dict(job_dict_in, run_id_str_in, log_path_str_in, gi
     if job_dict_in.get("n_jobs"):
         command_list += ["--n-jobs", str(int(job_dict_in["n_jobs"]))]
     environment_dict = dict(get_child_environment_dict(), PYTHONIOENCODING="utf-8", PYTHONPATH=worktree_str)
+    # THE JUDGE BEFORE ANY DESIGN CODE RUNS: THE FRESH CHECKOUT OF THE RUN COMMIT, BEFORE THE CHILD STARTS
+    from so.runner.judge_identity import get_judge_hash_dict
+    judge_before_str = get_judge_hash_dict(worktree_str)["judge_hash"]
     header_str = (f"run commit {run_commit_str}\njudge commit {job_dict_in['judge_commit']}\n"
-                  f"design commit {job_dict_in['commit']}\nworktree {worktree_str}\n")
+                  f"design commit {job_dict_in['commit']}\nworktree {worktree_str}\njudge hash before {judge_before_str}\n")
+    judge_after_str = ""
     try:
         outcome_dict = run_logged_command_dict(command_list, worktree_str, environment_dict, log_path_str_in,
                                                timeout_seconds, header_str)
+        # THE JUDGE AFTER THE RUN, FROM THE WORKTREE THE DESIGN CODE RAN IN
+        try:
+            judge_after_str = get_judge_hash_dict(worktree_str)["judge_hash"]
+        except OSError as error:
+            judge_after_str = f"unreadable ({type(error).__name__})"
     finally:
         remove_job_worktree(worktree_str, git_func)
     line_list = Path(log_path_str_in).read_text(encoding="utf-8", errors="replace").splitlines()
     return {"return_code": outcome_dict["return_code"], "log_line_list": line_list,
-            "timed_out_bool": outcome_dict["timed_out_bool"], "run_commit": run_commit_str}
+            "timed_out_bool": outcome_dict["timed_out_bool"], "run_commit": run_commit_str,
+            "judge_hash_before": judge_before_str, "judge_hash_after": judge_after_str}
 
 
 # FUNCTION: SEND AN EMAIL, OR WRITE IT TO THE OUTBOX
@@ -1338,6 +1366,29 @@ def upgrade_run_index_file(path_dict_in):
     return True
 
 
+# FUNCTION: WHAT IS WRONG WITH THE JUDGE OF A FINISHED RUN ("" WHEN NOTHING)
+def get_judge_problem_str(process_dict_in, report_judge_hash_str_in):
+    """
+    Args:
+        process_dict_in (dict): The run function's result (judge_hash_before / judge_hash_after when measured)
+        report_judge_hash_str_in (str): judge_hash_str of report.json ("" when there is no report)
+
+    Returns:
+        str: A reason when the judge changed during the run, else ""
+    """
+    # NOT MEASURED (TEST FAKES, A RUN THAT NEVER STARTED): NOTHING TO COMPARE
+    before_str = str(process_dict_in.get("judge_hash_before") or "")
+    if not before_str:
+        return ""
+    after_str = str(process_dict_in.get("judge_hash_after") or "")
+    if after_str and after_str != before_str:
+        return f"judge changed during the run: worktree judge {after_str[:16]} != run commit judge {before_str[:16]}"
+    if report_judge_hash_str_in and str(report_judge_hash_str_in) != before_str:
+        return (f"judge changed during the run: report judge {str(report_judge_hash_str_in)[:16]} != run commit judge "
+                f"{before_str[:16]}")
+    return ""
+
+
 # FUNCTION: RUN ONE JOB AND FILE ITS RESULT
 def run_job_dict(path_dict_in, job_dict_in, run_func_in=None, send_func_in=None, now_in=None):
     """
@@ -1368,11 +1419,21 @@ def run_job_dict(path_dict_in, job_dict_in, run_func_in=None, send_func_in=None,
     manifest_dict = read_json(manifest_path_str) if os.path.isfile(manifest_path_str) else None
     row_list = [line_str[len("results_row "):] for line_str in process_dict["log_line_list"] if line_str.startswith("results_row ")]
     ok_bool = process_dict["return_code"] == 0 and manifest_dict is not None
+    # THE JUDGE MUST BE THE SAME BEFORE THE RUN, IN THE REPORT AND AFTER THE RUN (ONLY WHEN THE PROCESS MEASURED IT)
+    judge_problem_str = get_judge_problem_str(process_dict, get_report_number_dict(path_dict_in, run_id_str)["judge_hash"]
+                                              if ok_bool else "")
+    if judge_problem_str:
+        ok_bool = False
+        process_dict = {**process_dict, "log_line_list": list(process_dict["log_line_list"]) + [judge_problem_str]}
+        with open(log_path_str, "a", encoding="utf-8") as log_file:
+            log_file.write(f"\n{judge_problem_str}\n")
     status_str = "done" if ok_bool else ("timeout" if process_dict.get("timed_out_bool") else "failed")
     result_dict = {**job_dict_in, "run_id": run_id_str, "finished_ts": datetime.datetime.now().isoformat(timespec="seconds"),
                    "status": status_str, "return_code": process_dict["return_code"], "log": log_path_str,
                    "results_row": row_list[-1] if row_list else None, "verdict": (manifest_dict or {}).get("verdict"),
-                   "run_commit": process_dict.get("run_commit") or job_dict_in.get("run_commit"), "email": None}
+                   "run_commit": process_dict.get("run_commit") or job_dict_in.get("run_commit"), "email": None,
+                   "judge_hash_before": process_dict.get("judge_hash_before"),
+                   "judge_hash_after": process_dict.get("judge_hash_after"), "judge_problem": judge_problem_str or None}
     send_func = send_func_in or send_email_dict
     if not ok_bool:
         result_dict["log_tail"] = process_dict["log_line_list"][-FAILED_TAIL_LINE_COUNT_INT:]
@@ -1501,12 +1562,16 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
     # A JOB THAT FAILS DOES NOT STOP THE WATCH
     job_count_int, loop_count_int = 0, 0
     while max_loop_count_in is None or loop_count_int < int(max_loop_count_in):
-        if get_has_work_bool(path_dict_in) and not get_stop_flag_bool(path_dict_in):
-            job_count_int += len(run_queue_list(path_dict_in, run_func_in, send_func_in, judge_func_in=judge_func_in,
-                                                git_func_in=git_func_in, prepare_func_in=prepare_func_in))
-        else:
-            make_runner_folder_list(path_dict_in)
-            write_state_dict(path_dict_in, None)
+        # ONE FAILED LOOP (A LOCKED FILE, A GIT ERROR) IS LOGGED AND THE WATCH GOES ON; A SECOND RUNNER STILL EXITS
+        try:
+            if get_has_work_bool(path_dict_in) and not get_stop_flag_bool(path_dict_in):
+                job_count_int += len(run_queue_list(path_dict_in, run_func_in, send_func_in, judge_func_in=judge_func_in,
+                                                    git_func_in=git_func_in, prepare_func_in=prepare_func_in))
+            else:
+                make_runner_folder_list(path_dict_in)
+                write_state_dict(path_dict_in, None)
+        except Exception as error:
+            print(f"warning: watch loop failed ({type(error).__name__}: {error}); retrying after the pause", flush=True)
         loop_count_int += 1
         if max_loop_count_in is None or loop_count_int < int(max_loop_count_in):
             time.sleep(float(interval_seconds_in))
