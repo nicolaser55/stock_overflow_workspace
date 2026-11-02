@@ -34,7 +34,8 @@ from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str,
                                   write_checkpoint_dict, read_checkpoint_dict, write_decisions_list, read_decisions_list,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
-from so.runner.baselines import get_runner_baseline_dict
+from so.runner.baselines import get_runner_baseline_dict, get_random_timing_tail_dict
+from so.core.multiple_testing import get_tried_design_count_dict
 from so.runner.preregistration import check_preregistration_dict, get_design_helper_dict
 from so.runner.judge_identity import get_judge_hash_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
@@ -745,6 +746,13 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
     baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
                                              seed_count_int_in=baseline_seed_count_int_in,
                                              realized_exposure_bool_in=get_realized_exposure_bool(design_module_in))
+    # THE MULTIPLE-TESTING RANDOM-TIMING COUNT: EXTRA DRAWS ONLY WHEN THE PATH IS STILL NEAR PASSING (ROADMAP R3,
+    # 2026-11-02); N IS COUNTED AS THE VERDICT COUNTS IT. A REDUCED SEED COUNT (TESTS) DRAWS NOTHING EXTRA (STRICTER).
+    tail_design_count_int = get_tried_design_count_dict(stream_dict_in.get("trial_log_path_str"))["total_count"]
+    baseline_dict["random_timing_tail_dict"] = get_random_timing_tail_dict(
+        ohlcv_array_dict_in, date1_in, date2_in, baseline_dict, prior_only_dict_in, tail_design_count_int,
+        realized_exposure_bool_in=get_realized_exposure_bool(design_module_in),
+        extend_bool_in=baseline_seed_count_int_in is None)
     lookahead_dict = None
     look_ahead_status_str = look_ahead_status_str_in
     if run_lookahead_bool_in:

@@ -99,9 +99,19 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
   value where 1.9 were expected**. The normal approximation is too lenient (about 18 times at alpha / N) for this path.
 - [x] Fix: the rebuilt return is compared with a 1e-7 tolerance (the engine rounds total_return to 8 decimals; exp02
   differed by 3.5e-9 and was refused). The script also reports the same test on log(1 + return).
-- [ ] Rerun the check on exp04 and exp02 with the log-scale section; then decide the referee change. Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
+- [x] Rerun with the log-scale section (2026-11-02): 6 (exp04) and 5 (exp02) above the critical value, 1.9 expected;
+  the log scale removes most of the excess but still lets about 3 times too many through.
+- [x] Decided by Nicolas (2026-11-02): the random-timing part of the multiple-testing test counts draws instead of
+  fitting a curve: p = (k + 1) / (M + 1); budget M + 1 = ceil(2 N / alpha) (10,400 at N = 260); extra draws in batches
+  with early stop as soon as too many draws are at or above the path (`so.runner.baselines.get_random_timing_tail_dict`,
+  `so.core.multiple_testing`; tests prove the extra draws equal the one-by-one draws, the stop point, the worker count
+  independence and the strict fallbacks). The 95%-of-100-draws baseline part is unchanged. No past verdict changes:
+  all nine experiments fail other parts.
+- [ ] On nicodesktop: merge and deploy (the judge changes).
+- [ ] Later (not blocking): a counted check of the deflated Sharpe ratio, which also rests on a normal-type
+  approximation (it corrects for skew and kurtosis, so it is less exposed). Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
 
-**Done when** the tail check has been read and its consequence decided.
+**Done when** the tail check has been read and its consequence decided. **Decided 2026-11-02**; done once deployed.
 
 ## R4. Results visible only as grades (decided; before any agent works with real data)
 

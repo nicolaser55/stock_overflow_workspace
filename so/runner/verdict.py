@@ -288,7 +288,8 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
     look_ahead_dict = get_look_ahead_verdict_dict(look_ahead_status_str_in)
     multiple_testing_dict = get_multiple_testing_verdict_dict(
         strategy_return_pdf_in, buy_hold_return_pdf_in, return_dict["strategy_total_return"],
-        list(baseline_dict_in.get("random_timing_return_list") or []), trial_log_path_str_in, legacy_path_list_in)
+        list(baseline_dict_in.get("random_timing_return_list") or []), trial_log_path_str_in, legacy_path_list_in,
+        random_timing_tail_dict_in=baseline_dict_in.get("random_timing_tail_dict"))
     failed_list = []
     if not return_dict["pass_bool"]:
         failed_list.append("return")
@@ -443,6 +444,20 @@ def get_report_markdown_str(report_dict_in):
             f"{str(multiple_dict['trial_sharpe_variance_source_str']).replace('_', ' ')}). Random-timing p-value "
             f"{multiple_dict['random_timing_p']:.2e} (need at most {multiple_dict['random_timing_p_max']:.2e}): "
             f"{'pass' if multiple_dict['pass_bool'] else 'fail'}.")
+        tail_dict = multiple_dict.get("random_timing_tail_dict") or {}
+        if tail_dict:
+            if tail_dict.get("budget_exceeded_bool"):
+                how_str = "the draw budget for this N exceeds the allowed maximum, so the test cannot pass"
+            elif tail_dict.get("stopped_early_bool"):
+                how_str = "stopped early: already more draws at or above the path than the budget allows"
+            elif tail_dict.get("extension_bool"):
+                how_str = "the full budget was drawn"
+            else:
+                how_str = "no extra draws (the registered draws decide)"
+            line_list.append(
+                f"Random timing counted, not fitted: {tail_dict.get('at_or_above_count')} of "
+                f"{tail_dict.get('draw_count')} draws at or above the path (budget {tail_dict.get('draw_target')} draws, "
+                f"at most {tail_dict.get('at_or_above_max')} allowed; {how_str}); p = (k + 1) / (budget + 1).")
     unread_dict = report_dict_in.get("unread_dict") or {}
     if unread_dict:
         line_list.extend(["", "### Never-read tail", ""])

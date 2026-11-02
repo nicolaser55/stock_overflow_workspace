@@ -165,7 +165,13 @@ def test_cost_sensitivity_in_report():
     assert cost_list[0]["strategy_total_return"] >= cost_list[2]["strategy_total_return"]
     assert cost_list[0]["buy_hold_total_return"] >= cost_list[2]["buy_hold_total_return"]
     with open(os.path.join(result_dict["run_folder_str"], "report.md"), encoding="utf-8") as file_obj:
-        assert "Cost sensitivity" in file_obj.read()
+        report_md_str = file_obj.read()
+    assert "Cost sensitivity" in report_md_str and "Random timing counted, not fitted" in report_md_str
+    # THE COUNTED RANDOM-TIMING TEST IS IN report.json; A REDUCED SEED COUNT (2) DRAWS NOTHING EXTRA AND CANNOT PASS
+    with open(os.path.join(result_dict["run_folder_str"], "report.json"), encoding="utf-8") as file_obj:
+        tail_dict = json.load(file_obj)["multiple_testing_dict"]["random_timing_tail_dict"]
+    assert tail_dict["method_str"] == "empirical" and tail_dict["draw_count"] == 2 and not tail_dict["extension_bool"]
+    assert not tail_dict["pass_bool"] and not tail_dict["tail_mismatch_bool"]
     passed("development report carries the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02")
     # THE TAIL-CHECK SCRIPT REBUILDS THIS FINISHED RUN'S PRIOR-ONLY PATH FROM THE PRUNED FOLDER (R3B, 2026-11-02)
     sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "scripts"))
