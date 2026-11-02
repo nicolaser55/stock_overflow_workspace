@@ -739,7 +739,10 @@ def make_judge_test_repo():
         "print('dirty', repr(subprocess.check_output(['git', 'status', '--porcelain'], text=True)))\n"
         "folder = Path(os.environ['SO_TEST_RUNS_PATH'], run_id); folder.mkdir(parents=True, exist_ok=True)\n"
         "(folder / 'manifest.json').write_text(json.dumps({'status': 'finished', 'verdict': {'email_worthy': False, 'label': 'x', 'failed_list': [], 'look_ahead': 'pass'}}))\n"
-        "print('results_row | ok |')\n")
+        "print('results_row | ok |')\n"
+        "if os.environ.get('SO_TEST_TAMPER') == '1':\n"
+        "    Path('so/helper.py').write_text('tampered\\n')\n")
+    write_file("protected_paths.txt", "so/**\nscripts/**\n")
     write_file("so/helper.py", "judge v1\n")
     write_file("scripts/run_development.py", script_str)
     write_file("experiments/exp_a/design.py", "design v1\n")
@@ -857,6 +860,32 @@ def test_queue_judge_from_main_run_commit():
     assert result_list[0]["run_commit"] == run_commit_str and result_list[0]["judge_commit"] == commit_dict["judge2"]
     assert git_func(["rev-parse", f"refs/runs/{result_list[0]['run_id']}"]).strip() == run_commit_str
     assert not os.listdir(worktree_root_str) and not os.listdir(path_dict["running"])
+    assert len(result_list[0]["judge_hash_before"]) == 64 and result_list[0]["judge_hash_after"] == result_list[0]["judge_hash_before"]
+    assert result_list[0]["judge_problem"] is None
+    # DESIGN CODE THAT CHANGES A JUDGE FILE DURING THE RUN: THE RUN IS FILED AS FAILED, WITH THE REASON
+    tamper_job_dict = get_valid_job_dict("00000c", {"design": "experiments/exp_a", "commit": commit_dict["design"]})
+    run_queue.write_job_file(os.path.join(path_dict["pending"], f"{tamper_job_dict['job_id']}.json"), tamper_job_dict)
+    environment_update_dict = {"SO_QUEUE_WORKTREE_ROOT": worktree_root_str, "SO_TEST_RUNS_PATH": path_dict["runs"],
+                               "SO_TEST_TAMPER": "1"}
+    os.environ.update(environment_update_dict)
+    try:
+        tamper_list = run_queue.run_queue_list(
+            path_dict, lambda job_in, run_id_in, log_in: run_queue.run_development_process_dict(job_in, run_id_in, log_in, git_func),
+            lambda *args_in: {"sent_bool": True, "detail": ""}, judge_func_in=lambda: commit_dict["judge2"], git_func_in=git_func)
+    finally:
+        for name_str in environment_update_dict:
+            os.environ.pop(name_str, None)
+    assert len(tamper_list) == 1 and tamper_list[0]["status"] == "failed", tamper_list
+    assert "judge changed during the run" in tamper_list[0]["judge_problem"], tamper_list[0]
+    assert tamper_list[0]["judge_hash_after"] != tamper_list[0]["judge_hash_before"]
+    assert any("judge changed" in line_str for line_str in tamper_list[0]["log_tail"])
+    # THE REPORT'S JUDGE MUST MATCH TOO; NOTHING MEASURED, NOTHING COMPARED
+    same_str = "a" * 64
+    assert run_queue.get_judge_problem_str({"judge_hash_before": same_str, "judge_hash_after": same_str}, same_str) == ""
+    assert "report judge" in run_queue.get_judge_problem_str({"judge_hash_before": same_str, "judge_hash_after": same_str}, "b" * 64)
+    assert run_queue.get_judge_problem_str({}, "b" * 64) == ""
+    passed("judge hash before and after every run (a design that changes a judge file fails the run; the report's hash "
+           "must match)")
     passed("judge = the deployed commit (refs/deployed, not main: a merge without a deploy changes nothing; run commit = "
            "the judge's tree + the job's experiments/, deterministic, parents kept by refs/runs; "
            "outside changes, links and missing experiments/ refused; clean worktree, no secrets, removed afterwards)")
@@ -899,6 +928,104 @@ def test_queue_waits_for_deployed_judge():
     assert first_fetch_int < first_check_int, call_list
     passed("no deployed judge: pending jobs wait, nothing is claimed; after a deploy the job runs under it; each pass "
            "fetches origin before it validates pending files")
+
+
+# FUNCTION: A REPLACE BLOCKED FOR A MOMENT IS RETRIED; ONE FAILED WATCH LOOP DOES NOT STOP THE WATCH (R3)
+def test_queue_windows_robustness():
+    """
+    Returns:
+        None
+    """
+    # os.replace FAILS TWICE WITH PermissionError (A READER HOLDS THE FILE), THEN WORKS
+    target_str = os.path.join(tempfile.mkdtemp(prefix="so_replace_"), "state.json")
+    real_replace = os.replace
+    fail_list = [PermissionError("held by a reader"), PermissionError("held by a reader")]
+    def flaky_replace(source_in, target_in):
+        if fail_list:
+            raise fail_list.pop(0)
+        return real_replace(source_in, target_in)
+    old_seconds = run_queue.REPLACE_RETRY_SECONDS
+    run_queue.os.replace, run_queue.REPLACE_RETRY_SECONDS = flaky_replace, 0.0
+    try:
+        run_queue.write_json_atomic(target_str, {"a": 1})
+        assert run_queue.read_json(target_str) == {"a": 1} and not fail_list
+        # ALWAYS BLOCKED: IT RAISES AFTER THE RETRIES AND LEAVES NO TEMPORARY FILE
+        def blocked_replace(source_in, target_in):
+            raise PermissionError("held")
+        run_queue.os.replace = blocked_replace
+        try:
+            run_queue.write_json_atomic(target_str, {"a": 2})
+            raise AssertionError("a permanently blocked replace was accepted")
+        except PermissionError:
+            pass
+        assert os.listdir(os.path.dirname(target_str)) == ["state.json"]
+    finally:
+        run_queue.os.replace, run_queue.REPLACE_RETRY_SECONDS = real_replace, old_seconds
+    # THE WATCH: THE FIRST LOOP RAISES, THE SECOND RUNS THE JOB
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    job_dict = get_valid_job_dict("00000e")
+    run_queue.write_job_file(os.path.join(path_dict["pending"], f"{job_dict['job_id']}.json"), job_dict)
+    real_run_queue_list = run_queue.run_queue_list
+    call_list = []
+    def flaky_run_queue_list(*arg_tuple_in, **kwarg_dict_in):
+        call_list.append(1)
+        if len(call_list) == 1:
+            raise OSError("a locked file (test)")
+        return real_run_queue_list(*arg_tuple_in, **kwarg_dict_in)
+    def fake_run_func(job_in, run_id_in, log_in):
+        Path(log_in).write_text("ok\n", encoding="utf-8")
+        return {"return_code": 1, "log_line_list": ["ok"], "timed_out_bool": False}
+    run_queue.run_queue_list = flaky_run_queue_list
+    try:
+        job_count_int = run_queue.watch_queue(path_dict, 0, 2, fake_run_func, lambda *args_in: {"sent_bool": False, "detail": ""},
+                                              judge_func_in=lambda: FAKE_JUDGE_STR, git_func_in=fake_accepting_git_func,
+                                              prepare_func_in=lambda job_in: FAKE_RUN_COMMIT_STR)
+    finally:
+        run_queue.run_queue_list = real_run_queue_list
+    assert len(call_list) == 2 and job_count_int == 1 and not os.listdir(path_dict["pending"])
+    passed("Windows robustness: a replace blocked by a reader is retried (and fails cleanly when it never clears); "
+           "a failed watch loop is logged and the next loop runs the job")
+
+
+# FUNCTION: THE TAIL-CHECK SCRIPT REPRODUCES THE BASELINE'S RANDOM DRAWS (R3, AUDIT S4)
+def test_random_timing_tail_script():
+    """
+    Returns:
+        None
+    """
+    # SYNTHETIC BARS, AN EXPOSURE PATH WITH A FEW CASH SPELLS, THE REFEREE'S OWN BASELINE AS THE REFERENCE
+    import numpy as np
+    import pandas as pd
+    import check_random_timing_tail as tail_script
+    from so.core.trade_execution import get_ohlcv_array_dict
+    from so.runner.baselines import get_runner_baseline_dict, get_random_timing_seed_list
+    from synthetic_data import get_synthetic_ohlcv_pdf
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-06-01", "2010-08-31", seed_in=7))
+    session_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_list[0], session_list[-1]
+    in_position_arr = np.ones(len(session_list), dtype=bool)
+    in_position_arr[[5, 6, 7, 20, 21, 40, 41, 42, 43]] = False
+    prior_only_dict = {"daily_equity_pdf": pd.DataFrame({"in_position": in_position_arr}), "metric_dict": {"total_return": 0.01}}
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, prior_only_dict, seed_count_int_in=6,
+                                             realized_exposure_bool_in=True)
+    exposure_arr = in_position_arr.astype(float)
+    exposure_arr[-1] = np.nan
+    seed_list = get_random_timing_seed_list(6)
+    script_list = tail_script.get_draw_return_list(seed_list, ohlcv_array_dict, date1, date2, exposure_arr, 1)
+    assert np.allclose(script_list, baseline_dict["random_timing_return_list"], rtol=0, atol=1e-12)
+    pool_list = tail_script.get_draw_return_list(seed_list, ohlcv_array_dict, date1, date2, exposure_arr, 2)
+    assert np.allclose(pool_list, script_list, rtol=0, atol=1e-12)
+    # THE SUMMARY: A NORMAL SAMPLE GIVES ABOUT THE EXPECTED EXCEEDANCES; A HEAVY RIGHT TAIL GIVES MANY MORE
+    rng = np.random.default_rng(1)
+    normal_dict = tail_script.get_tail_summary_dict(list(rng.normal(0.0, 1.0, 20000)), 0.5, 20)
+    assert normal_dict["draws_at_or_above_critical"] <= 1.5 * normal_dict["draws_at_or_above_critical_expected"] + 10
+    heavy_dict = tail_script.get_tail_summary_dict(list(rng.standard_t(2, 20000)), 0.5, 20)
+    assert heavy_dict["draws_at_or_above_critical"] > 2 * heavy_dict["draws_at_or_above_critical_expected"]
+    assert "Draws at or above it" in tail_script.get_tail_markdown_str("r", heavy_dict, {"registered_count": 6, "max_abs_difference": 0.0})
+    passed("tail-check script: reproduces the referee's random-timing draws (in process and with worker processes); "
+           "its summary flags a heavy right tail and not a normal one")
 
 
 # FUNCTION: AN OLD run_index.csv IS BROUGHT TO THE CURRENT COLUMNS BEFORE THE NEXT APPEND
@@ -1045,6 +1172,8 @@ if __name__ == "__main__":
     test_queue_heartbeat_and_child_environment()
     test_queue_judge_from_main_run_commit()
     test_queue_waits_for_deployed_judge()
+    test_queue_windows_robustness()
+    test_random_timing_tail_script()
     test_queue_run_index_upgrade()
     test_run_email_content()
     test_queue_kill_switch()

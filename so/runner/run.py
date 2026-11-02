@@ -35,7 +35,7 @@ from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict
-from so.runner.preregistration import check_preregistration_dict
+from so.runner.preregistration import check_preregistration_dict, get_design_helper_dict
 from so.runner.judge_identity import get_judge_hash_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
@@ -410,7 +410,8 @@ def get_realized_exposure_bool(design_module_in):
 
 # FUNCTION: APPEND ONE CANDIDATE-PERIOD TRIAL
 def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_in, period_row_in, score_dict_in,
-                                    commit_str_in, design_folder_hash_str_in, trial_log_path_str_in, note_str_in=""):
+                                    commit_str_in, design_folder_hash_str_in, trial_log_path_str_in, note_str_in="",
+                                    helper_hash_str_in=None):
     """
     One row, as soon as the period is scored, before any summary. A stable id that is already present is skipped.
 
@@ -424,6 +425,7 @@ def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_i
         design_folder_hash_str_in (str): Hash of the design folder
         trial_log_path_str_in (str): Trial log CSV
         note_str_in (str): Free text on the trial row
+        helper_hash_str_in (str | None): Helper hash of the design (preregistration.get_design_helper_dict)
 
     Returns:
         dict: The trial row
@@ -433,6 +435,8 @@ def log_candidate_period_trial_dict(design_module_in, run_id_str_in, candidate_i
     trial_id_str = get_trial_id_str(run_id_str_in, candidate_in, period_id)
     setting_dict = {"run_id": run_id_str_in, "candidate": candidate_in, "commit": commit_str_in,
                     "design_folder_hash": design_folder_hash_str_in}
+    if helper_hash_str_in:
+        setting_dict["helper_hash"] = str(helper_hash_str_in)
     metric_dict = {"total_return": float(score_dict_in["total_return"]),
                    "buy_hold_total_return": float(score_dict_in["buy_hold_total_return"]),
                    "excess_return": float(score_dict_in["excess_return"])}
@@ -527,7 +531,8 @@ def run_candidate_job_dict(job_dict_in):
                 log_candidate_period_trial_dict(design_module, run_id_str, candidate, period_row_dict, score_dict,
                                                 job_dict_in["commit_str"], job_dict_in["design_folder_hash_str"],
                                                 job_dict_in["trial_log_path_str"],
-                                                note_str_in=job_dict_in.get("note_str_in", ""))
+                                                note_str_in=job_dict_in.get("note_str_in", ""),
+                                                helper_hash_str_in=job_dict_in.get("helper_hash_str"))
             score_row_list.append(score_dict)
             completed_period_id_set.add(period_id)
             checkpoint_payload_dict = {
@@ -618,6 +623,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
         check_clean_tree(design_folder_str, design_file_path_str_in=design_file_path_str)
     check_design_file(design_file_path_str)
     design_folder_hash_str = get_design_folder_hash_str(design_folder_str)
+    helper_dict = get_design_helper_dict(design_file_path_str)
     commit_str = str(commit_str_in) if commit_str_in is not None else get_git_head_str()
     code_hash_str = (str(code_hash_str_in) if code_hash_str_in is not None
                      else get_code_hash_str(design_folder_str, design_file_path_str_in=design_file_path_str))
@@ -625,7 +631,9 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
     preregistration_dict = None
     if check_clean_tree_bool_in and log_trial_bool_in:
         preregistration_dict = check_preregistration_dict(design_module_in, design_folder_str, design_folder_hash_str,
-                                                          trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
+                                                          trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR,
+                                                          helper_hash_str_in=helper_dict["helper_hash"])
+        preregistration_dict["helper_file_list"] = list(helper_dict["helper_file_list"])
     period_pdf = period_pdf_in.copy()
     if period_pdf.empty:
         raise ValueError("no periods to run.")
@@ -663,6 +671,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
                 "ohlcv_path_str": ohlcv_path_str, "period_path_str": period_path_str, "buy_hold_path_str": buy_hold_path_str,
                 "context_path_str": context_path_str, "date1": date1, "date2": date2,
                 "commit_str": commit_str, "code_hash_str": code_hash_str, "design_folder_hash_str": design_folder_hash_str,
+                "helper_hash_str": helper_dict["helper_hash"],
                 "trial_log_path_str": trial_log_path_str, "crash_after_period_id": crash_after_period_id_in,
                 "log_trial_bool": bool(log_trial_bool_in), "runs_root_str": runs_root_str_in,
                 "note_str_in": str(note_str_in or ""),

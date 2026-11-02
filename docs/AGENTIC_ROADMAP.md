@@ -72,19 +72,28 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
   another clone was rejected as missing on the first pass. Each pass now fetches origin first.
 - [x] Tests (a merge to `main` without a deploy changes no judge; no deployed judge: jobs wait; fetch before
   validation); `docs/RUNNER_DESIGN.md`, `AGENTS.md`, design 4.2 updated.
-- [ ] On nicodesktop: merge, deploy, `status` shows `deployed_commit` equal to `queue_commit`.
+- [x] On nicodesktop: merge, deploy, `status` shows `deployed_commit` equal to `queue_commit` (2026-10-29: both
+  `ce4062d`; the first deploy ran the old script, a second deploy set the ref).
 
 **Done when** a merge to `main` without a deploy changes no judge commit.
 
-## R3. Core fixes from the audit (proposed; confirm each when built)
+## R3. Core fixes from the audit (agreed 2026-10-29)
 
-- [ ] Judge hash from the run commit's git tree, computed before any design code runs; includes
-  `records/legacy/*.csv` and the package lock (audit S9).
-- [ ] Design fingerprint and design key include the design's non-core import closure (audit S2).
-- [ ] Trial rows and manifests record the model(s) that designed the experiment (design section 1).
-- [ ] Queue on Windows: retry `os.replace` briefly on `PermissionError`; catch and log per watch loop (audit S8).
-- [ ] One-off check: 10,000 random-timing draws for one design against the normal approximation; keep it only if
-  conservative (audit S4).
+- [x] Judge hash includes `records/legacy/*.csv` and the package lock; the queue hashes the fresh worktree before the
+  run process starts and after it ends, and fails a run whose judge changed or whose report shows another hash
+  (audit S9).
+- [x] Helper hash of the unprotected `so/` files a design imports, recorded in trial rows; a logged version reruns
+  only with its own helper hash (audit S2). Decided when built: bookkeeping, not part of the design key (design 4.3).
+- [ ] ~~Trial rows and manifests record the model(s) that designed the experiment~~ moved to R5 (decided 2026-10-29:
+  every experiment so far was written by Nicolas and Claude).
+- [x] Queue on Windows: `os.replace` retried for about 5 seconds on `PermissionError`; a failed watch loop is logged
+  and retried (audit S8).
+- [x] `scripts/check_random_timing_tail.py` built: reproduces a run's 100 registered random-timing draws, extends them to
+  10,000, compares the tail with the normal fit (audit S4).
+- [ ] On nicodesktop: merge, **deploy** (the judge changes), then run the tail check on exp04 and exp02 and read the
+  result. Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
+
+**Done when** the tail check has been read and its consequence decided.
 
 ## R4. Results visible only as grades (decided; before any agent works with real data)
 
@@ -110,6 +119,8 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
 **Done when** every verdict compares total returns on both sides.
 
 ## R5. Stage 1 build: planner and blind coder (decided)
+
+- [ ] Trial rows and manifests record the model(s) that designed the experiment (moved from R3; design section 1).
 
 - [ ] Choose the agent runtime and model (requirements in design section 12; options and a bake-off in
   `claude/PROPOSAL_2026-10-29_models_and_setups.md`); provider-side monthly spend limit of **USD 25** on the system's

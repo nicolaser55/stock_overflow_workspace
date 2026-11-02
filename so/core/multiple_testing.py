@@ -39,6 +39,7 @@ quarters are calendar quarters and the trial log's are validation quarters (both
 EULER_GAMMA_FLOAT = 0.5772156649015329
 # SETTING KEYS THAT ARE RUN BOOKKEEPING, NOT PART OF A DESIGN
 BOOKKEEPING_KEY_SET = {"analysis_start", "commit", "cut_date", "cut_dates", "cuts", "data_cutoff", "design_folder_hash",
+                       "helper_hash",
                        "path", "run_id", "run_mode", "span", "step", "train_end", "train_start", "valid_end",
                        "valid_start", "valid_fold_id_list", "window", "kept_quarters", "calibration", "diagnostic",
                        "bootstrap", "null_seed", "null_run_count", "null_shift_share_range", "verdict", "reference",
