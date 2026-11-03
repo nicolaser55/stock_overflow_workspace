@@ -10,7 +10,8 @@
 # it only adds or replaces so_runner's own entries):
 #   1. Creates the local standard user so_runner if it does not exist (asks for a password).
 #   2. Data root: read everything; store01-03 write and delete denied; store04_experiments modify (runs, trial log,
-#      run index, queue, state).
+#      run index, queue, and visible\ with state.json, grades and technical status: roadmap R4). Run
+#      scripts\setup_so_agent.ps1 afterwards: it narrows so_agent to the pending queue, visible\ and control only.
 #   3. Quarantine root and holdout results folder: every access denied.
 #   4. Nicolas's workspace: read and run (venv-main), write denied.
 #   5. The runner workspace (its own git clone; job worktrees go under .worktrees): full control.

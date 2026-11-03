@@ -214,7 +214,8 @@ def test_queue_runs_files_and_emails():
     assert not os.path.exists(path_dict["lock"])
     state_dict = run_queue.read_json(path_dict["state"])
     assert state_dict["running"] is None and state_dict["pending_count"] == 0
-    assert [row["note"] for row in state_dict["recent"]] == ["second", "first"]
+    assert [row["job_id"] for row in state_dict["recent"]] == [second_dict["job_id"], first_dict["job_id"]]
+    assert all(set(row) == {"job_id", "run_id", "status"} and row["status"] == "ran" for row in state_dict["recent"])
     # A FAILING RUN EMAILS AND IS FILED; A RETRY KEEPS ITS RUN ID AND COUNTS THE ATTEMPT
     third_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "third", git_func_in=CLEAN_GIT_FUNC)
     failed_list = run_fake_queue_list(path_dict, get_fake_run_func(path_dict, True, 1), send_func)
@@ -585,7 +586,12 @@ def test_queue_rejects_bad_pending_files():
     reason_str = run_queue.read_json(os.path.join(path_dict["rejected"], rejected_list[0]))["reason"]
     assert reason_str
     state_recent_list = run_queue.read_json(path_dict["state"])["recent"]
-    assert len(state_recent_list) == 7 and all(row["status"] == "rejected" and row["reason"] for row in state_recent_list)
+    assert len(state_recent_list) == 7 and all(row["status"] == "rejected" and "reason" not in row for row in state_recent_list)
+    # THE REASON REACHES THE AGENT THROUGH ITS STATUS FILE (ROADMAP R4), NOT state.json
+    status_name_list = sorted(os.listdir(path_dict["status"]))
+    assert len(status_name_list) == 7 and all(run_queue.read_json(os.path.join(path_dict["status"], name_str))["status"] == "rejected"
+                                              and run_queue.read_json(os.path.join(path_dict["status"], name_str))["reason"]
+                                              for name_str in status_name_list)
     # A COMMIT THAT GIT DOES NOT HAVE
     import subprocess as subprocess_module
     def missing_git_func(arg_list_in, **kwarg_dict_in):

@@ -1,0 +1,6 @@
+# Stock Overflow phase switch (roadmap R4; protected; only Nicolas changes it, by a one-line merge in R6).
+#   development  docs/RESULTS_LOG.md rows show returns; scripts/reset_records.py may reset the trial log and run index
+#   agents       docs/RESULTS_LOG.md rows show identifiers, grade and reason only; nothing is ever reset
+# The first non-comment line decides; a missing file or an unknown value counts as "agents" (the stricter phase).
+# Not a .py file on purpose: the judge hash does not include it, so flipping it changes no judge.
+development

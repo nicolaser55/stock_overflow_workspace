@@ -4,7 +4,9 @@
 (`claude/AUDIT_2026-10-28_agentic_design.md` in the claude.ai project) and Nicolas's decisions on it. This is a
 design, not a description of built software: nothing in it is built unless the roadmap
 (`docs/AGENTIC_ROADMAP.md`) marks it done. Labels: **decided** (Nicolas agreed), **proposed** (recommended in the
-audit, to be confirmed when built), **open** (still to decide, section 14).*
+audit, to be confirmed when built), **open** (still to decide, section 14). **Updated 2026-11-03 (roadmap R4):** grades
+and technical status built (6.4, 6.5), the pilot scope of the multiple-testing count (6.7), the judge v1 freeze and
+equivalence checks (4.4).*
 
 **Two horizons.** Sections 2 to 11 describe the **target system** (the end goal, unchanged in purpose). Section 12
 describes **stage 1, the small version** that is built first. Every stage-1 part is a subset of the target and talks
@@ -133,6 +135,16 @@ built): including it would count every rerun of an unchanged design as a new des
 change instead. A changed helper under a new version keeps the same design key, so N undercounts it; the 3-version
 limit bounds this.
 
+### 4.4 The judge v1 freeze and equivalence checks (decided 2026-11-03)
+Every change to a protected `.py` file under `so/` or `scripts/` changes the judge hash, including changes that cannot
+affect a score (the queue, the agent view). To keep full reruns of the nine experiments (about 3 hours plus 11-14
+hours) to one, every change that can change a score is batched into the **judge v1 freeze**: R4 (grades, hash only),
+the pilot ledger (hash only), R4b (total returns: every number changes), and the counted check of the deflated Sharpe
+ratio (built, or dropped with a recorded reason). The freeze ends with a reset of the development records (6.7) and one
+full rerun of the nine, the baseline. After the freeze, a judge-hash change that touches no scoring code is accepted
+by an **equivalence check**: one or two fast daily experiments rerun under the new judge and must reproduce every
+number of their baseline run exactly; a change to scoring code means a full rerun.
+
 ---
 
 ## 5. Strategy lifecycle
@@ -180,8 +192,9 @@ log) rather than a separate subsystem. Not needed for stage 1.
 | Record | Written by | Readable by |
 |---|---|---|
 | Trial log, run index, run folders (equity curves, decisions, reports, manifests) | so_runner only | so_runner, Nicolas (auditor agent later) |
-| **Graded summaries** (6.5) | so_runner only | planner, research agents, Nicolas |
-| **Technical status** (ran / crashed + error / tests / rejected + reason), without performance numbers | so_runner only | codifier, coder |
+| **Graded summaries** (6.5): `store04_experiments/visible/grades/<run_id>.json` | so_runner only | planner, research agents, Nicolas (Windows group `so_grade_readers`) |
+| **Technical status** (ran / crashed + error / timeout / rejected + reason), without performance numbers: `store04_experiments/visible/status/<job_id>.json` | so_runner only | codifier, coder (group `so_status_readers`) |
+| **Queue state** `store04_experiments/visible/state.json` (running job, pending count, last 20 jobs as job id, run id, status) | so_runner only | every agent, Nicolas |
 | Results log (`docs/RESULTS_LOG.md`) | generated from the run index; grades only once agents run | everyone (it is in git) |
 | Idea list / strategy registry, lessons, failure log | planner (research agents later) | agents |
 
@@ -192,7 +205,30 @@ only holdout runs write the daily equity files.) Run folders become runner-only 
 data (roadmap R4). Error messages passed to the coder are cleaned of performance numbers.
 
 **`docs/RESULTS_LOG.md`** is public in git and agents can read it, so once agents run it holds grades and identifiers
-only, not returns (decided 2026-10-28); the numbers stay in the run index and reports.
+only, not returns (decided 2026-10-28); the numbers stay in the run index and reports. **Built (R4, 2026-11-03):** the
+switch `records/agent_phase.txt` (`development` / `agents`; a protected record, not a `.py` file, so flipping it changes
+no judge) decides the row format of `scripts/append_results_log.py`; it is flipped in R6. Rows already written stay;
+Nicolas accepted that agents can read the earlier rows of the nine baseline experiments.
+
+**Built (R4, 2026-11-03): what an agent account can read in the data folder.** `store04_experiments\queue\pending`
+(list and create), `store04_experiments\visible` (`state.json`; `grades\` through `so_grade_readers`, `status\`
+through `so_status_readers`) and `control` (the kill switch). Nothing else: no market data (store01-03), no run folders,
+reports, trial log, run index, queue folders, logs, checks or view files (`scripts/setup_so_agent.ps1`, checked by
+`scripts/check_agent_access.py` against real files). The finished-run email keeps every number and goes only to Nicolas.
+- **The coder's status** says `ran` for a run that has a verdict, with its look-ahead status only: a failed look-ahead
+  check is a code bug the coder must fix and says nothing about performance (decided 2026-11-03). A crash carries the
+  exception type, the message with every digit outside identifiers replaced by `#`, and the code locations; source
+  lines and printed values are dropped. It also carries what a retry needs, so `run_queue.py retry` reads it.
+- **A rejected job** (never run, no run id, not counted) gets a status for the coder and no grade (decided 2026-11-03).
+- **Stage 1: one account for planner and coder** (decided 2026-11-03). `so_agent` is in both reader groups, so in
+  stage 1 the coder could read grades (no numbers). R5 gives the planner its own account; only the group memberships
+  change.
+- **Leaks R4 does not close** (recorded, not hidden): the public git history (the nine baselines' rows, numbers quoted in
+  the design documents and commit messages, the pre-reset trial records removed from `main` on 2026-11-03); design code
+  runs as so_runner and could copy numbers into `visible\` (stage 1: Nicolas reads every pull request; target: the
+  so_design sandbox, 3.2); an agent with internet access could download prices elsewhere (firewall, R7); the run's
+  duration hints at the outcome (a strong path draws more random-timing samples). From R6, no number of an agent-era
+  run goes into the repository (documents, commit messages, pull-request text).
 
 ### 6.5 Grades (decided 2026-10-28)
 The planner never sees numbers. Each finished run gets one grade with its main reason:
@@ -203,12 +239,49 @@ The planner never sees numbers. Each finished run gets one grade with its main r
 - **Failed: could be luck (too many attempts)**
 - **Failed: technical problem**
 
-The runner computes the grade from the verdict (core code). Mapping each verdict part to one grade when several fail
-is defined when built (roadmap R4).
+The runner computes the grade from the verdict (core code). **Built (R4, decided by Nicolas on 2026-11-03):** the first
+failing check in this order gives the grade (`so/runner/grade.py`):
+
+| Order | Situation | Grade |
+|---|---|---|
+| 1 | No verdict: crashed, timed out, the judge changed during the run, the runner gave up after interruptions | Failed: technical problem |
+| 2 | Look-ahead check failed (the design used future data) or did not run | Failed: technical problem |
+| 3 | Return check fails even with zero slippage | Failed: not better than buy-and-hold |
+| 4 | Return check fails at the standard slippage but passes with zero slippage | Failed: gain disappears after costs |
+| 5 | Return passes, consistency fails | Failed: inconsistent over time |
+| 6 | Return and consistency pass; baselines (constant exposure, random timing) or multiple testing fail | Failed: could be luck (too many attempts) |
+| 7 | Every check passed | Passed all checks (audit pending) |
+
+"Zero slippage" is the cost-sensitivity replay at 0.00 dollars per share with buy-and-hold replayed the same way, and
+the full return check (including the comparable band with a better Sharpe ratio or drawdown) re-applied to it; broker
+fees are charged in both, so "after costs" here means after slippage. A rejected job is not a run and gets no grade.
+Each grade carries one reason from a fixed list (code and sentence, no digits) that names the check, for example
+"not above holding the same average exposure without any timing" or "the look-ahead check failed: the design used
+future data". A pass has the audit state "pending" until Nicolas (later the auditor agent) vetoes it or not; a veto is
+recorded in R6 and never upgrades a fail.
+
+**Format (R4):** one JSON per run, `visible/grades/<run_id>.json`: run_id, job_id, design, design_commit,
+judge_commit, attempt, finished_ts, grade, reason_code, reason, audit. A retry of the same run rewrites it. The folder
+listing is the index (no separate index file). The grade is also in `report.json`, `report.md`, the manifest's verdict
+and the email.
 
 ### 6.6 Backups
 Trial log, run index, manifests and summaries are copied to the NAS before any unattended run (before stage 2). Until
 the NAS exists, Nicolas copies `trial_log.csv` and `run_index.csv` by hand after each batch.
+
+### 6.7 Pilot scope, the tried-designs ledger and resets (decided 2026-11-03)
+Everything tried before the judge v1 freeze (4.4) is a **pilot phase** run with earlier, less robust code; its results
+were discarded. The verdict's multiple-testing N counts the trial log only; reruns of the same design add nothing.
+Every report and email also shows the multiple-testing part with the pilot designs included (reported, not part of the
+verdict), so the effect of this scope choice is visible; the thesis states the pilot count (260 designs) and this rule,
+and current settings chosen from pilot results are labelled data-dependent (exp13). The **tried-designs ledger**
+`records/legacy/pilot_designs.csv` holds the pilot's designs as family and settings only (made from the two pre-reset
+records, whose numbers were removed from `main`); it only grows. **Resets:** until R6, `scripts/reset_records.py`
+(Nicolas, development phase only) adds the trial log's designs to the ledger, checks that the pilot-included N is
+unchanged, moves the trial log, run index, run folders, queue records and agent view to a backup folder outside the data
+root, and appends a "withdrawn" note row to the results log. The first reset is at the freeze, before the rerun of the
+nine. Pilot variants do not use up the planner's budgets (section 5); the protocol-version limit starts again after a
+reset. From R6, nothing is reset and everything counts.
 
 ---
 
@@ -348,8 +421,10 @@ The living plan with status is `docs/AGENTIC_ROADMAP.md`. In short: apply A3 →
 ## 14. Open items
 
 - Coding/planning agent runtime and model (requirements in section 12; spend limit USD 25 per month for now).
-- Exact file formats of plan, job, technical status and graded summary.
-- How a verdict with several failed parts maps to one grade.
+- Exact file formats of plan and job (technical status and graded summary: built, R4, 6.4 / 6.5).
+- The counted check of the deflated Sharpe ratio: a diagnostic first, a core change only if the approximation is too
+  lenient; inside the judge v1 freeze (4.4).
+- How an auditor's veto is recorded against a graded pass (R6).
 - Screening design (flag of the full run, proposed), when research agents need it.
 - Accounts for the planner and auditor in the target (own accounts, or roles within existing ones).
 - Data request channel format (file plus email) until an ingest pipeline exists.

@@ -544,7 +544,8 @@ def get_random_timing_draw_return_float(seed_in, ohlcv_array_dict_in=None, date1
 # FUNCTION: THE MULTIPLE-TESTING RANDOM-TIMING COUNT, WITH EXTRA DRAWS UP TO THE BUDGET FOR N DESIGNS
 def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baseline_dict_in, prior_only_dict_in,
                                 design_count_int_in, realized_exposure_bool_in=False, extend_bool_in=True,
-                                process_count_int_in=None, batch_int_in=None, max_draw_int_in=None, alpha_in=None):
+                                process_count_int_in=None, batch_int_in=None, max_draw_int_in=None, alpha_in=None,
+                                pilot_design_count_int_in=None):
     """
     k = draws at or above the path; the budget M + 1 = ceil(factor * N / alpha); after the registered draws, batches of
     further seeds run while fewer than M draws are done and k is still at most k_max(M). Stopping early cannot change
@@ -563,11 +564,18 @@ def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baselin
         extend_bool_in (bool): Draw beyond the registered draws
         process_count_int_in, batch_int_in, max_draw_int_in (int | None): None = the config values
         alpha_in (float | None): Family-wise alpha (None = RUNNER_MULTIPLE_TESTING_ALPHA)
+        pilot_design_count_int_in (int | None): N with the pilot designs included (roadmap R4, reported only). When it
+            is larger than N, the budget is sized for it (when that budget is within max_draw_int_in), so the same
+            draws decide both: the verdict at N and the pilot-included view. The verdict stays an exact test at N
+            (p = (k + 1) / (M + 1) with M fixed before any draw, only finer); the stop rule follows the verdict's
+            allowed count (the larger one), and the pilot-included pass needs k at most its own allowed count at the
+            same budget. A pilot budget above max_draw_int_in leaves the budget at N and the pilot view fails.
 
     Returns:
         dict: method_str, design_count, alpha, p_max, path_return_used, draw_target, draw_count,
               registered_draw_count, at_or_above_count, at_or_above_max, p (at the budget: (k + 1) / (target + 1)),
-              stopped_early_bool, budget_exceeded_bool, extension_bool, process_count, extra_seconds, pass_bool
+              stopped_early_bool, budget_exceeded_bool, extension_bool, process_count, extra_seconds, pass_bool,
+              pilot_design_count, pilot_at_or_above_max, pilot_budget_bool, pilot_pass_bool
     """
     # THE REGISTERED DRAWS FIRST (THE PATH RETURN HAS THE ENGINE'S ROUNDING, LIKE EVERY DRAW)
     alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA if alpha_in is None else alpha_in)
@@ -575,10 +583,20 @@ def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baselin
     path_float = float((prior_only_dict_in.get("metric_dict") or {}).get("total_return", float("nan")))
     registered_list = [float(value) for value in list(baseline_dict_in.get("random_timing_return_list") or [])]
     registered_seed_list = [int(value) for value in list(baseline_dict_in.get("random_timing_seed_list") or [])]
+    pilot_count = max(design_count, int(pilot_design_count_int_in or design_count))
     tail_dict = get_random_timing_count_dict(path_float, registered_list, design_count, alpha_float)
-    tail_dict.update({"process_count": 0, "extra_seconds": 0.0})
+    tail_dict.update({"process_count": 0, "extra_seconds": 0.0, "pilot_design_count": pilot_count,
+                      "pilot_at_or_above_max": get_random_timing_at_or_above_max_int(len(registered_list), pilot_count,
+                                                                                    alpha_float),
+                      "pilot_budget_bool": False})
+    tail_dict["pilot_pass_bool"] = bool(tail_dict["pass_bool"] and int(tail_dict["at_or_above_count"])
+                                        <= int(tail_dict["pilot_at_or_above_max"]))
     budget_int = get_random_timing_draw_target_int(design_count, alpha_float)
     max_draw_int = int(config.RUNNER_RANDOM_TIMING_TAIL_MAX_DRAWS if max_draw_int_in is None else max_draw_int_in)
+    pilot_budget_int = get_random_timing_draw_target_int(pilot_count, alpha_float)
+    pilot_budget_bool = pilot_budget_int <= max_draw_int
+    if pilot_budget_bool:
+        budget_int = max(budget_int, pilot_budget_int)
     default_seed_bool = registered_seed_list == get_random_timing_seed_list(len(registered_seed_list))
     if not (extend_bool_in and default_seed_bool and math.isfinite(path_float) and len(registered_list) > 0):
         return tail_dict
@@ -624,4 +642,8 @@ def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baselin
                       "process_count": process_count if pool is not None else (1 if draw_count > len(registered_list) else 0),
                       "extra_seconds": float(time.time() - start_float),
                       "pass_bool": bool(not stopped_early_bool and at_or_above_int <= at_or_above_max)})
+    pilot_at_or_above_max = get_random_timing_at_or_above_max_int(target_int, pilot_count, alpha_float)
+    tail_dict.update({"pilot_at_or_above_max": pilot_at_or_above_max, "pilot_budget_bool": bool(pilot_budget_bool),
+                      "pilot_pass_bool": bool(pilot_budget_bool and not stopped_early_bool
+                                              and at_or_above_int <= pilot_at_or_above_max)})
     return tail_dict

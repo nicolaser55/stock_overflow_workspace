@@ -44,6 +44,9 @@ from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_d
                                LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_FAIL_STR, REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR,
                                MANIFEST_FILE_STR)
 from so.runner.lookahead import run_lookahead_check_dict, LOOKAHEAD_FILE_STR
+from so.runner.grade import get_run_grade_dict
+from so.runner.verdict import get_return_verdict_dict
+from so.core.evaluation import get_success_criteria_dict
 
 """
 Development And Holdout Runs (infrastructure steps 4b-1a, 4b-1b, 4b-1c and 4b-1d)
@@ -748,11 +751,12 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                                              realized_exposure_bool_in=get_realized_exposure_bool(design_module_in))
     # THE MULTIPLE-TESTING RANDOM-TIMING COUNT: EXTRA DRAWS ONLY WHEN THE PATH IS STILL NEAR PASSING (ROADMAP R3,
     # 2026-11-02); N IS COUNTED AS THE VERDICT COUNTS IT. A REDUCED SEED COUNT (TESTS) DRAWS NOTHING EXTRA (STRICTER).
-    tail_design_count_int = get_tried_design_count_dict(stream_dict_in.get("trial_log_path_str"))["total_count"]
+    tail_count_dict = get_tried_design_count_dict(stream_dict_in.get("trial_log_path_str"))
     baseline_dict["random_timing_tail_dict"] = get_random_timing_tail_dict(
-        ohlcv_array_dict_in, date1_in, date2_in, baseline_dict, prior_only_dict_in, tail_design_count_int,
+        ohlcv_array_dict_in, date1_in, date2_in, baseline_dict, prior_only_dict_in, tail_count_dict["total_count"],
         realized_exposure_bool_in=get_realized_exposure_bool(design_module_in),
-        extend_bool_in=baseline_seed_count_int_in is None)
+        extend_bool_in=baseline_seed_count_int_in is None,
+        pilot_design_count_int_in=tail_count_dict["pilot_included_count"])
     lookahead_dict = None
     look_ahead_status_str = look_ahead_status_str_in
     if run_lookahead_bool_in:
@@ -773,6 +777,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
         verdict_dict["look_ahead_dict"]["elapsed_seconds"] = lookahead_dict.get("elapsed_seconds")
     extra_report_dict = dict(extra_report_dict_in or {})
+    # THE GRADE THE PLANNER SEES (ROADMAP R4): ONE GRADE AND ONE REASON FROM THE VERDICT AND THE ZERO-SLIPPAGE REPLAY
+    grade_dict = get_run_grade_dict(verdict_dict, extra_report_dict.get("cost_sensitivity_list"))
     # THE JUDGE THAT SCORED THIS RUN (HASH OF THE PROTECTED CORE CODE; DESIGN 2026-10-27)
     judge_dict = get_judge_hash_dict()
     view_stamp_dict = extra_report_dict.pop("view_stamp_dict", get_view_stamp_dict())
@@ -783,7 +789,7 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         "judge_hash_str": judge_dict["judge_hash"], "judge_file_count": judge_dict["judge_file_count"],
         "view_stamp_dict": view_stamp_dict, "candidate_list": list(stream_dict_in["candidate_list"]),
         "trial_id_list": list(stream_dict_in["trial_id_list"]), "date1": str(date1_in), "date2": str(date2_in),
-        **extra_report_dict,
+        "grade_dict": grade_dict, **extra_report_dict,
     })
     output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR]
     if lookahead_dict is not None:
@@ -801,7 +807,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                      "output_files": list(output_file_list),
                      "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
                                  "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
-                                 "look_ahead": look_ahead_status_str}}
+                                 "look_ahead": look_ahead_status_str, "grade": grade_dict["grade_str"],
+                                 "grade_reason_code": grade_dict["reason_code_str"]}}
     if extra_manifest_dict_in:
         manifest_dict.update(dict(extra_manifest_dict_in))
     finish_dict = {"baseline_dict": baseline_dict, "verdict_dict": verdict_dict, "report_dict": report_dict,
@@ -851,8 +858,13 @@ def get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict
         ohlcv_array_dict_in (dict): Bars
         stream_dict_in (dict): Output of run_candidate_streams_dict
 
+    Each row also re-applies the full return check of the verdict (>= buy-and-hold, or the comparable band with a
+    better Sharpe ratio or drawdown) to that level's replay and buy-and-hold (roadmap R4): the grade uses the 0.00 row to
+    tell "not better than buy-and-hold" from "gain disappears after costs". Broker fees are charged at every level.
+
     Returns:
-        list[dict]: slippage_per_share, strategy_total_return, buy_hold_total_return
+        list[dict]: slippage_per_share, strategy_total_return, buy_hold_total_return, return_pass_bool,
+            return_reason_str (None when a replay has no daily equity)
     """
     # ONE REPLAY AND ONE BUY-AND-HOLD PER LEVEL
     from so.core.reentry_simulation import get_buy_and_hold_result_dict
@@ -868,9 +880,17 @@ def get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict
             engine_in=get_candidate_engine(design_module_in, slippage_float, slippage_float), design_module_in=design_module_in)
         buy_hold_dict = get_buy_and_hold_result_dict(ohlcv_array_dict_in, stream_dict_in["date1"], stream_dict_in["date2"],
                                                      config.INITIAL_CAPITAL, float(slippage_float), float(slippage_float))
+        return_pass_value, return_reason_value = None, None
+        strategy_equity_pdf = path_dict.get("daily_equity_pdf")
+        buy_hold_equity_pdf = buy_hold_dict.get("daily_equity_pdf")
+        if strategy_equity_pdf is not None and buy_hold_equity_pdf is not None and len(strategy_equity_pdf) and len(buy_hold_equity_pdf):
+            level_return_dict = get_return_verdict_dict(get_success_criteria_dict(
+                get_equity_daily_return_pdf(strategy_equity_pdf), get_equity_daily_return_pdf(buy_hold_equity_pdf)))
+            return_pass_value, return_reason_value = bool(level_return_dict["pass_bool"]), level_return_dict["reason_str"]
         row_list.append({"slippage_per_share": float(slippage_float),
                          "strategy_total_return": float(path_dict["metric_dict"].get("total_return", float("nan"))),
-                         "buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"])})
+                         "buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"]),
+                         "return_pass_bool": return_pass_value, "return_reason_str": return_reason_value})
     return row_list
 
 

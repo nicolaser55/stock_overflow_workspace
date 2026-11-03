@@ -48,9 +48,10 @@ Environment variables: `SO_DATA_PATH` (the data root, required). Nicolas only: `
 | Queue a run at the current (pushed, clean) commit | `scripts\run_queue.py add experiments\<exp> --note "<why>"` |
 | Queue state / retry a failed job | `scripts\run_queue.py status`, `scripts\run_queue.py retry <job id>` |
 | Run the queue (so_runner; normally the scheduled task `SO queue runner`) | `scripts\run_queue.py watch` (or `run` for one pass) |
-| Append finished runs to `docs/RESULTS_LOG.md` (then a pull request) | `scripts\append_results_log.py` |
+| Append finished runs to `docs/RESULTS_LOG.md` (Nicolas; then a pull request) | `scripts\append_results_log.py` |
+| Reset the development records, keeping the count of designs tried (Nicolas, development phase only) | `scripts\reset_records.py --backup-folder <folder> [--confirm]` |
 | One development run by hand (so_runner, or Nicolas) | `scripts\run_development.py experiments\<exp> --note "<why>"` |
-| Set up the agent / runner accounts (Nicolas, administrator) | `scripts\setup_so_agent.ps1`, `scripts\setup_so_runner.ps1`, then `scripts\check_agent_access.py [--role runner]` |
+| Set up the agent / runner accounts (Nicolas, administrator) | `scripts\setup_so_runner.ps1`, `scripts\setup_so_agent.ps1`, then `scripts\check_agent_access.py --make-sample-list <file>` (nico) and `--sample-list <file> [--role runner]` |
 | Protected files changed by a branch | `scripts\check_protected_paths.py --base main` |
 | Modules protected code imports but the list misses | `scripts\check_protected_paths.py --closure` |
 | Refresh the development view after a download (Nicolas) | `scripts\refresh_development_view.py` |
@@ -62,6 +63,8 @@ alone writes results. A run writes `store04_experiments/runs/<run id>/` (report.
 manifest.json, and per candidate the decisions and scores; the large pickles are deleted once the manifest exists),
 appends its rows to the trial log (`store04_experiments/trial_log.csv`), and the queue appends one row per attempt to
 `store04_experiments/run_index.csv`. `docs/RESULTS_LOG.md` gets the finished runs through `scripts/append_results_log.py`.
+Agents see only `store04_experiments/visible/`: a grade per run (`grades/`, no numbers), a technical status per job
+(`status/`, numbers scrubbed) and `state.json` (identifiers only); roadmap R4.
 A run refuses uncommitted changes in `so/` or its experiment folder, and a version that breaks pre-registration.
 
 ## Data folders (under `SO_DATA_PATH`)
@@ -70,7 +73,7 @@ A run refuses uncommitted changes in `so/` or its experiment folder, and a versi
 |---|---|---|
 | `store01_rawzone/` | raw IBKR SPY minute bars (bad ticks corrected once, `records/bad_tick_corrections.csv`) and the VIX family | downloads; never edited |
 | `store02_workzone/`, `store03_goldzone/` | pipeline caches: TSIND, TSSEG, TSCTX, TSBAR (barrier labels), TSDAY | pipeline notebooks |
-| `store04_experiments/` | `runs/`, `trial_log.csv` (append-only), `run_index.csv` (append-only), `queue/`, `state.json` | so_runner (agents may only add files to `queue/pending/`) |
+| `store04_experiments/` | `runs/`, `trial_log.csv` (append-only), `run_index.csv` (append-only), `queue/`, `checks/`, `visible/` (`state.json`, `grades/`, `status/`) | so_runner (agents may only add files to `queue/pending/` and read `visible/`) |
 
 The development view stops before the registered holdout window (embargo included). A design reads data only through
 the point-in-time layer (`so.core.point_in_time`, `docs/DATA_SOURCES.md`).

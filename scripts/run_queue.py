@@ -53,8 +53,18 @@ add refuses a clone with uncommitted changes in the design folder, and records t
     queue/runner.lock             the running runner's process id and host; a stale lock (dead process) is replaced
     run_index.csv                 one row per job attempt (append-only; scripts/append_results_log.py turns finished
                                   rows into docs/RESULTS_LOG.md rows)
-    state.json                    the running job, pending count, heartbeat, the commit of the queue script itself
-                                  (queue_commit), the last 20 results
+    visible/state.json            the running job (identifiers only), pending count, heartbeat, the commit of the queue
+                                  script (queue_commit), the deployed judge, the kill switch, and the last 20 results
+                                  as job id, run id and status only (roadmap R4; the state.json of earlier versions at
+                                  the zone root held full results and is removed on the first write)
+    visible/grades/<run_id>.json  the grade of a run (so.runner.grade): identifiers, grade, reason, audit; no numbers.
+                                  Readable by the planner (group so_grade_readers)
+    visible/status/<job_id>.json  the technical status of a job: ran / crashed / timeout / rejected, the look-ahead
+                                  status of a run that ran, the error with every number scrubbed, and the fields a retry
+                                  needs; no performance numbers. Readable by the coder (group so_status_readers)
+
+Agents read only visible/ (and write queue/pending); everything else here is readable by so_runner and Nicolas only
+(roadmap R4, scripts/setup_so_agent.ps1).
 
 A pending file is untrusted input. It must hold exactly the fields of a job (JOB_FIELD_LIST) with safe values
 (identifier patterns, a 40-character commit that exists and holds the design, a bounded note); a run id, a judge
@@ -137,6 +147,15 @@ STATE_LOCK = threading.Lock()
 REPLACE_RETRY_COUNT_INT = 50
 REPLACE_RETRY_SECONDS = 0.1
 QUEUE_COMMIT_CACHE_STR = None
+# THE FOLDER AGENTS MAY READ (ROADMAP R4): STATE, GRADES, TECHNICAL STATUS
+VISIBLE_FOLDER_STR = "visible"
+# THE FIELDS OF A RECENT ENTRY AND OF THE RUNNING JOB IN state.json (IDENTIFIERS ONLY)
+STATE_RECENT_KEY_LIST = ["job_id", "run_id", "status"]
+STATE_RUNNING_KEY_LIST = ["job_id", "design", "commit", "run_id", "attempt", "added_ts", "started_ts"]
+# THE TECHNICAL STATUS NAMES THE CODER SEES (QUEUE STATUS -> STATUS)
+TECHNICAL_STATUS_DICT = {"done": "ran", "failed": "crashed", "timeout": "timeout", "rejected": "rejected"}
+# LINES OF A FAILED LOG LOOKED AT FOR THE CODER'S ERROR SUMMARY
+STATUS_TAIL_LINE_COUNT_INT = 60
 # THE REF scripts/deploy_runner.ps1 SETS TO THE COMMIT NICOLAS DEPLOYED (THE JUDGE OF NEW JOBS)
 DEPLOYED_REF_STR = "refs/deployed"
 
@@ -194,17 +213,20 @@ def get_queue_path_dict(experiment_zone_str_in=None):
         experiment_zone_str_in (str | None): store04_experiments folder (None = from SO_DATA_PATH)
 
     Returns:
-        dict: root, pending, running, rejected, done, failed, outbox, logs, lock, state, runs, run_index, stop_flag
-        (paths as str; stop_flag is "" when no data root is set)
+        dict: root, pending, running, rejected, done, failed, outbox, logs, lock, state, old_state, visible, grades,
+        status, runs, run_index, stop_flag (paths as str; stop_flag is "" when no data root is set)
     """
     # PATHS ONLY: AN AGENT CANNOT CREATE FOLDERS HERE, AND add NEEDS ONLY pending
     zone_str = experiment_zone_str_in or get_named_data_path_str("LOCAL_EXPERIMENTZONE_PATH_STR")
     root_str = os.path.join(zone_str, "queue")
-    return {"root": root_str, "pending": os.path.join(root_str, "pending"), "running": os.path.join(root_str, "running"),
+    visible_str = os.path.join(zone_str, VISIBLE_FOLDER_STR)
+    return {"visible": visible_str, "grades": os.path.join(visible_str, "grades"),
+            "status": os.path.join(visible_str, "status"), "old_state": os.path.join(zone_str, "state.json"),
+            "root": root_str, "pending": os.path.join(root_str, "pending"), "running": os.path.join(root_str, "running"),
             "rejected": os.path.join(root_str, "rejected"), "done": os.path.join(root_str, "done"),
             "failed": os.path.join(root_str, "failed"), "outbox": os.path.join(root_str, "outbox"),
             "logs": os.path.join(root_str, "logs"), "lock": os.path.join(root_str, "runner.lock"),
-            "state": os.path.join(zone_str, "state.json"), "runs": os.path.join(zone_str, "runs"),
+            "state": os.path.join(visible_str, "state.json"), "runs": os.path.join(zone_str, "runs"),
             "run_index": os.path.join(zone_str, "run_index.csv"), "stop_flag": get_stop_flag_path_str()}
 
 
@@ -218,7 +240,7 @@ def make_runner_folder_list(path_dict_in):
         None
     """
     # THE RUNNER OWNS THESE
-    for key_str in ["pending", "running", "rejected", "done", "failed", "outbox", "logs", "runs"]:
+    for key_str in ["pending", "running", "rejected", "done", "failed", "outbox", "logs", "runs", "grades", "status"]:
         os.makedirs(path_dict_in[key_str], exist_ok=True)
 
 
@@ -249,6 +271,106 @@ def write_json_atomic(path_str_in, payload_in):
                     pass
                 raise
             time.sleep(REPLACE_RETRY_SECONDS)
+
+
+# PATTERNS THE SCRUBBER KEEPS (IDENTIFIERS AND CODE LOCATIONS); EVERY OTHER DIGIT IN AN ERROR TEXT BECOMES "#"
+FRAME_LINE_PATTERN = re.compile(r'^\s*File "([^"]{1,300})", line (\d{1,7}), in ([A-Za-z_<>][A-Za-z0-9_<>.]{0,120})\s*$')
+EXCEPTION_LINE_PATTERN = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]{0,120}(?:Error|Exception|Exit|Interrupt|Warning|Refused|Failure))(?::\s?(.*))?$")
+KEPT_TOKEN_PATTERN = re.compile(r"\b(?:(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}|exp[0-9]{2}_[A-Za-z0-9_]+|"
+                                r"[0-9]{20}_[0-9a-f]{6}_[A-Za-z0-9_]+)\b")
+DIGIT_RUN_PATTERN = re.compile(r"[0-9]+")
+SCRUB_TEXT_MAX_LENGTH_INT = 600
+
+
+# FUNCTION: A PLACEHOLDER WITHOUT DIGITS (INDEX IN LETTERS)
+def get_placeholder_str(index_int_in):
+    """
+    Args:
+        index_int_in (int): Index
+
+    Returns:
+        str: "\x00" + letters + "\x00" (no digit, so the digit scrub leaves it alone)
+    """
+    # BASE 26 IN LETTERS
+    letter_str, value_int = "", int(index_int_in)
+    while True:
+        letter_str = chr(ord("a") + value_int % 26) + letter_str
+        value_int //= 26
+        if value_int == 0:
+            break
+    return f"\x00{letter_str}\x00"
+
+
+# FUNCTION: AN ERROR TEXT WITHOUT NUMBERS
+def get_scrubbed_text_str(text_in, keep_list_in=None):
+    """
+    Conservative (roadmap R4): an error message may print values (a DataFrame, an assertion, a formatted return). Every
+    run of digits becomes "#", except inside identifiers: the strings in keep_list_in (job id, run id, design path,
+    commits), git hashes (7-40 hex characters with a letter), experiment names (expNN_...) and job ids. Control
+    characters go and the text is cut.
+
+    Args:
+        text_in (str): Text
+        keep_list_in (list[str] | None): Identifiers kept as they are
+
+    Returns:
+        str: The scrubbed text
+    """
+    # IDENTIFIERS OUT (LONGEST FIRST), DIGITS SCRUBBED, IDENTIFIERS BACK
+    text_str = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]+", " ", str(text_in or ""))
+    kept_list = []
+
+    def hold_func(value_str_in):
+        kept_list.append(value_str_in)
+        return get_placeholder_str(len(kept_list) - 1)
+    for keep_str in sorted({str(value) for value in (keep_list_in or []) if value and len(str(value)) >= 4},
+                           key=len, reverse=True):
+        if keep_str in text_str:
+            text_str = text_str.replace(keep_str, hold_func(keep_str))
+    text_str = KEPT_TOKEN_PATTERN.sub(lambda match_in: hold_func(match_in.group(0)), text_str)
+    text_str = DIGIT_RUN_PATTERN.sub("#", text_str)
+    for index_int in range(len(kept_list) - 1, -1, -1):
+        text_str = text_str.replace(get_placeholder_str(index_int), kept_list[index_int])
+    return text_str[:SCRUB_TEXT_MAX_LENGTH_INT]
+
+
+# FUNCTION: THE CODER'S ERROR SUMMARY OF A FAILED LOG
+def get_error_summary_dict(log_line_list_in, keep_list_in=None):
+    """
+    Keeps only the traceback frames (file, line, function: code locations, not data) and the last exception line with
+    its message scrubbed. Source lines, printed values and every other log line are dropped.
+
+    Args:
+        log_line_list_in (list[str]): The log (or its tail)
+        keep_list_in (list[str] | None): Identifiers kept by the scrubber
+
+    Returns:
+        dict: error_type (str | None), error_text (scrubbed, str), frame_list (list of "file:line in function")
+    """
+    # THE LAST EXCEPTION LINE, AND THE FRAMES BEFORE IT
+    line_list = [str(line_str).rstrip("\r\n") for line_str in list(log_line_list_in or [])[-STATUS_TAIL_LINE_COUNT_INT:]]
+    frame_list, error_type, error_text = [], None, ""
+    for line_str in line_list:
+        frame_match = FRAME_LINE_PATTERN.match(line_str)
+        if frame_match:
+            file_str = frame_match.group(1).replace("\\", "/")
+            for marker_str in ["/experiments/", "/so/", "/scripts/", "/tests/"]:
+                if marker_str in file_str:
+                    file_str = marker_str.strip("/") + "/" + file_str.split(marker_str, 1)[1]
+                    break
+            else:
+                file_str = file_str.rsplit("/", 1)[-1]
+            # THE LINE NUMBER IS A CODE LOCATION AND STAYS; THE PATH AND THE FUNCTION NAME ARE SCRUBBED LIKE TEXT
+            frame_list.append(f"{get_scrubbed_text_str(file_str, keep_list_in)}:{frame_match.group(2)} in "
+                              f"{get_scrubbed_text_str(frame_match.group(3), keep_list_in)}")
+            continue
+        exception_match = EXCEPTION_LINE_PATTERN.match(line_str.strip())
+        if exception_match:
+            error_type = exception_match.group(1)
+            error_text = get_scrubbed_text_str(exception_match.group(2) or "", keep_list_in)
+    if error_type is None and line_list:
+        error_text = get_scrubbed_text_str(line_list[-1], keep_list_in)
+    return {"error_type": error_type, "error_text": error_text, "frame_list": frame_list[-12:]}
 
 
 # FUNCTION: WRITE A NEW JOB FILE IN ONE CREATE
@@ -529,17 +651,28 @@ def add_retry_job_dict(path_dict_in, job_id_str_in, now_in=None):
 
     Args:
         path_dict_in (dict): Queue paths
-        job_id_str_in (str): A job in failed/
+        job_id_str_in (str): A crashed or timed-out job (visible/status/<job_id>.json, else queue/failed/)
         now_in (datetime.datetime | None): Clock (tests)
 
     Returns:
         dict: The new job
     """
-    # THE FAILED RESULT HOLDS THE RUN ID
+    # THE TECHNICAL STATUS HOLDS WHAT A RETRY NEEDS (AGENTS CANNOT READ failed/ SINCE R4); NICOLAS MAY STILL USE failed/.
+    # THE RUNNER CHECKS THE RETRY AGAINST failed/ EITHER WAY (check_retry_job_dict)
+    status_path_str = os.path.join(path_dict_in["status"], f"{get_safe_name_str(job_id_str_in)}.json")
     failed_path_str = os.path.join(path_dict_in["failed"], f"{job_id_str_in}.json")
-    if not os.path.isfile(failed_path_str):
-        raise ValueError(f"no failed job {job_id_str_in}")
-    failed_dict = read_json(failed_path_str)
+    failed_dict = None
+    try:
+        status_dict = read_json(status_path_str)
+        if status_dict.get("retry_possible") and status_dict.get("job_id") == job_id_str_in:
+            failed_dict = status_dict
+    except (OSError, ValueError, AttributeError):
+        failed_dict = None
+    if failed_dict is None:
+        try:
+            failed_dict = read_json(failed_path_str)
+        except (OSError, ValueError):
+            raise ValueError(f"no failed job {job_id_str_in} (its status does not allow a retry, or it does not exist)")
     now = now_in or datetime.datetime.now()
     attempt_int = int(failed_dict.get("attempt") or 1) + 1
     job_id_str = f"{now.strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:6]}_{Path(failed_dict['design']).name}_retry{attempt_int}"
@@ -606,9 +739,11 @@ def reject_pending_file(path_dict_in, name_str_in, raw_in, reason_str_in, now_in
     source_str = os.path.join(path_dict_in[source_key_str_in], os.path.basename(name_str_in))
     if os.path.isfile(source_str):
         os.remove(source_str)
-    # THE AGENT THAT ADDED THE JOB CANNOT READ rejected/, SO THE REASON ALSO GOES INTO state.json (status SHOWS IT)
-    write_state_dict(path_dict_in, None, {"job_id": stem_str, "status": "rejected", "reason": str(reason_str_in)[:300],
-                                          "finished_ts": now.isoformat(timespec="seconds")})
+    # THE AGENT THAT ADDED THE JOB CANNOT READ rejected/: THE SCRUBBED REASON GOES INTO ITS STATUS FILE (ROADMAP R4)
+    status_job_dict = dict(raw_in) if isinstance(raw_in, dict) else {}
+    status_job_dict["job_id"] = stem_str
+    write_status_dict(path_dict_in, status_job_dict, "rejected", now, reason_str_in=str(reason_str_in)[:500])
+    write_state_dict(path_dict_in, None, {"job_id": stem_str, "status": "rejected"})
     return target_str
 
 
@@ -684,23 +819,158 @@ def write_state_dict(path_dict_in, running_job_in, result_dict_in=None):
     Returns:
         dict: The state written (updated_ts is the runner's heartbeat)
     """
-    # THE MAIN THREAD AND THE HEARTBEAT THREAD BOTH WRITE; THE RECENT LIST IS KEPT ACROSS WRITES
+    # THE MAIN THREAD AND THE HEARTBEAT THREAD BOTH WRITE; THE RECENT LIST IS KEPT ACROSS WRITES, TRIMMED TO
+    # IDENTIFIERS AND STATUS (ROADMAP R4: AGENTS READ THIS FILE). AN OLD ENTRY WITH MORE FIELDS IS CUT, NOT MERGED
     with STATE_LOCK:
         recent_list = []
         if os.path.isfile(path_dict_in["state"]):
             try:
                 recent_list = list(read_json(path_dict_in["state"]).get("recent", []))
-            except (ValueError, OSError):
+            except (ValueError, OSError, AttributeError):
                 recent_list = []
         if result_dict_in is not None:
             recent_list = [result_dict_in] + recent_list
-        state_dict = {"updated_ts": datetime.datetime.now().isoformat(timespec="seconds"), "running": running_job_in,
+        recent_list = [get_state_entry_dict(entry) for entry in recent_list if isinstance(entry, dict)]
+        state_dict = {"updated_ts": datetime.datetime.now().isoformat(timespec="seconds"),
+                      "running": get_state_entry_dict(running_job_in, STATE_RUNNING_KEY_LIST) if running_job_in else None,
                       "pending_count": len(get_pending_job_list(path_dict_in)), "host": socket.gethostname(),
                       "queue_commit": get_queue_commit_str(), "deployed_commit": get_deployed_commit_str(),
                       "stopped": get_stop_flag_bool(path_dict_in),
                       "recent": recent_list[:STATE_RECENT_COUNT_INT]}
+        os.makedirs(os.path.dirname(path_dict_in["state"]), exist_ok=True)
         write_json_atomic(path_dict_in["state"], state_dict)
+        # THE state.json OF EARLIER VERSIONS (ZONE ROOT, FULL RESULTS) GOES
+        old_state_str = path_dict_in.get("old_state") or ""
+        if old_state_str and os.path.abspath(old_state_str) != os.path.abspath(path_dict_in["state"]) and os.path.isfile(old_state_str):
+            try:
+                os.remove(old_state_str)
+            except OSError as error:
+                print(f"warning: could not remove the old {old_state_str} ({type(error).__name__})", flush=True)
     return state_dict
+
+
+# FUNCTION: ONE state.json ENTRY WITH ALLOWED FIELDS ONLY
+def get_state_entry_dict(entry_dict_in, key_list_in=None):
+    """
+    Args:
+        entry_dict_in (dict): A job, a result, or an earlier entry
+        key_list_in (list[str] | None): Allowed keys (None = STATE_RECENT_KEY_LIST)
+
+    Returns:
+        dict: Only the allowed keys, as strings (or None); status mapped to the technical status names
+    """
+    # IDENTIFIERS ONLY; A QUEUE STATUS BECOMES THE CODER'S STATUS NAME (done -> ran)
+    key_list = list(key_list_in or STATE_RECENT_KEY_LIST)
+    entry_dict = {}
+    for key_str in key_list:
+        value = entry_dict_in.get(key_str)
+        if key_str == "status" and value is not None:
+            value = TECHNICAL_STATUS_DICT.get(str(value), str(value) if str(value) in TECHNICAL_STATUS_DICT.values() else "unknown")
+        entry_dict[key_str] = None if value is None else (int(value) if key_str == "attempt" and str(value).isdigit() else str(value))
+    return entry_dict
+
+
+# FUNCTION: A FILE NAME FROM AN IDENTIFIER (NOTHING CAN ESCAPE THE FOLDER)
+def get_safe_name_str(value_in):
+    """
+    Args:
+        value_in (str): Job id or run id
+
+    Returns:
+        str: Letters, digits, "_", "-" and "." only, at most 160 characters
+    """
+    # THE IDENTIFIERS ARE PATTERN-CHECKED ALREADY; THIS IS A SECOND FENCE
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value_in))[:160] or "unnamed"
+
+
+# FUNCTION: THE TECHNICAL STATUS OF A JOB (WHAT THE CODER SEES)
+def write_status_dict(path_dict_in, job_dict_in, status_str_in, now_in=None, error_dict_in=None, look_ahead_str_in=None,
+                      reason_str_in=None):
+    """
+    visible/status/<job_id>.json (roadmap R4): ran / crashed / timeout / rejected; for a run that ran, its look-ahead
+    status only (a failed look-ahead check is a code bug the coder must fix; it says nothing about performance); for a
+    crash, the error type, the scrubbed message and the code locations; for a rejection, the scrubbed reason. It also
+    holds the identifiers a retry needs. Nothing about the grade, the verdict or any number the run produced.
+
+    Args:
+        path_dict_in (dict): Queue paths
+        job_dict_in (dict): The job (or the raw pending content of a rejected file)
+        status_str_in (str): done, failed, timeout or rejected (queue names)
+        now_in (datetime.datetime | None): Clock (tests)
+        error_dict_in (dict | None): Output of get_error_summary_dict (crashes)
+        look_ahead_str_in (str | None): pass / fail / pending (runs that ran)
+        reason_str_in (str | None): Why it was rejected, or the queue's own finding (judge changed, gave up)
+
+    Returns:
+        str: The file written
+    """
+    # IDENTIFIERS ARE KEPT BY THE SCRUBBER; EVERYTHING ELSE LOSES ITS DIGITS
+    now = now_in or datetime.datetime.now()
+    job_dict = job_dict_in if isinstance(job_dict_in, dict) else {}
+    keep_list = [job_dict.get(name_str) for name_str in ["job_id", "run_id", "design", "commit", "judge_commit", "retry_of"]
+                 if isinstance(job_dict.get(name_str), str)]
+    job_id_str = str(job_dict.get("job_id") or "unknown")
+    status_str = TECHNICAL_STATUS_DICT.get(status_str_in, "crashed")
+
+    def get_identifier_value(name_str_in, pattern_in):
+        value = job_dict.get(name_str_in)
+        return value if isinstance(value, str) and pattern_in.match(value) else None
+    attempt_value = job_dict.get("attempt")
+    status_dict = {"job_id": job_id_str if JOB_ID_PATTERN.match(job_id_str) else get_safe_name_str(job_id_str),
+                   "status": status_str, "finished_ts": now.isoformat(timespec="seconds"),
+                   "run_id": get_identifier_value("run_id", RUN_ID_PATTERN),
+                   "design": get_identifier_value("design", DESIGN_PATTERN),
+                   "commit": get_identifier_value("commit", COMMIT_PATTERN),
+                   "judge_commit": get_identifier_value("judge_commit", COMMIT_PATTERN),
+                   "attempt": int(attempt_value) if isinstance(attempt_value, int) and not isinstance(attempt_value, bool) else None,
+                   "look_ahead": look_ahead_str_in if status_str == "ran" and look_ahead_str_in in ("pass", "fail", "pending") else None,
+                   "look_ahead_failed": bool(status_str == "ran" and look_ahead_str_in == "fail"),
+                   "reason": get_scrubbed_text_str(reason_str_in, keep_list) if reason_str_in else None,
+                   "error_type": None, "error_text": None, "error_frame_list": [],
+                   "retry_possible": bool(status_str in ("crashed", "timeout") and job_dict.get("run_id")),
+                   # THE JOB'S OWN NOTE (WRITTEN BY WHOEVER QUEUED IT) AND n_jobs: A RETRY COPIES THEM
+                   "note": str(job_dict.get("note") or "")[:NOTE_MAX_LENGTH_INT] if status_str != "rejected" else None,
+                   "n_jobs": job_dict.get("n_jobs") if isinstance(job_dict.get("n_jobs"), int) else None}
+    if error_dict_in:
+        status_dict.update({"error_type": error_dict_in.get("error_type"), "error_text": error_dict_in.get("error_text"),
+                            "error_frame_list": list(error_dict_in.get("frame_list") or [])})
+    os.makedirs(path_dict_in["status"], exist_ok=True)
+    status_path_str = os.path.join(path_dict_in["status"], f"{get_safe_name_str(status_dict['job_id'])}.json")
+    write_json_atomic(status_path_str, status_dict)
+    return status_path_str
+
+
+# FUNCTION: THE GRADE OF A RUN (WHAT THE PLANNER SEES)
+def write_grade_dict(path_dict_in, result_dict_in, grade_dict_in):
+    """
+    visible/grades/<run_id>.json (roadmap R4): identifiers, the grade, its reason and the audit state; no numbers. A
+    retry of the same run rewrites it (attempt shows which).
+
+    Args:
+        path_dict_in (dict): Queue paths
+        result_dict_in (dict): The job's result
+        grade_dict_in (dict): Output of so.runner.grade.get_queue_grade_dict
+
+    Returns:
+        str: The file written
+    """
+    # ONLY PATTERN-CHECKED IDENTIFIERS AND THE FIXED VOCABULARY
+    def get_identifier_value(name_str_in, pattern_in):
+        value = result_dict_in.get(name_str_in)
+        return value if isinstance(value, str) and pattern_in.match(value) else None
+    grade_record_dict = {"run_id": get_identifier_value("run_id", RUN_ID_PATTERN),
+                         "job_id": get_identifier_value("job_id", JOB_ID_PATTERN),
+                         "design": get_identifier_value("design", DESIGN_PATTERN),
+                         "design_commit": get_identifier_value("commit", COMMIT_PATTERN),
+                         "judge_commit": get_identifier_value("judge_commit", COMMIT_PATTERN),
+                         "attempt": int(result_dict_in.get("attempt") or 1),
+                         "finished_ts": str(result_dict_in.get("finished_ts") or ""),
+                         "grade": grade_dict_in["grade_str"], "reason_code": grade_dict_in["reason_code_str"],
+                         "reason": grade_dict_in["reason_str"], "audit": grade_dict_in["audit_str"]}
+    os.makedirs(path_dict_in["grades"], exist_ok=True)
+    grade_path_str = os.path.join(path_dict_in["grades"], f"{get_safe_name_str(grade_record_dict['run_id'] or result_dict_in.get('run_id'))}.json")
+    write_json_atomic(grade_path_str, grade_record_dict)
+    return grade_path_str
 
 
 # CLASS: A HEARTBEAT WHILE A JOB RUNS
@@ -1202,6 +1472,28 @@ def get_percent_str(value_in):
         return "n/a"
 
 
+# FUNCTION: THE PILOT-INCLUDED VIEW FOR THE EMAIL ("" WHEN THE REPORT HAS NONE)
+def get_pilot_email_str(path_dict_in, run_id_str_in):
+    """
+    Args:
+        path_dict_in (dict): Queue paths
+        run_id_str_in (str): Run id
+
+    Returns:
+        str: "; with the pilot designs included N = ..., multiple testing pass/fail" or ""
+    """
+    # report.json HOLDS IT SINCE R4
+    try:
+        report_dict = read_json(os.path.join(path_dict_in["runs"], run_id_str_in, "report.json"))
+    except (OSError, ValueError):
+        return ""
+    pilot_dict = (report_dict.get("multiple_testing_dict") or {}).get("pilot_included_dict") or {}
+    if not pilot_dict:
+        return ""
+    return (f"; with the pilot designs included N = {pilot_dict.get('design_count')}, multiple testing "
+            f"{'pass' if pilot_dict.get('pass_bool') else 'fail'} (reported, not part of the verdict)")
+
+
 # FUNCTION: THE EMAIL OF A FINISHED RUN (ONE PER FULL RUN, POSITIVE OR NEGATIVE)
 def get_finished_run_email_tuple(path_dict_in, result_dict_in, manifest_dict_in):
     """
@@ -1228,7 +1520,10 @@ def get_finished_run_email_tuple(path_dict_in, result_dict_in, manifest_dict_in)
                  f"Look-ahead check {verdict_dict.get('look_ahead', '')}",
                  f"Total return {get_percent_str(number_dict['strategy_total_return'])} vs buy-and-hold "
                  f"{get_percent_str(number_dict['buy_hold_total_return'])}",
-                 f"Designs tried (the multiple-testing N) {number_dict['design_count'] or 'n/a'}",
+                 f"Grade (what the planner sees) {verdict_dict.get('grade') or 'n/a'} "
+                 f"({verdict_dict.get('grade_reason_code') or 'no reason code'})",
+                 f"Designs tried (the multiple-testing N) {number_dict['design_count'] or 'n/a'}"
+                 f"{get_pilot_email_str(path_dict_in, result_dict_in['run_id'])}",
                  f"Judge hash {str(number_dict['judge_hash'])[:16] or 'n/a'}",
                  f"Commits: design {result_dict_in.get('commit')}, judge {result_dict_in.get('judge_commit')}, "
                  f"run {result_dict_in.get('run_commit')}",
@@ -1302,6 +1597,7 @@ def recover_running_job_list(path_dict_in, now_in=None):
             write_json_atomic(os.path.join(path_dict_in["rejected"], f"claim_{re.sub(r'[^A-Za-z0-9_.-]', '_', name_str)[:100]}"),
                               {"rejected_ts": now.isoformat(timespec="seconds"), "reason": f"unusable claim: {error}"})
             os.remove(file_str)
+            write_status_dict(path_dict_in, {"job_id": name_str[:-5]}, "rejected", now, reason_str_in=f"unusable claim: {error}")
             continue
         job_dict["resume_count"] = int(raw_dict.get("resume_count") or 0) + 1
         job_dict["attempt"] = job_dict["attempt"] + 1
@@ -1327,7 +1623,7 @@ def get_give_up_run_func(resume_count_int_in):
     def run_func(job_dict_in, run_id_str_in, log_path_str_in):
         message_str = f"gave up: the runner was interrupted {resume_count_int_in} times while this job ran"
         Path(log_path_str_in).write_text(message_str + "\n", encoding="utf-8")
-        return {"return_code": -2, "log_line_list": [message_str], "timed_out_bool": False}
+        return {"return_code": -2, "log_line_list": [message_str], "timed_out_bool": False, "gave_up_bool": True}
     return run_func
 
 
@@ -1449,6 +1745,8 @@ def run_job_dict(path_dict_in, job_dict_in, run_func_in=None, send_func_in=None,
     os.makedirs(target_folder_str, exist_ok=True)
     write_json_atomic(os.path.join(target_folder_str, f"{job_dict_in['job_id']}.json"), result_dict)
     append_run_index_row(path_dict_in, result_dict)
+    # WHAT AGENTS SEE (ROADMAP R4): THE GRADE (PLANNER) AND THE TECHNICAL STATUS (CODER), BOTH WITHOUT NUMBERS
+    write_agent_view_dict(path_dict_in, result_dict, process_dict)
     # THE JOB IS FILED: THE CLAIM AND ANY LEFTOVER PENDING FILE GO
     for folder_key_str in ["running", "pending"]:
         leftover_str = os.path.join(path_dict_in[folder_key_str], f"{job_dict_in['job_id']}.json")
@@ -1456,6 +1754,41 @@ def run_job_dict(path_dict_in, job_dict_in, run_func_in=None, send_func_in=None,
             os.remove(leftover_str)
     write_state_dict(path_dict_in, None, result_dict)
     return result_dict
+
+
+# FUNCTION: THE GRADE AND THE TECHNICAL STATUS OF A FILED JOB
+def write_agent_view_dict(path_dict_in, result_dict_in, process_dict_in):
+    """
+    Args:
+        path_dict_in (dict): Queue paths
+        result_dict_in (dict): The job's result (as filed in done/ or failed/)
+        process_dict_in (dict): The run function's result (log lines, gave_up_bool)
+
+    Returns:
+        dict: grade_path_str, status_path_str, grade_dict
+    """
+    # THE GRADE MODULE IS IMPORTED HERE: so.runner PULLS IN THE RUNNER'S PACKAGES, WHICH add AND status DO NOT NEED
+    from so.runner.grade import get_queue_grade_dict
+    status_str = result_dict_in["status"]
+    verdict_dict = result_dict_in.get("verdict") or {}
+    grade_dict = get_queue_grade_dict(status_str, verdict_dict, result_dict_in.get("judge_problem") or "",
+                                      bool(process_dict_in.get("gave_up_bool")))
+    grade_path_str = write_grade_dict(path_dict_in, result_dict_in, grade_dict)
+    keep_list = [result_dict_in.get(name_str) for name_str in ["job_id", "run_id", "design", "commit", "judge_commit", "run_commit"]]
+    if status_str == "done":
+        status_path_str = write_status_dict(path_dict_in, result_dict_in, "done",
+                                            look_ahead_str_in=str(verdict_dict.get("look_ahead") or "pending"))
+    elif result_dict_in.get("judge_problem"):
+        status_path_str = write_status_dict(path_dict_in, result_dict_in, status_str,
+                                            reason_str_in="the judge changed during the run; the run was not scored")
+    elif process_dict_in.get("gave_up_bool"):
+        status_path_str = write_status_dict(path_dict_in, result_dict_in, status_str,
+                                            reason_str_in="the runner was interrupted too often while this job ran")
+    else:
+        status_path_str = write_status_dict(path_dict_in, result_dict_in, status_str,
+                                            error_dict_in=get_error_summary_dict(process_dict_in.get("log_line_list"), keep_list),
+                                            reason_str_in="time limit exceeded" if status_str == "timeout" else None)
+    return {"grade_path_str": grade_path_str, "status_path_str": status_path_str, "grade_dict": grade_dict}
 
 
 # FUNCTION: WHETHER THE QUEUE HAS ANYTHING TO DO
@@ -1511,7 +1844,8 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
         give_up_bool = resume_count_int > MAX_RESUME_COUNT_INT
         print(f"start {job_in['job_id']} {datetime.datetime.now():%H:%M:%S}" + (f" (resumed, interruption {resume_count_int})" if resume_count_int else ""), flush=True)
         result_dict = run_job_dict(path_dict_in, job_in, get_give_up_run_func(resume_count_int) if give_up_bool else run_func_in, send_func_in)
-        print(f"{result_dict['status']} {job_in['job_id']} {result_dict['results_row'] or result_dict['log']}", flush=True)
+        # NO RESULTS ROW ON THE CONSOLE (IT HOLDS RETURNS); THE GRADE FILE AND THE EMAIL CARRY THE OUTCOME
+        print(f"{result_dict['status']} {job_in['job_id']} run {result_dict['run_id']}", flush=True)
         result_list.append(result_dict)
 
     try:
@@ -1589,7 +1923,7 @@ if __name__ == "__main__":
     add_parser.add_argument("--n-jobs", type=int, default=None, help="Candidate processes")
     add_parser.add_argument("--commit", default=None, help="Commit to run (default: this clone's HEAD, which must be clean)")
     retry_parser = sub_parser.add_parser("retry", help="Queue a failed job again under the same run id")
-    retry_parser.add_argument("job_id", help="Job id in queue/failed/")
+    retry_parser.add_argument("job_id", help="Job id of a crashed or timed-out job (visible/status/)")
     sub_parser.add_parser("run", help="Run every pending job, then exit (runner account)")
     watch_parser = sub_parser.add_parser("watch", help="Run jobs as they arrive (runner account)")
     watch_parser.add_argument("--interval", type=float, default=DEFAULT_WATCH_INTERVAL_SECONDS, help="Seconds between looks")
@@ -1606,7 +1940,7 @@ if __name__ == "__main__":
         result_list = run_queue_list(path_dict)
         print(f"\n===== queue: {len(result_list)} job(s) =====")
         for result_dict in result_list:
-            print(f"{result_dict['job_id']} {result_dict['status']}: {result_dict['results_row'] or result_dict['log']}")
+            print(f"{result_dict['job_id']} {result_dict['status']}: run {result_dict['run_id']}")
     elif arg_dict.command == "watch":
         watch_queue(path_dict, arg_dict.interval)
     elif arg_dict.command == "test-email":

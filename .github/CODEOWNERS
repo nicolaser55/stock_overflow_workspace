@@ -56,6 +56,7 @@
 /scripts/check_environment.py @nicolaser55
 /scripts/setup_so_agent.ps1 @nicolaser55
 /scripts/check_agent_access.py @nicolaser55
+/scripts/reset_records.py @nicolaser55
 /tests/run_all_tests.py @nicolaser55
 /tests/temporary_data_root.py @nicolaser55
 /tests/test_holdout.py @nicolaser55
@@ -64,6 +65,7 @@
 /tests/test_trial_log_append.py @nicolaser55
 /tests/test_runner*.py @nicolaser55
 /tests/test_tools.py @nicolaser55
+/tests/test_grades.py @nicolaser55
 /tests/runner_*_design.py @nicolaser55
 /tests/synthetic_data.py @nicolaser55
 /.github/ @nicolaser55
