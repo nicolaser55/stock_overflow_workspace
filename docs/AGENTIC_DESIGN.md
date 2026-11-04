@@ -17,7 +17,9 @@ through the same files, so the target grows by adding roles, never by rebuilding
 ## 1. Purpose and principle
 
 The system researches, implements and tests long-only, unlevered SPY strategies autonomously and tells Nicolas when
-something survives. Nicolas then freezes it and evaluates it himself, outside the system, on data that did not exist
+something survives. **The goal is a total return above buy-and-hold** (after costs, out of sample); a high ratio of
+take-profit to stop-loss exits is not a goal in itself (decided by Nicolas, 2026-11-04). "Thesis" in these documents
+means a standard of rigour (referenced, traceable, honest), not a publication (Nicolas, 2026-11-04). Nicolas then freezes it and evaluates it himself, outside the system, on data that did not exist
 when it was frozen (paper trading, section 11), before any money is used.
 
 Principle: **agents may be wrong, careless or adversarial by accident, and the system must still produce honest
@@ -27,7 +29,7 @@ permissions, firewall rules and GitHub rules, never by instructions alone:
 | Boundary | Meaning | Enforced by |
 |---|---|---|
 | **Who decides success** | A pass or fail comes from fixed code that no agent can change, and design code cannot reach that code | The protected core (section 4); the referee is the commit Nicolas deployed (4.2); design code runs under its own account (3.2) |
-| **What gets counted** | Every design tested on market data is recorded and raises the multiple-testing bar | Market data is read only by the runner; agents never see run folders or price files (6.4); no agent that reads the web can run code (3.1) |
+| **What gets counted** | Every design tested on market data is recorded; from the judge v1 freeze on, every design raises the multiple-testing bar (the pilot before the freeze is shown in a reported view, 6.7) | Market data is read only by the runner; agents never see run folders or price files (6.4); no agent that reads the web can run code (3.1) |
 | **What agents can see and change** | Agents never see reserved data or detailed results they should not see, never write records, never change the core | Windows accounts with allow-list ACLs (section 3); results visible only as grades (6.5); GitHub rulesets (10.3) |
 
 **A known limit, accepted (decided 2026-10-28).** The models that power the agents were trained on text that covers
@@ -219,7 +221,8 @@ reports, trial log, run index, queue folders, logs, checks or view files (`scrip
   check is a code bug the coder must fix and says nothing about performance (decided 2026-11-03). A crash carries the
   exception type, the message with every digit outside identifiers replaced by `#`, and the code locations; source
   lines and printed values are dropped. It also carries what a retry needs, so `run_queue.py retry` reads it.
-- **A rejected job** (never run, no run id, not counted) gets a status for the coder and no grade (decided 2026-11-03).
+- **A rejected job** (never run, no run id, not counted) gets a status for the coder and no grade (built 2026-11-03,
+  confirmed by Nicolas 2026-11-04): a grade describes a run; a refused submission is the coder's to fix.
 - **Stage 1: one account for planner and coder** (decided 2026-11-03). `so_agent` is in both reader groups, so in
   stage 1 the coder could read grades (no numbers). R5 gives the planner its own account; only the group memberships
   change.
@@ -331,7 +334,7 @@ The system should get more efficient over time (decided). Rules:
 ### 10.1 Two kinds of restrictions (decided 2026-10-28)
 | Kind | Examples | When |
 |---|---|---|
-| **Protect the results** | only the runner writes records; every attempt counted; deployed referee; agents never see run folders, prices, reserved data or detailed results; pre-registration; kill switch | **Always on whenever a run uses real market data**, stage 1 included. A result produced while one was off is discarded and rerun |
+| **Protect the results** | only the runner writes records; every attempt counted (from the freeze on; the pilot, 6.7); deployed referee; agents never see run folders, prices, reserved data or detailed results; pre-registration; kill switch | **Always on whenever a run uses real market data**, stage 1 included. A result produced while one was off is discarded and rerun |
 | **Protect the system from a mess** | firewall rules, disk quotas, GitHub rulesets and machine account, so_design sandbox, separate so_web account, provider-side spend limit | Before stage 2 (unattended). Relaxed while building and testing on synthetic data |
 
 ### 10.2 Budgets and the kill switch
@@ -372,12 +375,19 @@ buy-and-hold for months), the test used, and three possible outcomes:
 - **not rejected** (never "proven");
 - **not enough evidence yet**.
 
+**What the live test can show (decided 2026-11-04).** Nicolas intends about 2-3 months of live data before deciding
+on money; the duration is set per strategy, depending on the model and how it trades. That span is a mechanical and
+behavioural check (data and fills work; time in the market, trade frequency and the gaps from buy-and-hold match the
+backtest), not proof of an edge: a few months can only detect an edge far larger than a realistic one. The evidence
+for an edge comes from the development verdict and from data after the designing model's training cutoff (below).
+
 Paper-trading results stay outside the system and the public repository (section 8). The registered holdout window
 and other markets are secondary and robustness checks (section 7). Only after a "not rejected" does Nicolas consider
 real money.
 
-**Option kept for later (proposed):** a strategy designed by an older model whose training ended before a date D can
-also be evaluated honestly on data after D, without waiting.
+**Training-cutoff evaluation (planned, decided 2026-11-04; built with the model choice in R5):** a strategy designed by
+a model whose training ended before a date D can also be evaluated honestly on data after D, without waiting. The run
+records the designing model and its training cutoff, so this window is known for every design.
 
 Expected outcome, stated in advance: as search reaches hundreds of designs the multiple-testing bar rises steeply, and
 the likeliest honest result is many well-documented negatives. That is a valid thesis result.

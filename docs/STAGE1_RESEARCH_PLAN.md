@@ -10,6 +10,12 @@ our data**; "evidence" means what the cited authors report. Use this document wh
 (section 6): remove, add or reorder. (3) Collect the data of section 5 for the ideas that stay. (4) The ledger of
 section 4 decides which ideas are still allowed; the planner picks among them, most promising first.
 
+**Note (2026-11-04).** Written before the pilot scope (design 6.7): the verdict's N is no longer 260 but counts the
+trial log only, from the judge v1 freeze on; "existing experiments" in the family ledger means the nine as rerun at
+the freeze, not their pilot versions. The numbers in sections 2, 6 and 7 are price returns before R4b (cash at 0%) and
+are Nicolas's records: the planner gets a numbers-free brief instead (roadmap R5). After the freeze, a few ideas from
+this list are run by hand before the agents (roadmap, judge v1 freeze).
+
 ---
 
 ## 1. Decisions taken (Nicolas, 2026-10-29)
