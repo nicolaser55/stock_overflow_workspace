@@ -15,8 +15,8 @@
 #   2. Data root: so_agent loses every entry on the data root and on store01-store04 (no read of market data, runs,
 #      the trial log, the run index, the queue folders, checks, VIEW.json). It keeps, by explicit grants:
 #        store04_experiments\queue\pending      read, list and create files (it adds jobs; it cannot delete or rename)
-#        store04_experiments\visible            so_grade_readers and so_status_readers: read this folder and its files
-#                                               (state.json)
+#        store04_experiments\visible            so_grade_readers and so_status_readers: read this folder and the files
+#                                               directly in it (state.json), not grades\ or status\ (no propagation)
 #        store04_experiments\visible\grades     so_grade_readers: read (one grade per run, no numbers)
 #        store04_experiments\visible\status     so_status_readers: read (one technical status per job, no numbers)
 #        control                                read (the kill switch STOP); the control folder's own list is not
@@ -157,8 +157,10 @@ foreach ($folder in @($NicolasWorkspace, $QuarantineRoot, $AgentWorkspace)) {
 
 # 2. THE ONLY GRANTS IN THE DATA ROOT
 Set-Acl-Entry $pendingFolder @("/grant", "${Agent}:(OI)(CI)(RX,W)")
-Set-Acl-Entry $visibleFolder @("/grant", "${GradeGroup}:(OI)RX")
-Set-Acl-Entry $visibleFolder @("/grant", "${StatusGroup}:(OI)RX")
+# (OI)(NP): THIS FOLDER AND THE FILES DIRECTLY IN IT ONLY. A PLAIN (OI) ENTRY WOULD ALSO REACH THE FILES INSIDE grades\ AND
+# status\ (WINDOWS PASSES IT TO SUBFOLDERS AS INHERIT-ONLY), SO EACH GROUP COULD READ THE OTHER'S FOLDER
+Set-Acl-Entry $visibleFolder @("/grant", "${GradeGroup}:(OI)(NP)RX")
+Set-Acl-Entry $visibleFolder @("/grant", "${StatusGroup}:(OI)(NP)RX")
 Set-Acl-Entry $gradeFolder @("/grant", "${GradeGroup}:(OI)(CI)RX")
 Set-Acl-Entry $statusFolder @("/grant", "${StatusGroup}:(OI)(CI)RX")
 # THE KILL SWITCH MUST STAY READABLE: A FLAG THE AGENT CANNOT SEE WOULD LOOK LIKE "NOT SET" TO A CARELESS CHECK
