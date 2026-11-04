@@ -138,9 +138,21 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] Tests: `tests/test_grades.py` (every combination of verdict parts, vocabulary without digits, scrubber, trimmed
   state, grade and status files end to end on an allow-list, retry from the status, the switch both ways, the reset);
   additions to `tests/test_runner_protocol.py`, `tests/test_runner_verdict.py`, `tests/test_tools.py`.
-- [ ] On nicodesktop: merge, deploy (`deploy_runner.ps1` as so_runner), run `setup_so_agent.ps1` as administrator, the
-  access check as so_agent (with the sample list) and as so_runner; queue nothing new until both pass. Check the
-  scrubber against real failed and rejected job files (`queue\failed`, `queue\rejected`) after the first crash.
+- [x] On nicodesktop (2026-11-04): merged (PR #19, then #20 with a deploy-script fix), deployed as so_runner (runner
+  clone and `refs/deployed` at `6d71c1c`; `visible\state.json` written, the old zone-root `state.json` gone),
+  `setup_so_agent.ps1` run as administrator, `check_agent_access.py` passed as so_agent (53 checks, every denial on
+  real files: a report, a manifest, the run index, the trial log, a finished job, a run log, one file per market-data
+  zone, the view files) and as so_runner (37 checks). A job so_agent queued with a design outside `experiments/` was
+  rejected; so_agent read its status (reason, no digits) and `state.json`, and was refused `queue\rejected`.
+- Fixes found while applying it (all merged 2026-11-04): `deploy_runner.ps1` read the running job from the old
+  `state.json` (PR #20); a local group description may hold at most 48 characters (PR #21); a plain `(OI)` grant on
+  `visible\` reached the files inside `grades\` and `status\`, now `(OI)(NP)` (PR #22, caught by the script's
+  read-back); **a deny of icacls `W` holds SYNCHRONIZE and READ_CONTROL**, so so_agent could not open any file in
+  Nicolas's workspace or start Python there; this was already true of the earlier script, whose access check only
+  listed folders. Denies now name the write rights one by one (PR #23).
+- [ ] The scrubber on a real crash: `queue\failed` and `queue\rejected` were empty on 2026-11-04, so it has only been
+  tested on synthetic tracebacks; read the first real crash's status file.
+- [ ] The first real grade file read by so_agent (comes with the freeze rerun).
 
 **Done when** an agent account can read the grade of a run and nothing else about it.
 
@@ -175,6 +187,11 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] A data dictionary for the blind coder: the columns, types and availability clocks of every registered source,
   without values (the coder cannot read the data folder since R4).
 
+- [ ] How agents are isolated, decided with the runtime (decided 2026-11-04): if the chosen agent tool runs in a
+  container, agents run in containers with only `visible\` (read-only), `queue\pending` and their own clone mounted,
+  and no network beyond GitHub and package mirrors; the Windows accounts and ACLs of R4 stay underneath as a second
+  layer. An editor-based tool on the Windows desktop keeps the Windows accounts. Containers stay the first choice for
+  the R7 network limits and the design-code sandbox. The agent's Python then needs a Linux copy of the package lock.
 - [ ] Choose the agent runtime and model (requirements in design section 12; options and a bake-off in
   `claude/PROPOSAL_2026-10-29_models_and_setups.md`); provider-side monthly spend limit of **USD 25** on the system's
   own key (decided 2026-10-28; revised when the workload is known).
@@ -205,7 +222,10 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   time by the runner; decisions back. Also closes a channel R4 leaves: design code running as so_runner could copy
   numbers into `visible\` (R4, 2026-11-03).
 - [ ] Accounts: so_agent renamed so_code; so_web created (no code execution); firewall rules; NTFS quotas.
-- [ ] Setup scripts reproduce the machine (accounts, ACLs including `control` and the run folders, tasks).
+- [ ] Setup scripts reproduce the machine (accounts, ACLs including `control` and the run folders, tasks). Known
+  mismatch (2026-11-04): on store01-03 so_runner has only the read inherited from the data root; the deny that
+  `setup_so_runner.ps1` describes was never applied (harmless: read-only). Rerun and check that script on purpose, not
+  as a side effect.
 - [ ] GitHub machine account and rulesets re-enabled (design 10.3).
 - [ ] NAS backups of trial log, run index, manifests, summaries.
 - [ ] Base Python moved out of Nicolas's profile.
