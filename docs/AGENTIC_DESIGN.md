@@ -425,6 +425,8 @@ The living plan with status is `docs/AGENTIC_ROADMAP.md`. In short: apply A3 →
 - The counted check of the deflated Sharpe ratio: a diagnostic first, a core change only if the approximation is too
   lenient; inside the judge v1 freeze (4.4).
 - How an auditor's veto is recorded against a graded pass (R6).
+- How agents are isolated: containers (only the allowed folders mounted, network limited) or Windows accounts; decided
+  with the agent runtime in R5 (roadmap R5, 2026-11-04). The R4 ACLs stay either way.
 - Screening design (flag of the full run, proposed), when research agents need it.
 - Accounts for the planner and auditor in the target (own accounts, or roles within existing ones).
 - Data request channel format (file plus email) until an ingest pipeline exists.
