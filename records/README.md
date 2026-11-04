@@ -8,11 +8,13 @@ Versioned CSV records (the root `.gitignore` excludes `*.csv` except in this fol
 | `holdout_windows.csv` | The registered holdout windows (start, end, status) | `scripts/holdout_window.py` (append; a retired row is filled once) |
 | `bad_tick_corrections.csv` | The 62 raw cells corrected on 2026-10-04 by the bad-tick rule | `scripts/fix_raw_bad_ticks.py --apply` (append) |
 | `bad_tick_invalidated_dates.csv` | The per-day pipeline files rebuilt after that correction | final, never edited |
-| `legacy/trial_log_snapshot_20261022.csv` | The trial log of 2026-10-05 -> 2026-10-22 (7,712 rows), deleted at the 2026-10-22 reset and restored from commit `237f60c^` on 2026-10-25 | final, never edited |
-| `legacy/audit_trials_20261005.csv` | The 2026-10-05 bad-tick audit trials (1,584 rows), restored the same way | final, never edited |
+| `legacy/pilot_designs.csv` | The tried-designs ledger: every design tried before the judge v1 freeze (the pilot phase), as source, experiment, stage and settings only (no results, no window dates, no notes). Made on 2026-11-03 from the two pre-reset records (the trial log of 2026-10-05 -> 2026-10-22 and the 2026-10-05 bad-tick audit trials; 9,296 rows, 260 designs, same design keys); those files and their numbers were removed from the repository (they stay in git history) | `scripts/reset_records.py` (append only) |
+| `agent_phase.txt` | The phase switch: `development` until roadmap R6, then `agents` (results log in grades only; no more resets) | Nicolas, by a one-line merge |
 
-The two legacy files count in the multiple-testing adjustment (`so/core/multiple_testing.py`): every design tried on
-this development data raises the bar, including those tried before the reset (Nicolas, 2026-10-25).
+The ledger does not enter the verdict (decided by Nicolas on 2026-11-03): the pilot was run with earlier, less robust
+code and its results were discarded. The verdict's multiple-testing N counts the trial log only; every report also
+shows the multiple-testing part with the pilot designs included, so the effect of that choice is visible
+(`so/core/multiple_testing.py`). From R6 nothing is reset and everything counts.
 
 The holdout evaluation ledger (`holdout_evaluations.csv`, one row per evaluation with its results) is not here: it lives
 under `SO_HOLDOUT_PATH`, which agents cannot read, so holdout outcomes never reach design work.

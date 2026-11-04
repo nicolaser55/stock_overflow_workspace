@@ -20,10 +20,11 @@ Every experiment appends one row per evaluated configuration: each exploration r
 candidate of each fold and each test evaluation. The log is the evidence of how many configurations were tried before a
 result was obtained (multiple testing) and of whether a test window had already been seen. Never edit or delete rows.
 
-The records from before the 2026-10-22 reset are kept, read-only, in records/legacy/: the trial log of 2026-10-05 ->
-2026-10-22 (trial_log_snapshot_20261022.csv, which contains the 2026-10-05 legacy rows) and the 2026-10-05 audit trials
-(audit_trials_20261005.csv). They were restored from git history on 2026-10-25 (audit B5) and count in the
-multiple-testing adjustment (so.core.multiple_testing).
+The designs tried before the judge v1 freeze (the pilot phase, including the records from before the 2026-10-22
+reset) are kept, as family and settings only, in the tried-designs ledger records/legacy/pilot_designs.csv
+(2026-11-03). They are shown in every report's pilot-included multiple-testing view but do not enter the verdict's N
+(so.core.multiple_testing). scripts/reset_records.py (development phase only) adds this log's designs to the ledger
+before it moves the log aside.
 
 From 2026-10-20 a new trial_id includes the process id, so two processes that log in the same microsecond do not
 share an id. One row is "{timestamp}_{pid}_{config_hash}". A row written in a batch is

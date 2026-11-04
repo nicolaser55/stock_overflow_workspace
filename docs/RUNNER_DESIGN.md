@@ -124,7 +124,10 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   windows; audit S1, a data-dependent amendment because exp13 failed only the old rule); baselines (constant exposure
   with a 0.05 dead band, random timing on the realized exposure); look-ahead; multiple testing (deflated Sharpe
   ratio of quarterly excess returns at 0.95 or more, and random-timing p-value at most 0.05 / N, N = designs tried on
-  the development data including the pre-reset records; `so.core.multiple_testing`, audit B5). **The random-timing
+  the development data in the trial log; `so.core.multiple_testing`, audit B5). **Pilot scope (R4, decided
+  2026-11-03):** the designs of the pilot phase (before the judge v1 freeze, `records/legacy/pilot_designs.csv`, family
+  and settings only) do not enter the verdict's N; the report also shows the part with them included (deflated Sharpe at
+  that N, random timing from the same counted draws, whose budget is sized for the larger N when it fits the maximum). **The random-timing
   p-value is counted, not fitted (R3, 2026-11-02):** p = (k + 1) / (M + 1), k = draws at or above the path; the runner
   extends the 100 registered draws (same seed sequence, same code, 4 worker processes, batches of 1,000) up to the
   budget M + 1 = ceil(2 N / 0.05) (10,400 draws at N = 260; at most 1 draw at or above the path passes) and stops as
@@ -132,7 +135,12 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   registered draws. A budget above 200,000 draws, a reduced seed count (tests) or other seeds draw nothing extra and
   cannot pass. The normal fit used before was too lenient: 35 and 37 of 10,000 draws above its critical value where
   1.9 were expected (exp04, exp02; `scripts/check_random_timing_tail.py`). The report also shows
-  the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02 (not part of the verdict).
+  the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02 (not part of the verdict), each with the return
+  check re-applied (R4: the grade uses the 0.00 row; fees are charged at every level).
+- **Grade (R4, 2026-11-03):** `so.runner.grade` turns the verdict into one of the six grades of design 6.5 with one
+  reason from a fixed list (first failing check: look-ahead, return even at zero slippage, return only at the standard
+  slippage, consistency, baselines or multiple testing; a run without a verdict is a technical problem). The run writes
+  it into `report.json` (`grade_dict`), `report.md` and the manifest's verdict (`grade`, `grade_reason_code`).
 - **Pre-registration (audit S5):** `so.runner.preregistration` refuses a development run whose version already ran
   with different design-folder code, a first run of a new version without a `preregister` last commit or without the
   required protocol sections and "Derived from:" line, and a fourth version of an experiment. **Shared helpers (R3,
@@ -158,7 +166,15 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   `queue/rejected/` with the reason. A claimed job lives in `queue/running/` with its run id and judge commit; after a
   crash or reboot it is resumed under the same run id and judge (at most twice, then filed as failed). A thread
   refreshes `state.json` every 60 s while a job runs; `state.json` also shows the commit of the queue script
-  (`queue_commit`) and the judge new jobs would get (`deployed_commit`, empty when nothing is deployed).
+  (`queue_commit`) and the judge new jobs would get (`deployed_commit`, empty when nothing is deployed). **Agent view
+  (R4, 2026-11-03):** `state.json` lives in `store04_experiments/visible/` and holds identifiers only (the running job's
+  job id, design, commits, run id, attempt and times; the last 20 jobs as job id, run id and status `ran` / `crashed` /
+  `timeout` / `rejected`); the full-result `state.json` of earlier versions at the zone root is removed on the first
+  write. Each filed job also gets `visible/status/<job_id>.json` (the coder's technical status: status, look-ahead
+  status of a run that ran, the scrubbed error or rejection reason, the retry fields) and each run
+  `visible/grades/<run_id>.json` (the planner's grade). A rejected job gets a status, no grade. `retry` reads the status
+  file; the runner still checks a retry against `queue/failed/`. The console prints no results row. Only `visible/`,
+  `queue/pending/` and `control/` are open to agents (`scripts/setup_so_agent.ps1`).
   `run_index.csv` is rewritten with the current columns (a copy is kept) when it only lacks columns. A failed job is
   emailed and can be retried under the same run id and judge (it resumes from the checkpoints). On Windows a reader
   that holds `state.json` open blocks its replacement for a moment: the write is retried for about 5 seconds, and a
@@ -177,7 +193,7 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
 - **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected
-  `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (they enter the multiple-testing N) and the package
+  `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (the tried-designs ledger; the pilot-included multiple-testing view since R4) and the package
   lock `requirements/venv_main_lock.txt` (R3, 2026-10-29), as paths and LF-normalized contents. The report
   (`judge_hash_str`), the manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge
   hash were scored by identical rules; a core change changes the hash, so results judged by different rules are never

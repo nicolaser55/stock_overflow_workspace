@@ -107,23 +107,54 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
   `so.core.multiple_testing`; tests prove the extra draws equal the one-by-one draws, the stop point, the worker count
   independence and the strict fallbacks). The 95%-of-100-draws baseline part is unchanged. No past verdict changes:
   all nine experiments fail other parts.
-- [ ] On nicodesktop: merge and deploy (the judge changes).
-- [ ] Later (not blocking): a counted check of the deflated Sharpe ratio, which also rests on a normal-type
+- [x] On nicodesktop: merge and deploy (the judge changes): PR #18, `134f716`, deployed as the referee (stated in the
+  R4 handoff of 2026-11-03).
+- [ ] Moved into the judge v1 freeze (below; decided 2026-11-03): a counted check of the deflated Sharpe ratio, which also rests on a normal-type
   approximation (it corrects for skew and kurtosis, so it is less exposed). Keep the normal approximation only if it is fair or conservative; otherwise a core change follows.
 
 **Done when** the tail check has been read and its consequence decided. **Decided 2026-11-02**; done once deployed.
 
 ## R4. Results visible only as grades (decided; before any agent works with real data)
 
-- [ ] Run folders, trial log and run index readable only by so_runner and Nicolas (ACLs).
-- [ ] The runner writes a **graded summary** per run (grade and reason, design 6.5; identifiers; no numbers) into a
-  folder the planner may read, and a **technical status** (ran / crashed + cleaned error / rejected + reason) the coder
-  may read.
-- [ ] Grade mapping for verdicts with several failed parts (open, decide when built).
-- [ ] `scripts/append_results_log.py` writes grades and identifiers only, no returns, once agents run (decided
-  2026-10-28).
+Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11-03 in design 6.4, 6.5, 6.7 and 4.4.
+
+- [x] Run folders, trial log, run index, queue records, logs, checks and market data readable only by so_runner and
+  Nicolas: `scripts/setup_so_agent.ps1` removes so_agent's read of the whole data root and grants only
+  `queue\pending`, `visible\` (two reader groups: `so_grade_readers`, `so_status_readers`; so_agent in both for stage
+  1) and `control`; it saves the ACLs first and reads them back. The folders next to the data root (`archive`,
+  `backup_records`, `move_logs`, `runner_workspace`) were checked on 2026-11-03: closed to so_agent already.
+- [x] The runner writes a **graded summary** per run (`visible/grades/<run_id>.json`: grade, reason, audit state,
+  identifiers; no numbers) and a **technical status** per job (`visible/status/<job_id>.json`: ran / crashed / timeout
+  / rejected, look-ahead status, scrubbed error, retry fields). `state.json` moved into `visible/`, trimmed to
+  identifiers; the old one is removed. `retry` reads the status file. The console prints no results row.
+- [x] Grade mapping (design 6.5): technical (no verdict, look-ahead) -> not better than buy-and-hold (fails even at
+  zero slippage) -> gain disappears after costs -> inconsistent -> could be luck (baselines, multiple testing) -> pass
+  (audit pending). The cost-sensitivity rows re-apply the full return check. Rejected jobs: status only.
+- [x] `scripts/append_results_log.py` writes grades and identifiers only once the switch `records/agent_phase.txt` says
+  `agents` (a protected record, not hashed into the judge); it says `development` until R6.
+- [x] Pilot scope (design 6.7): the verdict's N is the trial log; the pre-reset records slimmed into the tried-designs
+  ledger `records/legacy/pilot_designs.csv` (family and settings only, 260 designs, same keys; their numbers removed
+  from `main`); every report shows the pilot-included view; `scripts/reset_records.py` for development resets.
+- [x] Tests: `tests/test_grades.py` (every combination of verdict parts, vocabulary without digits, scrubber, trimmed
+  state, grade and status files end to end on an allow-list, retry from the status, the switch both ways, the reset);
+  additions to `tests/test_runner_protocol.py`, `tests/test_runner_verdict.py`, `tests/test_tools.py`.
+- [ ] On nicodesktop: merge, deploy (`deploy_runner.ps1` as so_runner), run `setup_so_agent.ps1` as administrator, the
+  access check as so_agent (with the sample list) and as so_runner; queue nothing new until both pass. Check the
+  scrubber against real failed and rejected job files (`queue\failed`, `queue\rejected`) after the first crash.
 
 **Done when** an agent account can read the grade of a run and nothing else about it.
+
+## Judge v1 freeze (decided 2026-11-03; design 4.4)
+
+- [x] R4 (judge hash changes; no number changes).
+- [x] Pilot ledger and pilot scope (judge hash changes; the verdict's N falls from 260 to the trial log's count).
+- [ ] R4b total returns (every number changes).
+- [ ] Counted check of the deflated Sharpe ratio: a diagnostic script first (like `check_random_timing_tail.py`, on
+  exp04 and exp02); a core change only if the approximation lets too many designs through; or dropped with a reason.
+- [ ] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
+  nine: the baseline.
+- [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
+  fast daily experiments reproduce every number exactly); a scoring change means a full rerun.
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 
@@ -139,6 +170,10 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
 ## R5. Stage 1 build: planner and blind coder (decided)
 
 - [ ] Trial rows and manifests record the model(s) that designed the experiment (moved from R3; design section 1).
+- [ ] The planner gets its own Windows account in `so_grade_readers` only; the coder (so_agent, renamed so_code) leaves
+  `so_grade_readers` (decided 2026-11-03; only memberships change).
+- [ ] A data dictionary for the blind coder: the columns, types and availability clocks of every registered source,
+  without values (the coder cannot read the data folder since R4).
 
 - [ ] Choose the agent runtime and model (requirements in design section 12; options and a bake-off in
   `claude/PROPOSAL_2026-10-29_models_and_setups.md`); provider-side monthly spend limit of **USD 25** on the system's
@@ -155,7 +190,10 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
 ## R6. Stage 1 supervised cycles
 
 - [ ] Nicolas reviews and approves every pull request before its job is queued (this replaces the sandbox in stage 1).
-- [ ] Nicolas reads every result email and acts as auditor (veto only).
+- [ ] Nicolas reads every result email and acts as auditor (veto only); a veto is recorded against the graded pass (a
+  field or file the planner reads; format to define).
+- [ ] Flip `records/agent_phase.txt` to `agents` by a one-line merge just before the first supervised cycle (results
+  log in grades only; no more resets). From then on no number of an agent-era run goes into the repository.
 - [ ] A pass is frozen (commit + tag), a forward protocol is written for it (design 11), and paper trading starts;
   the rest keeps running.
 
@@ -164,7 +202,8 @@ after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp0
 ## R7. Before stage 2 (unattended); all required
 
 - [ ] **A4 sandbox under so_design** (design 3.2): no network, no data root, no records, no secrets; rows fed point in
-  time by the runner; decisions back.
+  time by the runner; decisions back. Also closes a channel R4 leaves: design code running as so_runner could copy
+  numbers into `visible\` (R4, 2026-11-03).
 - [ ] Accounts: so_agent renamed so_code; so_web created (no code execution); firewall rules; NTFS quotas.
 - [ ] Setup scripts reproduce the machine (accounts, ACLs including `control` and the run folders, tasks).
 - [ ] GitHub machine account and rulesets re-enabled (design 10.3).

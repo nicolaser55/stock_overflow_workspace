@@ -24,6 +24,7 @@ Suite (fast set marked F):
     test_rolling_retrain.py       F  retrain calendar, template refit log
     test_trial_log_append.py      F  locked CSV append (concurrent rows, byte prefix, refused header and newline, lock timeout)
     test_tools.py                 F  run queue, state, email, protected paths, package lock
+    test_grades.py                F  grades, technical status, scrubber, trimmed state, results-log switch, reset (R4)
     test_execute_notebook.py      F  notebook execution saves a failed run
     test_runner.py                F  runner view, daily loop, fractional engine
     test_runner_engines.py        F  barrier and trailing-stop engines vs the old simulators
@@ -41,7 +42,7 @@ Suite (fast set marked F):
 
 # DEFINE THE SUITES AND THE FAST SET
 SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_vix_features.py", "test_holdout.py",
-              "test_point_in_time.py", "test_rolling_retrain.py", "test_trial_log_append.py", "test_tools.py",
+              "test_point_in_time.py", "test_rolling_retrain.py", "test_trial_log_append.py", "test_tools.py", "test_grades.py",
               "test_execute_notebook.py", "test_runner.py", "test_runner_engines.py", "test_runner_candidates.py",
               "test_runner_verdict.py", "test_runner_guard.py", "test_runner_judge.py", "test_runner_protocol.py", "test_runner_lookahead.py", "test_runner_holdout.py",
               "test_refresh_development_view.py", "test_runner_minute.py", "test_experiments.py"]

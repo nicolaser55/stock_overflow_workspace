@@ -8,16 +8,19 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
 
 1. `README.md`: layout, commands, data folders.
 2. `.cursor/rules/research-integrity.mdc`: what you may and may not do. Its "Never" rules override everything else.
-3. `docs/RESULTS_LOG.md`: every run so far.
+3. `docs/RESULTS_LOG.md`: every run so far (once agents run, new rows hold identifiers, grade and reason only).
 4. `experiments/README.md` and the `PROTOCOL.md` of the experiment you work on.
 5. `docs/RUNNER_DESIGN.md` when you touch a design (what the runner guarantees and what a design writes).
 
 ## How work is done
 
 - Account and folders: you run as `so_agent` in your own clone. You can write only in that clone and in
-  `store04_experiments/queue/pending/` (new jobs). Runs, the trial log and the run index are written by the runner
-  account `so_runner`, never by you. You cannot read the quarantine or the holdout results. An "access denied" is a
-  boundary: stop that action and report it; never work around it.
+  `store04_experiments/queue/pending/` (new jobs). In the data folder you can read only
+  `store04_experiments/visible/` (`state.json`; `grades/` and `status/`, below) and `control/`. Market data, run
+  folders, reports, the trial log, the run index, the queue's other folders and logs, the quarantine and the holdout
+  are closed to you (roadmap R4): they are written and read by the runner account `so_runner` and Nicolas. An "access
+  denied" is a boundary: stop that action and report it; never work around it, and never try to obtain market prices
+  or results another way.
 - Kill switch: if the file `<data root>\control\STOP` exists, start nothing new (no run, no search, no screening) and
   report that you stopped. Only Nicolas creates or removes it.
 - Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
@@ -34,16 +37,24 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   records the commit; uncommitted changes in the experiment folder are refused). A job brings only `experiments/**`:
   the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the commit Nicolas last deployed,
   so a commit that changes other files, or is based on `main` commits not deployed yet, is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
-  The runner writes the report, the manifest and a `run_index.csv` row. Read results from those files
-  (`scripts\run_queue.py status`, `store04_experiments/runs/<run id>/report.md`), never from memory. A failed job
-  emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id.
+  The runner writes the report, the manifest and a `run_index.csv` row, which only it and Nicolas read. What you see
+  (no numbers, by design: doers do not grade their own work):
+  - `store04_experiments/visible/status/<job id>.json`, the technical status (for the coder): `ran`, `crashed`,
+    `timeout` or `rejected`; for a run that ran, its look-ahead status (`look_ahead_failed: true` means the design
+    used future data: a bug to fix); for a crash, the error type, the message with every number replaced by `#` and
+    the code locations; for a rejection, the reason.
+  - `store04_experiments/visible/grades/<run id>.json`, the grade (for the planner): one of the six grades of
+    `docs/AGENTIC_DESIGN.md` 6.5, its reason and the audit state.
+  - `scripts\run_queue.py status`: the running job, the queue and the last 20 jobs (job id, run id, status).
+  A crashed or timed-out job emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id
+  (it reads the status file).
 - A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
   selection rule, stopping rule, trial budget) and commit it with `config.py`, `design.py` and tests before the first
   run (message `preregister expNN`). Any change after a run is a new protocol version, including a change to a shared
   helper under `so/` that the design imports. The runner enforces this (`so/runner/preregistration.py`) and counts every
   design you try against the multiple-testing bar.
-- Writing: separate implemented / tested / observed / intended / inferred. Quote numbers with their file. Report the
-  prior-only result, the baselines and the look-ahead status; never present a result as stronger than the evidence.
+- Writing: separate implemented / tested / observed / intended / inferred. Quote grades and statuses with their file;
+  never quote a number you did not get from a file you may read; never present a result as stronger than the evidence.
 
 ## Decisions that are Nicolas's
 

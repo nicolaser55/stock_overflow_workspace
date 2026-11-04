@@ -72,6 +72,7 @@ scripts/check_protected_paths.py
 scripts/check_environment.py
 scripts/setup_so_agent.ps1
 scripts/check_agent_access.py
+scripts/reset_records.py
 
 # Tests of the guards and the runner, and the test runner itself
 tests/run_all_tests.py
@@ -82,6 +83,7 @@ tests/test_refresh_development_view.py
 tests/test_trial_log_append.py
 tests/test_runner*.py
 tests/test_tools.py
+tests/test_grades.py
 tests/runner_*_design.py
 tests/synthetic_data.py
 
