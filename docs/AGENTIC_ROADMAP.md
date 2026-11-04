@@ -167,6 +167,10 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   nine: the baseline.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
   fast daily experiments reproduce every number exactly); a scoring change means a full rerun.
+- [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
+  pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
+  check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
+  then the agents carry on the work.
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 
@@ -180,6 +184,12 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 **Done when** every verdict compares total returns on both sides.
 
 ## R5. Stage 1 build: planner and blind coder (decided)
+
+- [ ] Plan the training-cutoff evaluation with the model choice (design 11, decided 2026-11-04): every design records
+  its model and that model's training cutoff.
+- [ ] A numbers-free brief for the planner (review 2026-11-04, point C): the idea list, the family ledger and the
+  grades of the baseline runs; `docs/STAGE1_RESEARCH_PLAN.md`, the roadmap and the earlier results-log rows stay
+  Nicolas's records.
 
 - [ ] Trial rows and manifests record the model(s) that designed the experiment (moved from R3; design section 1).
 - [ ] The planner gets its own Windows account in `so_grade_readers` only; the coder (so_agent, renamed so_code) leaves
@@ -212,7 +222,8 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] Flip `records/agent_phase.txt` to `agents` by a one-line merge just before the first supervised cycle (results
   log in grades only; no more resets). From then on no number of an agent-era run goes into the repository.
 - [ ] A pass is frozen (commit + tag), a forward protocol is written for it (design 11), and paper trading starts;
-  the rest keeps running.
+  the rest keeps running. Its duration is set per strategy (about 2-3 months intended): a mechanical and behavioural
+  check, not proof of an edge (decided 2026-11-04).
 
 **Done when** several cycles ran with no integrity problem.
 
