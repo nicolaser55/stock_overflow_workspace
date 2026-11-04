@@ -80,11 +80,13 @@ foreach ($folder in @($DataRoot, $NicolasWorkspace, $QuarantineRoot, $RunnerWork
     Set-Acl-Entry $folder @("/remove:g", $Runner, "/remove:d", $Runner)
 }
 
+# THE DENIED RIGHTS ARE LISTED ONE BY ONE: icacls "W" IS GENERIC WRITE, WHICH ALSO HOLDS SYNCHRONIZE AND READ CONTROL, SO
+# DENYING "W" STOPS THE ACCOUNT FROM OPENING ANY FILE AT ALL, READS AND PROGRAM STARTS INCLUDED (FOUND 2026-11-04)
 # 2. DATA ROOT: READ EVERYTHING, WRITE store04_experiments
 Set-Acl-Entry $DataRoot @("/grant", "${Runner}:(OI)(CI)RX")
 foreach ($zone in @("store01_rawzone", "store02_workzone", "store03_goldzone")) {
     $zonePath = Join-Path $DataRoot $zone
-    if (Test-Path $zonePath) { Set-Acl-Entry $zonePath @("/deny", "${Runner}:(OI)(CI)(W,D,DC)") }
+    if (Test-Path $zonePath) { Set-Acl-Entry $zonePath @("/deny", "${Runner}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)") }
 }
 Set-Acl-Entry $experimentZone @("/grant", "${Runner}:(OI)(CI)M")
 
@@ -98,7 +100,7 @@ if ($HoldoutPath -ne "") {
 
 # 4. NICOLAS'S WORKSPACE: READ AND RUN ONLY
 Set-Acl-Entry $NicolasWorkspace @("/grant", "${Runner}:(OI)(CI)RX")
-Set-Acl-Entry $NicolasWorkspace @("/deny", "${Runner}:(OI)(CI)(W,D,DC)")
+Set-Acl-Entry $NicolasWorkspace @("/deny", "${Runner}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)")
 
 # 5. THE RUNNER'S OWN CLONE
 Set-Acl-Entry $RunnerWorkspace @("/grant", "${Runner}:(OI)(CI)F")
