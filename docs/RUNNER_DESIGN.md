@@ -180,8 +180,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   that holds `state.json` open blocks its replacement for a moment: the write is retried for about 5 seconds, and a
   failed watch loop is logged and retried after the pause instead of stopping the task (R3). A stale lock from a
   dead process is replaced. Agents can only add job files. **Email (A3):** one email per finished run, positive or
-  negative (verdict, failed parts, returns, N, judge hash, commits, paths; "PASS, audit pending" when every part
-  passed), one per failed, timed-out or abandoned job, none for a rejected job. **Kill switch (A3):** while
+  negative (verdict, failed parts, the grade the planner sees and its reason code, returns, N and the
+  multiple-testing result with the pilot designs included (R4), judge hash, commits, paths; "PASS, audit pending" when
+  every part passed), one per failed, timed-out or abandoned job, none for a rejected job. **Kill switch (A3):** while
   `<SO_DATA_PATH>/control/STOP` exists (or the file named by `SO_STOP_FLAG_PATH`) the runner starts and resumes
   nothing; a running job finishes; `state.json` shows `"stopped"`; an unreadable flag counts as set. `scripts/deploy_runner.ps1` (the deploy button) moves the runner clone (the
   queue script itself) to `origin/main`, sets `refs/deployed` to that commit with a reflog entry (time and account;

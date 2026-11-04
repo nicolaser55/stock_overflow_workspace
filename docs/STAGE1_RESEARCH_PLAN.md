@@ -69,7 +69,13 @@ about 77% average exposure, above 58 of 100 random-timing draws (needed 95), def
 - **Full rerun of the nine experiments** after R2-R4b (one batch, exp01 included because its returns change too:
   about 3 hours for the eight daily ones plus 11-14 hours for exp01). The ledger of section 4 and section 2 are then
   updated with the new numbers.
-- **R5** agent runtime chosen (proposal of 2026-10-29), file formats, planner and coder prompts.
+- **Judge v1 freeze** (added 2026-11-04): R4b plus the deflated-Sharpe diagnostic; then the development records are
+  reset (`scripts/reset_records.py`, the count of designs kept) and the nine rerun once, which is the baseline.
+- **A few hand-designed experiments** from this list (decided 2026-11-04), pre-registered and queued by Nicolas and
+  Claude under the same rules, to check the queue, the grades and the status files in practice before agents rely on
+  them.
+- **R5** agent runtime chosen (proposal of 2026-10-29), file formats, planner and coder prompts, a numbers-free brief
+  for the planner, and **no general internet for code-running agents** (decided 2026-11-04).
 
 ---
 

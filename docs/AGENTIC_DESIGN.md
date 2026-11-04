@@ -229,7 +229,8 @@ reports, trial log, run index, queue folders, logs, checks or view files (`scrip
 - **Leaks R4 does not close** (recorded, not hidden): the public git history (the nine baselines' rows, numbers quoted in
   the design documents and commit messages, the pre-reset trial records removed from `main` on 2026-11-03); design code
   runs as so_runner and could copy numbers into `visible\` (stage 1: Nicolas reads every pull request; target: the
-  so_design sandbox, 3.2); an agent with internet access could download prices elsewhere (firewall, R7); the run's
+  so_design sandbox, 3.2); an agent with internet access could download prices elsewhere and test designs on them uncounted (closed before R6:
+  code-running agents get no general internet, roadmap R5, 10.1); the run's
   duration hints at the outcome (a strong path draws more random-timing samples). From R6, no number of an agent-era
   run goes into the repository (documents, commit messages, pull-request text).
 
@@ -334,8 +335,8 @@ The system should get more efficient over time (decided). Rules:
 ### 10.1 Two kinds of restrictions (decided 2026-10-28)
 | Kind | Examples | When |
 |---|---|---|
-| **Protect the results** | only the runner writes records; every attempt counted (from the freeze on; the pilot, 6.7); deployed referee; agents never see run folders, prices, reserved data or detailed results; pre-registration; kill switch | **Always on whenever a run uses real market data**, stage 1 included. A result produced while one was off is discarded and rerun |
-| **Protect the system from a mess** | firewall rules, disk quotas, GitHub rulesets and machine account, so_design sandbox, separate so_web account, provider-side spend limit | Before stage 2 (unattended). Relaxed while building and testing on synthetic data |
+| **Protect the results** | only the runner writes records; every attempt counted (from the freeze on; the pilot, 6.7); deployed referee; agents never see run folders, prices, reserved data or detailed results; **agents that run code have no general internet** (GitHub and package mirrors only), since otherwise they could download prices and test designs privately, uncounted (moved here 2026-11-04); pre-registration; kill switch | **Always on whenever a run uses real market data**, stage 1 included. A result produced while one was off is discarded and rerun |
+| **Protect the system from a mess** | firewall rules beyond that (per-account limits for the target roles), disk quotas, GitHub rulesets and machine account, so_design sandbox, separate so_web account, provider-side spend limit | Before stage 2 (unattended). Relaxed while building and testing on synthetic data |
 
 ### 10.2 Budgets and the kill switch
 - Budgets: per role, plus a **hard monthly spend limit set at the model provider** on the system's own API key (an

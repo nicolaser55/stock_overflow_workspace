@@ -5,8 +5,13 @@
 #       -NicolasWorkspace D:\stock_overflow\workspace -QuarantineRoot <quarantine folder> [-HoldoutPath <folder>] `
 #       [-AclBackupFolder D:\stock_overflow\backup_records]
 #
-# Results visible only as grades (roadmap R4, 2026-11-03). What it does (it can be run again; it only adds, removes or
-# replaces entries of so_agent and of the two reader groups, and never touches nico, Administrators, SYSTEM or so_runner):
+# Results visible only as grades (roadmap R4, 2026-11-03), on the allow-list model of the machine (rebuilt by hand on
+# 2026-10-26, scripted on 2026-11-04, roadmap R7): so_agent can do only what it is granted. No write-deny entries: a
+# deny of icacls "W" also holds SYNCHRONIZE and READ_CONTROL and stops the account from opening any file (Python
+# included). The only denies are full denies on the quarantine and the holdout. Run scripts\setup_so_runner.ps1 first:
+# it removes the drive's inheritance from the root that holds the data root, which this script checks.
+# What it does (it can be run again; it only adds, removes or replaces entries of so_agent and of the two reader
+# groups, and never touches nico, Administrators, SYSTEM or so_runner):
 #   0. Saves the current ACLs of the data root tree (icacls /save) into the ACL backup folder, outside the data root.
 #   1. Creates the local standard user so_agent if it does not exist (asks for a password), and the local groups
 #      so_grade_readers (the planner reads grades) and so_status_readers (the coder reads technical status). In stage 1
@@ -23,12 +28,15 @@
 #                                               otherwise changed, so only nico can write it
 #      Parents need no grant: "bypass traverse checking" (on for every user by default) lets an account open a granted
 #      folder below folders it cannot list.
-#   3. Quarantine root and holdout results folder: every access denied (unchanged).
-#   4. Nicolas's workspace: read and run (venv-main) allowed, write and delete denied (unchanged).
-#   5. The agent workspace (its own git clone): full control (unchanged).
+#   3. Quarantine root and holdout results folder: every access denied (a full deny).
+#   4. The root (D:\stock_overflow): list this folder only. Nicolas's workspace (venv-main and the code it imports) and
+#      the base Python venv-main points to (the "home" line of venv-main\pyvenv.cfg): read and run, nothing else (no
+#      write grant, so no write; no deny).
+#   5. The agent workspace (its own git clone): full control, owned by so_agent (git refuses a clone owned by another
+#      account).
 #   6. Sets SO_DATA_PATH for so_agent; SO_QUARANTINE_PATH, SO_HOLDOUT_PATH and SO_HOLDOUT_EVALUATION_TOKEN are not set.
-#   7. Reads the ACLs back and stops with an error when an expected entry is missing or so_agent still has an entry
-#      where it must have none.
+#   7. Reads the ACLs back and stops with an error when an expected entry is missing, so_agent still has an entry where
+#      it must have none, or it has a deny other than the two full denies.
 # Then (see the end of the script for the exact lines):
 #   as nico:      venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list <file>
 #   as so_agent:  runas /user:so_agent powershell, then from the agent workspace
@@ -66,6 +74,14 @@ foreach ($folder in @($DataRoot, $NicolasWorkspace, $QuarantineRoot)) {
     if (-not (Test-Path $folder -PathType Container)) { throw "Folder not found: $folder" }
 }
 $DataRoot = (Resolve-Path $DataRoot).Path.TrimEnd("\")
+$Root = Split-Path $DataRoot -Parent
+$pyvenvLine = Get-Content (Join-Path $NicolasWorkspace "venv-main\pyvenv.cfg") | Where-Object { $_ -match "^\s*home\s*=" } | Select-Object -First 1
+if (-not $pyvenvLine) { throw "no 'home' line in venv-main\pyvenv.cfg" }
+$PythonHome = ($pyvenvLine -split "=", 2)[1].Trim()
+if (-not (Test-Path (Join-Path $PythonHome "python.exe"))) { throw "base Python not found: $PythonHome" }
+if (@((Get-Acl -LiteralPath $Root).Access | Where-Object { $_.IsInherited }).Count -gt 0) {
+    throw "$Root still inherits entries from the drive: run scripts\setup_so_runner.ps1 first"
+}
 if ($AclBackupFolder -eq "") { $AclBackupFolder = Join-Path (Split-Path $DataRoot -Parent) "backup_records" }
 New-Item -ItemType Directory -Force -Path $AclBackupFolder | Out-Null
 $AclBackupFolder = (Resolve-Path $AclBackupFolder).Path.TrimEnd("\")
@@ -92,6 +108,22 @@ function Assert-No-Entry([string]$Path, [string]$Name) {
     $ruleList = Get-Identity-Rule-List $Path $Name
     if ($ruleList.Count -gt 0) { throw "check failed: $Name still has an entry on $Path" }
     Write-Host "checked: $Name has no entry on $Path"
+}
+
+# FUNCTION: STOP WHEN AN IDENTITY HAS A DENY THAT IS NOT A FULL DENY (A PARTIAL DENY CAN BLOCK OPENING FILES)
+function Assert-No-Partial-Deny([string]$Path, [string]$Name) {
+    $ruleList = @(Get-Identity-Rule-List $Path $Name | Where-Object {
+        $_.AccessControlType -eq "Deny" -and $_.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl })
+    if ($ruleList.Count -gt 0) { throw "check failed: $Name has a partial deny on $Path" }
+    Write-Host "checked: no partial deny of $Name on $Path"
+}
+
+# FUNCTION: STOP WHEN AN IDENTITY HAS NO FULL DENY ON A PATH
+function Assert-Full-Deny([string]$Path, [string]$Name) {
+    $ruleList = @(Get-Identity-Rule-List $Path $Name | Where-Object {
+        $_.AccessControlType -eq "Deny" -and $_.FileSystemRights -eq [Security.AccessControl.FileSystemRights]::FullControl })
+    if ($ruleList.Count -eq 0) { throw "check failed: $Name is not fully denied on $Path" }
+    Write-Host "checked: $Name is fully denied on $Path"
 }
 
 # FUNCTION: STOP WHEN AN IDENTITY HAS NO ALLOW ENTRY WITH READ ON A PATH
@@ -151,7 +183,7 @@ foreach ($folder in @($DataRoot) + $zoneList + @($pendingFolder, $visibleFolder,
     Set-Acl-Entry $folder @("/remove:g", $GradeGroup)
     Set-Acl-Entry $folder @("/remove:g", $StatusGroup)
 }
-foreach ($folder in @($NicolasWorkspace, $QuarantineRoot, $AgentWorkspace)) {
+foreach ($folder in @($Root, $NicolasWorkspace, $PythonHome, $QuarantineRoot, $AgentWorkspace)) {
     Set-Acl-Entry $folder @("/remove:g", $Agent, "/remove:d", $Agent)
 }
 
@@ -166,7 +198,7 @@ Set-Acl-Entry $statusFolder @("/grant", "${StatusGroup}:(OI)(CI)RX")
 # THE KILL SWITCH MUST STAY READABLE: A FLAG THE AGENT CANNOT SEE WOULD LOOK LIKE "NOT SET" TO A CARELESS CHECK
 Set-Acl-Entry $controlFolder @("/grant", "${Agent}:(OI)(CI)RX")
 
-# 3. QUARANTINE AND HOLDOUT RESULTS: NO ACCESS
+# 3. QUARANTINE AND HOLDOUT RESULTS: NO ACCESS (A FULL DENY)
 Set-Acl-Entry $QuarantineRoot @("/deny", "${Agent}:(OI)(CI)F")
 if ($HoldoutPath -ne "") {
     if (-not (Test-Path $HoldoutPath -PathType Container)) { throw "Folder not found: $HoldoutPath" }
@@ -174,15 +206,16 @@ if ($HoldoutPath -ne "") {
     Set-Acl-Entry $HoldoutPath @("/deny", "${Agent}:(OI)(CI)F")
 }
 
-# 4. NICOLAS'S WORKSPACE: READ AND RUN ONLY
+# 4. THE ROOT (LIST THIS FOLDER ONLY), NICOLAS'S WORKSPACE AND THE BASE PYTHON (READ AND RUN ONLY). NO DENY: WITHOUT A
+# WRITE GRANT THERE IS NO WRITE, AND A PARTIAL DENY CAN STOP THE ACCOUNT FROM OPENING FILES (FOUND 2026-10-26 AND AGAIN
+# 2026-11-04)
+Set-Acl-Entry $Root @("/grant", "${Agent}:RX")
 Set-Acl-Entry $NicolasWorkspace @("/grant", "${Agent}:(OI)(CI)RX")
-# THE DENIED RIGHTS ARE LISTED ONE BY ONE: icacls "W" IS GENERIC WRITE, WHICH ALSO HOLDS SYNCHRONIZE AND READ CONTROL, SO
-# DENYING "W" STOPS THE ACCOUNT FROM OPENING ANY FILE AT ALL, READS AND PROGRAM STARTS INCLUDED (FOUND 2026-11-04)
-Set-Acl-Entry $NicolasWorkspace @("/deny", "${Agent}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)")
+Set-Acl-Entry $PythonHome @("/grant", "${Agent}:(OI)(CI)RX")
 
-# A FILE IN THE WORKSPACE MUST BE READABLE BY so_agent (THE VENV'S pyvenv.cfg): CHECKED ON THE EFFECTIVE ENTRIES BELOW
-# 5. THE AGENT'S OWN CLONE
+# 5. THE AGENT'S OWN CLONE, OWNED BY so_agent
 Set-Acl-Entry $AgentWorkspace @("/grant", "${Agent}:(OI)(CI)F")
+Set-Acl-Entry $AgentWorkspace @("/setowner", $Agent, "/T")
 
 # 6. THE AGENT'S ENVIRONMENT (USER VARIABLES OF so_agent, WRITTEN IN ITS REGISTRY HIVE)
 $sid = (Get-LocalUser -Name $Agent).SID.Value
@@ -218,10 +251,14 @@ foreach ($pair in @(@($pendingFolder, $Agent), @($visibleFolder, $GradeGroup), @
                     @($gradeFolder, $GradeGroup), @($statusFolder, $StatusGroup), @($controlFolder, $Agent))) {
     Assert-Read-Entry $pair[0] $pair[1]
 }
-$workspaceDenyList = @(Get-Identity-Rule-List $NicolasWorkspace $Agent | Where-Object {
-    $_.AccessControlType -eq "Deny" -and ((([int64]$_.FileSystemRights) -band 0x00120001) -ne 0) })
-if ($workspaceDenyList.Count -gt 0) { throw "check failed: a deny entry of $Agent on $NicolasWorkspace blocks reading or opening files" }
-Write-Host "checked: no deny entry of $Agent on $NicolasWorkspace blocks reading (synchronize, read control, read data)"
+foreach ($path in @($Root, $NicolasWorkspace, $PythonHome)) { Assert-Read-Entry $path $Agent }
+foreach ($path in @($Root, $NicolasWorkspace, $PythonHome, $AgentWorkspace, $pendingFolder, $controlFolder)) {
+    Assert-No-Partial-Deny $path $Agent
+}
+$deniedList = @($QuarantineRoot) + $(if ($HoldoutPath -ne "") { @($HoldoutPath) } else { @() })
+foreach ($path in $deniedList) { Assert-Full-Deny $path $Agent }
+if ((Get-Acl -LiteralPath $AgentWorkspace).Owner -notmatch "\\$Agent$") { throw "check failed: $AgentWorkspace is not owned by $Agent" }
+Write-Host "checked: $AgentWorkspace is owned by $Agent"
 Assert-No-Entry $gradeFolder $StatusGroup
 Assert-No-Entry $statusFolder $GradeGroup
 foreach ($path in @($DataRoot, $experimentZone, $visibleFolder, $controlFolder)) {
@@ -238,5 +275,5 @@ Write-Host "Done. so_agent's new group memberships apply from its next logon (cl
 Write-Host "Next, as nico (this PowerShell, not elevated is fine), from your workspace:"
 Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list $AgentWorkspace\access_samples.txt"
 Write-Host "Then as so_agent (runas /user:so_agent powershell), from the agent workspace:"
-Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list $AgentWorkspace\access_samples.txt --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace"
+Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list $AgentWorkspace\access_samples.txt --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace$(if ($HoldoutPath -ne '') { " --holdout $HoldoutPath" })"
 Write-Host "And as so_runner: the same line with --role runner."
