@@ -19,13 +19,21 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $RunnerWorkspace
 
-# 1. WHAT IS RUNNING
-$statePath = Join-Path $DataRoot "store04_experiments\state.json"
-if ((Test-Path $statePath) -and -not $Force) {
-    $state = Get-Content $statePath -Raw | ConvertFrom-Json
-    if ($null -ne $state.running) {
-        Write-Host "STOP: a job is running ($($state.running.run_id)). Wait for it, or use -Force."
+# 1. WHAT IS RUNNING (SINCE R4 THE QUEUE WRITES store04_experiments\visible\state.json; THE ZONE-ROOT state.json OF
+# EARLIER VERSIONS IS READ TOO, FOR A DEPLOY FROM AN OLDER QUEUE). NO READABLE STATE: STOP UNLESS -Force
+if (-not $Force) {
+    $statePathList = @((Join-Path $DataRoot "store04_experiments\visible\state.json"), (Join-Path $DataRoot "store04_experiments\state.json")) |
+        Where-Object { Test-Path $_ }
+    if (@($statePathList).Count -eq 0) {
+        Write-Host "STOP: no state.json found under $DataRoot\store04_experiments; check that the runner is up, or use -Force."
         return
+    }
+    foreach ($statePath in $statePathList) {
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        if ($null -ne $state.running) {
+            Write-Host "STOP: a job is running ($($state.running.run_id)). Wait for it, or use -Force."
+            return
+        }
     }
 }
 
