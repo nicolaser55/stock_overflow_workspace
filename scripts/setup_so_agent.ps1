@@ -118,8 +118,9 @@ if (-not (Get-LocalUser -Name $Agent -ErrorAction SilentlyContinue)) {
 } else {
     Write-Host "$Agent exists"
 }
-foreach ($group in @(@($GradeGroup, "Stock Overflow: may read graded summaries (planner)"),
-                     @($StatusGroup, "Stock Overflow: may read technical status (coder)"))) {
+# A LOCAL GROUP DESCRIPTION MAY HOLD AT MOST 48 CHARACTERS
+foreach ($group in @(@($GradeGroup, "SO: may read graded summaries (planner)"),
+                     @($StatusGroup, "SO: may read technical status (coder)"))) {
     if (-not (Get-LocalGroup -Name $group[0] -ErrorAction SilentlyContinue)) {
         New-LocalGroup -Name $group[0] -Description $group[1] | Out-Null
         Write-Host "created group $($group[0])"
