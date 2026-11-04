@@ -176,8 +176,11 @@ if ($HoldoutPath -ne "") {
 
 # 4. NICOLAS'S WORKSPACE: READ AND RUN ONLY
 Set-Acl-Entry $NicolasWorkspace @("/grant", "${Agent}:(OI)(CI)RX")
-Set-Acl-Entry $NicolasWorkspace @("/deny", "${Agent}:(OI)(CI)(W,D,DC)")
+# THE DENIED RIGHTS ARE LISTED ONE BY ONE: icacls "W" IS GENERIC WRITE, WHICH ALSO HOLDS SYNCHRONIZE AND READ CONTROL, SO
+# DENYING "W" STOPS THE ACCOUNT FROM OPENING ANY FILE AT ALL, READS AND PROGRAM STARTS INCLUDED (FOUND 2026-11-04)
+Set-Acl-Entry $NicolasWorkspace @("/deny", "${Agent}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)")
 
+# A FILE IN THE WORKSPACE MUST BE READABLE BY so_agent (THE VENV'S pyvenv.cfg): CHECKED ON THE EFFECTIVE ENTRIES BELOW
 # 5. THE AGENT'S OWN CLONE
 Set-Acl-Entry $AgentWorkspace @("/grant", "${Agent}:(OI)(CI)F")
 
@@ -215,6 +218,10 @@ foreach ($pair in @(@($pendingFolder, $Agent), @($visibleFolder, $GradeGroup), @
                     @($gradeFolder, $GradeGroup), @($statusFolder, $StatusGroup), @($controlFolder, $Agent))) {
     Assert-Read-Entry $pair[0] $pair[1]
 }
+$workspaceDenyList = @(Get-Identity-Rule-List $NicolasWorkspace $Agent | Where-Object {
+    $_.AccessControlType -eq "Deny" -and ((([int64]$_.FileSystemRights) -band 0x00120001) -ne 0) })
+if ($workspaceDenyList.Count -gt 0) { throw "check failed: a deny entry of $Agent on $NicolasWorkspace blocks reading or opening files" }
+Write-Host "checked: no deny entry of $Agent on $NicolasWorkspace blocks reading (synchronize, read control, read data)"
 Assert-No-Entry $gradeFolder $StatusGroup
 Assert-No-Entry $statusFolder $GradeGroup
 foreach ($path in @($DataRoot, $experimentZone, $visibleFolder, $controlFolder)) {
