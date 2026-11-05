@@ -185,6 +185,10 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 
 ## R5. Stage 1 build: planner and blind coder (decided)
 
+- [ ] **Code-running agents have no general internet** (only GitHub and package mirrors), required before R6 (a
+  "protect the results" restriction, decided 2026-11-04, design 10.1): otherwise an agent could download SPY prices
+  elsewhere and test designs on them privately, uncounted. Container networking or the agent tool's own tool list,
+  decided with the isolation choice above.
 - [ ] Plan the training-cutoff evaluation with the model choice (design 11, decided 2026-11-04): every design records
   its model and that model's training cutoff.
 - [ ] A numbers-free brief for the planner (review 2026-11-04, point C): the idea list, the family ledger and the
@@ -232,11 +236,17 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] **A4 sandbox under so_design** (design 3.2): no network, no data root, no records, no secrets; rows fed point in
   time by the runner; decisions back. Also closes a channel R4 leaves: design code running as so_runner could copy
   numbers into `visible\` (R4, 2026-11-03).
-- [ ] Accounts: so_agent renamed so_code; so_web created (no code execution); firewall rules; NTFS quotas.
-- [ ] Setup scripts reproduce the machine (accounts, ACLs including `control` and the run folders, tasks). Known
-  mismatch (2026-11-04): on store01-03 so_runner has only the read inherited from the data root; the deny that
-  `setup_so_runner.ps1` describes was never applied (harmless: read-only). Rerun and check that script on purpose, not
-  as a side effect.
+- [ ] Accounts: so_agent renamed so_code; so_web created (no code execution); per-account firewall rules for the
+  target roles (the no-internet rule for code-running agents comes earlier, R5); NTFS quotas.
+- [~] Setup scripts reproduce the machine. **Rewritten 2026-11-04** to the allow-list model the machine has had since
+  it was rebuilt by hand on 2026-10-26 (`claude/STATE_2026-10-26.md`), checked against an inventory of nicodesktop the
+  same day: root inheritance removed, no write denies anywhere (a partial deny broke Python twice: 2026-10-26 and
+  2026-11-04), full denies only on the quarantine and the holdout, base Python read and run, clone ownership, the
+  `control` folder's own list, the batch-logon right; the runner script re-registers the task only with
+  `-RegisterTask` and asks for SMTP settings only when given; both scripts read everything back. Still to do: run
+  both on nicodesktop and pass both access checks.
+- [ ] The queue task's own output is written to a log file (decided 2026-11-04; a separate small item: it changes
+  how the task starts the queue, so the task is re-registered once).
 - [ ] GitHub machine account and rulesets re-enabled (design 10.3).
 - [ ] NAS backups of trial log, run index, manifests, summaries.
 - [ ] Base Python moved out of Nicolas's profile.
