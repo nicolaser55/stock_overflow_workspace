@@ -1170,6 +1170,115 @@ def test_queue_kill_switch():
     passed("kill switch (no job starts or resumes while STOP exists, state says stopped, work resumes after removal, unreadable flag counts as set)")
 
 
+# FUNCTION: THE WATCH WRITES ITS OWN LOG (ROADMAP R7, 2026-11-05)
+def test_watch_log():
+    """
+    Lines printed by the watch reach the original stream and, stamped, queue/logs/runner_watch.log; a partial line waits
+    for its end; past the size limit the log moves to .1 and a new one starts; an unwritable log never stops the watch.
+
+    Returns:
+        None
+    """
+    # A TEE ON A FAKE STREAM INSIDE A TEMPORARY QUEUE
+    import io
+    zone_str = tempfile.mkdtemp(prefix="watch_log_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    os.makedirs(path_dict["logs"], exist_ok=True)
+    log_path_str = os.path.join(path_dict["logs"], run_queue.WATCH_LOG_FILE_STR)
+    fake_stream = io.StringIO()
+    tee = run_queue.WatchLogTee(fake_stream, log_path_str, max_bytes_in=200)
+    tee.write("warning: watch loop failed (OSError: locked)\nhalf ")
+    tee.write("line\n")
+    tee.flush()
+    assert fake_stream.getvalue() == "warning: watch loop failed (OSError: locked)\nhalf line\n"
+    log_line_list = Path(log_path_str).read_text(encoding="utf-8").splitlines()
+    assert len(log_line_list) == 2 and log_line_list[0].endswith(" warning: watch loop failed (OSError: locked)")
+    assert log_line_list[1].endswith(" half line") and log_line_list[0][:4].isdigit() and "T" in log_line_list[0][:20]
+    # ROTATION: ONE OLD COPY, A FRESH LOG
+    for index_int in range(10):
+        tee.write(f"heartbeat line {index_int} with some padding to grow the file\n")
+    assert os.path.isfile(log_path_str + ".1") and os.path.getsize(log_path_str) < 400
+    assert not os.path.exists(log_path_str + ".2")
+    # AN UNWRITABLE LOG (A FOLDER IN ITS PLACE) AND A MISSING STREAM DO NOT RAISE
+    bad_tee = run_queue.WatchLogTee(None, path_dict["logs"])
+    assert bad_tee.write("still running\n") == len("still running\n")
+    bad_tee.flush()
+    passed("watch log (stamped lines in queue/logs/runner_watch.log, partial lines wait, rotation to .1, a broken log never stops the watch)")
+
+
+# FUNCTION: THE EQUIVALENCE CHECK OF TWO RUNS (DESIGN 4.4, 2026-11-05)
+def test_check_equivalence():
+    """
+    Two synthetic run folders: identical scoring numbers with different identities are equivalent; one changed number,
+    one changed decision, a missing candidate or another experiment is not; a multiple-testing change with a different
+    N is explained by N, the same change with the same N is not.
+
+    Returns:
+        None
+    """
+    # TWO RUN FOLDERS WITH A REPORT AND ONE CANDIDATE EACH
+    import copy
+    import pandas as pd
+    import check_equivalence
+    root_str = tempfile.mkdtemp(prefix="equivalence_", dir=os.environ["SO_DATA_PATH"])
+    report_dict = {"run_id_str": "exp_a_1", "experiment_name_str": "exp_a", "protocol_version_str": "v1",
+                   "commit_str": "a" * 40, "code_hash_str": "b" * 64, "judge_hash_str": "c" * 64, "judge_file_count": 40,
+                   "trial_id_list": ["t1"], "date1": "2010-01-04", "date2": "2020-12-31", "label_str": "not email-worthy",
+                   "email_worthy_bool": False, "failed_list": ["return"],
+                   "return_dict": {"strategy_total_return": 0.4321, "pass_bool": False},
+                   "look_ahead_dict": {"status_str": "pass", "elapsed_seconds": 12.5, "cut_date_list": ["2015-01-02"]},
+                   "multiple_testing_dict": {"design_count": 300, "deflated_sharpe_probability": 0.41,
+                                             "random_timing_tail_dict": {"draw_count": 1000}},
+                   "view_stamp_dict": {"window_id": "w1", "built_ts": "2026-11-01T10:00:00"},
+                   "grade_dict": {"grade_str": "Not better than buy-and-hold"},
+                   "cost_sensitivity_list": [{"slippage_per_share": 0.0, "total_return": float("nan")}]}
+
+    def make_run_str(name_str_in, report_in, decision_list_in, token_list_in=("c0",)):
+        folder_str = os.path.join(root_str, name_str_in)
+        for token_str in token_list_in:
+            os.makedirs(os.path.join(folder_str, "candidates", token_str), exist_ok=True)
+            pd.DataFrame({"date": ["2010-01-04", "2010-01-05"], "target": decision_list_in}).to_pickle(
+                os.path.join(folder_str, "candidates", token_str, "decisions.pkl"))
+            pd.Series([0.1, float("nan")]).to_pickle(os.path.join(folder_str, "candidates", token_str, "scores.pkl"))
+        Path(folder_str, "report.json").write_text(json.dumps(report_in), encoding="utf-8")
+        return folder_str
+
+    baseline_str = make_run_str("base", report_dict, [1.0, 0.0])
+    # ONLY IDENTITY CHANGED: EQUIVALENT
+    same_dict = copy.deepcopy(report_dict)
+    same_dict.update({"run_id_str": "exp_a_2", "commit_str": "d" * 40, "judge_hash_str": "e" * 64, "judge_file_count": 41,
+                      "trial_id_list": ["t9"]})
+    same_dict["look_ahead_dict"]["elapsed_seconds"] = 99.0
+    same_dict["view_stamp_dict"]["built_ts"] = "2026-11-05T09:00:00"
+    outcome_dict = check_equivalence.get_equivalence_dict(baseline_str, make_run_str("same", same_dict, [1.0, 0.0]))
+    assert outcome_dict["equivalent_bool"], outcome_dict
+    # ONE SCORING NUMBER, ONE DECISION, ONE CANDIDATE, ANOTHER EXPERIMENT: NOT EQUIVALENT
+    number_dict = copy.deepcopy(same_dict)
+    number_dict["return_dict"]["strategy_total_return"] = 0.4322
+    outcome_dict = check_equivalence.get_equivalence_dict(baseline_str, make_run_str("number", number_dict, [1.0, 0.0]))
+    assert not outcome_dict["equivalent_bool"]
+    assert outcome_dict["scoring_difference_list"] == ["return_dict.strategy_total_return: 0.4321 -> 0.4322"]
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("decision", same_dict, [1.0, 0.5]))["equivalent_bool"]
+    missing_dict = check_equivalence.get_equivalence_dict(baseline_str, make_run_str("tokens", same_dict, [1.0, 0.0], ("c0", "c1")))
+    assert not missing_dict["equivalent_bool"] and missing_dict["candidate_difference_list"] == ["candidates/c1: only in the new run"]
+    window_dict = copy.deepcopy(same_dict)
+    window_dict["view_stamp_dict"]["window_id"] = "w2"
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("window", window_dict, [1.0, 0.0]))["equivalent_bool"]
+    other_dict = copy.deepcopy(same_dict)
+    other_dict["experiment_name_str"] = "exp_b"
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("other", other_dict, [1.0, 0.0]))["equivalent_bool"]
+    # A LARGER N: THE MULTIPLE-TESTING CHANGE IS EXPLAINED; THE SAME CHANGE WITH THE SAME N IS NOT
+    n_dict = copy.deepcopy(same_dict)
+    n_dict["multiple_testing_dict"].update({"design_count": 302, "deflated_sharpe_probability": 0.39})
+    n_dict["grade_dict"]["grade_str"] = "Could be luck"
+    outcome_dict = check_equivalence.get_equivalence_dict(baseline_str, make_run_str("n", n_dict, [1.0, 0.0]))
+    assert outcome_dict["equivalent_bool"] and len(outcome_dict["n_difference_list"]) == 3 and outcome_dict["n_pair"] == (300, 302)
+    same_n_dict = copy.deepcopy(same_dict)
+    same_n_dict["multiple_testing_dict"]["deflated_sharpe_probability"] = 0.39
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("same_n", same_n_dict, [1.0, 0.0]))["equivalent_bool"]
+    passed("equivalence check (identities ignored, any scoring number, decision or candidate difference fails, N changes explained)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
@@ -1191,4 +1300,6 @@ if __name__ == "__main__":
     test_notebooks_without_outputs()
     test_environment_lock()
     test_ledger_outside_repository()
+    test_watch_log()
+    test_check_equivalence()
     print("\nAll tool tests passed ✅")

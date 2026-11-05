@@ -166,7 +166,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
   nine: the baseline.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
-  fast daily experiments reproduce every number exactly); a scoring change means a full rerun.
+  fast daily experiments reproduce every number exactly); a scoring change means a full rerun. **The check is built
+  (2026-11-05)**: `scripts/check_equivalence.py --baseline <run id> --new <run id>` (Nicolas or so_runner; it prints
+  numbers) compares every report value except identities (run ids, commits, hashes, judge, paths, time stamps, trial
+  ids, timings) and every candidate's `decisions.pkl` and `scores.pkl`, exactly; differences only in the
+  multiple-testing view are reported as explained by N when the count of designs changed. Exit 0 equivalent, 1 not.
+- [x] Decided 2026-11-05: **the judge hash stays broad** (every protected `.py` under `so/` and `scripts/`, plus the
+  pilot ledger). Narrowing it to scoring code would need a judgement, file by file, of what can change a score; a
+  mistake there would let a scoring change through unseen. The equivalence check makes the broad hash cheap instead.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
@@ -218,6 +225,10 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   checks STOP before each step.
 - [ ] `AGENTS.md` updated for the two roles.
 
+- [ ] Revisit the size of `scripts/run_queue.py` (about 2,000 lines; decided 2026-11-05 not to split it now: a split
+  changes the judge hash and moves code the tests and the setup checks rely on, for no change in behaviour). Split it
+  when R5 adds the container or account runner, if that work makes the file harder to review.
+
 ## R6. Stage 1 supervised cycles
 
 - [ ] Nicolas reviews and approves every pull request before its job is queued (this replaces the sandbox in stage 1).
@@ -238,15 +249,20 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   numbers into `visible\` (R4, 2026-11-03).
 - [ ] Accounts: so_agent renamed so_code; so_web created (no code execution); per-account firewall rules for the
   target roles (the no-internet rule for code-running agents comes earlier, R5); NTFS quotas.
-- [~] Setup scripts reproduce the machine. **Rewritten 2026-11-04** to the allow-list model the machine has had since
+- [x] Setup scripts reproduce the machine. **Rewritten 2026-11-04** to the allow-list model the machine has had since
   it was rebuilt by hand on 2026-10-26 (`claude/STATE_2026-10-26.md`), checked against an inventory of nicodesktop the
   same day: root inheritance removed, no write denies anywhere (a partial deny broke Python twice: 2026-10-26 and
   2026-11-04), full denies only on the quarantine and the holdout, base Python read and run, clone ownership, the
   `control` folder's own list, the batch-logon right; the runner script re-registers the task only with
-  `-RegisterTask` and asks for SMTP settings only when given; both scripts read everything back. Still to do: run
-  both on nicodesktop and pass both access checks.
-- [ ] The queue task's own output is written to a log file (decided 2026-11-04; a separate small item: it changes
-  how the task starts the queue, so the task is re-registered once).
+  `-RegisterTask` and asks for SMTP settings only when given; both scripts read everything back. **Run on nicodesktop
+  2026-11-05**: every read-back passed, the agent access check (53 checks) and the runner check (37 checks) passed.
+- [x] The queue's own output is written to a log file (decided 2026-11-04; **changed 2026-11-05**: `run_queue.py watch`
+  writes its own log, `queue\logs\runner_watch.log`, every line time-stamped, rotated to `.1` past 5 MB, so the
+  scheduled task is not changed or re-registered). The agent cannot read `queue\logs\` (the access check samples
+  `*.log`).
+- [ ] Windows CI for the setup scripts (decided 2026-11-05, its own package): a `windows-latest` job creates throwaway
+  accounts and a fake tree, runs both setup scripts, runs the access check as the agent account and the fast suite on
+  Windows, so a script error is caught before it reaches nicodesktop.
 - [ ] GitHub machine account and rulesets re-enabled (design 10.3).
 - [ ] NAS backups of trial log, run index, manifests, summaries.
 - [ ] Base Python moved out of Nicolas's profile.

@@ -145,7 +145,10 @@ the pilot ledger (hash only), R4b (total returns: every number changes), and the
 ratio (built, or dropped with a recorded reason). The freeze ends with a reset of the development records (6.7) and one
 full rerun of the nine, the baseline. After the freeze, a judge-hash change that touches no scoring code is accepted
 by an **equivalence check**: one or two fast daily experiments rerun under the new judge and must reproduce every
-number of their baseline run exactly; a change to scoring code means a full rerun.
+number of their baseline run exactly; a change to scoring code means a full rerun. The check is `scripts/check_equivalence.py` (built
+2026-11-05): report values compared exactly, identities ignored, every candidate's decisions and scores compared;
+multiple-testing differences are explained when N changed between the two runs. The judge hash stays broad (decided
+2026-11-05): the check, not a narrower hash, keeps non-scoring changes cheap.
 
 ---
 

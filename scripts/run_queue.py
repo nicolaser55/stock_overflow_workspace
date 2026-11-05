@@ -1912,6 +1912,84 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
     return job_count_int
 
 
+# THE WATCH'S OWN LOG (ROADMAP R7, DECIDED 2026-11-05): queue/logs/runner_watch.log, ROTATED TO .1 PAST 5 MB
+WATCH_LOG_FILE_STR = "runner_watch.log"
+WATCH_LOG_MAX_BYTES = 5 * 1024 * 1024
+
+
+# CLASS: A STREAM THAT ALSO WRITES TIME-STAMPED LINES TO THE WATCH LOG
+class WatchLogTee:
+    """
+    Wraps stdout or stderr. Every complete line goes to the original stream unchanged and to the log with a time
+    stamp. Past max_bytes_in the log is renamed to .1 (one old copy kept) and a new log starts. A log that cannot be
+    written never stops the watch: the line still reaches the original stream.
+    """
+
+    # FUNCTION: OPEN THE LOG
+    def __init__(self, stream_in, log_path_str_in, max_bytes_in=WATCH_LOG_MAX_BYTES, lock_in=None):
+        self.stream = stream_in
+        self.log_path_str = str(log_path_str_in)
+        self.max_bytes = int(max_bytes_in)
+        self.lock = lock_in or threading.Lock()
+        self.pending_str = ""
+
+    # FUNCTION: WRITE TEXT (THE LOG GETS WHOLE LINES)
+    def write(self, text_in):
+        text_str = str(text_in)
+        if self.stream is not None:
+            try:
+                self.stream.write(text_str)
+            except (OSError, ValueError):
+                pass
+        with self.lock:
+            self.pending_str += text_str
+            if "\n" not in self.pending_str:
+                return len(text_str)
+            line_list = self.pending_str.split("\n")
+            self.pending_str = line_list.pop()
+            self.write_log_line_list(line_list)
+        return len(text_str)
+
+    # FUNCTION: APPEND STAMPED LINES, ROTATING FIRST WHEN THE LOG IS FULL
+    def write_log_line_list(self, line_list_in):
+        stamp_str = datetime.datetime.now().isoformat(timespec="seconds")
+        try:
+            if os.path.isfile(self.log_path_str) and os.path.getsize(self.log_path_str) >= self.max_bytes:
+                os.replace(self.log_path_str, self.log_path_str + ".1")
+            with open(self.log_path_str, "a", encoding="utf-8") as log_file:
+                log_file.write("".join(f"{stamp_str} {line_str}\n" for line_str in line_list_in))
+        except OSError:
+            pass
+
+    # FUNCTION: FLUSH THE ORIGINAL STREAM
+    def flush(self):
+        if self.stream is not None:
+            try:
+                self.stream.flush()
+            except (OSError, ValueError):
+                pass
+
+
+# FUNCTION: SEND THE WATCH'S STDOUT AND STDERR TO THE WATCH LOG AS WELL
+def start_watch_log(path_dict_in, max_bytes_in=WATCH_LOG_MAX_BYTES):
+    """
+    Args:
+        path_dict_in (dict): Queue paths (the log goes in logs/)
+        max_bytes_in (int): Rotation size
+
+    Returns:
+        str: Log path
+    """
+    # ONE LOCK FOR BOTH STREAMS SO LINES DO NOT INTERLEAVE
+    os.makedirs(path_dict_in["logs"], exist_ok=True)
+    log_path_str = os.path.join(path_dict_in["logs"], WATCH_LOG_FILE_STR)
+    lock = threading.Lock()
+    sys.stdout = WatchLogTee(sys.stdout, log_path_str, max_bytes_in, lock)
+    sys.stderr = WatchLogTee(sys.stderr, log_path_str, max_bytes_in, lock)
+    print(f"watch started: pid {os.getpid()}", flush=True)
+    return log_path_str
+
+
 # PARSE THE COMMAND
 if __name__ == "__main__":
     # THE COMMANDS
@@ -1942,6 +2020,7 @@ if __name__ == "__main__":
         for result_dict in result_list:
             print(f"{result_dict['job_id']} {result_dict['status']}: run {result_dict['run_id']}")
     elif arg_dict.command == "watch":
+        start_watch_log(path_dict)
         watch_queue(path_dict, arg_dict.interval)
     elif arg_dict.command == "test-email":
         make_runner_folder_list(path_dict)
