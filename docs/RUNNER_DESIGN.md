@@ -178,7 +178,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   `run_index.csv` is rewritten with the current columns (a copy is kept) when it only lacks columns. A failed job is
   emailed and can be retried under the same run id and judge (it resumes from the checkpoints). On Windows a reader
   that holds `state.json` open blocks its replacement for a moment: the write is retried for about 5 seconds, and a
-  failed watch loop is logged and retried after the pause instead of stopping the task (R3). A stale lock from a
+  failed watch loop is logged and retried after the pause instead of stopping the task (R3). The watch writes its own
+  output, time-stamped, to `queue/logs/runner_watch.log` (rotated to `.1` past 5 MB; 2026-11-05), next to the job
+  logs; agents cannot read `queue/logs/`. A stale lock from a
   dead process is replaced. Agents can only add job files. **Email (A3):** one email per finished run, positive or
   negative (verdict, failed parts, the grade the planner sees and its reason code, returns, N and the
   multiple-testing result with the pilot designs included (R4), judge hash, commits, paths; "PASS, audit pending" when
@@ -201,7 +203,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   mixed silently. **Checked around every queued run (R3):** the queue hashes the fresh worktree before the run process
   starts and again after it ends; when the two differ, or the report shows another value, the run is filed as failed
   ("judge changed during the run"): design code ran in between. This catches a judge file changed and left changed; a
-  change undone before the end is out of reach until design code runs in its own account (roadmap R7, A4).
+  change undone before the end is out of reach until design code runs in its own account (roadmap R7, A4). After the judge v1 freeze a hash change that touches no scoring code is accepted when
+  `scripts/check_equivalence.py --baseline <run id> --new <run id>` finds every report value (identities aside) and
+  every candidate's decisions and scores identical (design 4.4; 2026-11-05).
 - **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) random cut dates
   (one from each third of the span, fixed seed), plus, for each candidate, up to `RUNNER_LOOKAHEAD_CHANGE_CUT_MAX` (10)
   sessions where its own decision changed (`RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE`, 2, in minute mode), spread

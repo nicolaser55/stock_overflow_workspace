@@ -57,6 +57,7 @@
 /scripts/setup_so_agent.ps1 @nicolaser55
 /scripts/check_agent_access.py @nicolaser55
 /scripts/reset_records.py @nicolaser55
+/scripts/check_equivalence.py @nicolaser55
 /tests/run_all_tests.py @nicolaser55
 /tests/temporary_data_root.py @nicolaser55
 /tests/test_holdout.py @nicolaser55

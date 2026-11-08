@@ -73,6 +73,7 @@ scripts/check_environment.py
 scripts/setup_so_agent.ps1
 scripts/check_agent_access.py
 scripts/reset_records.py
+scripts/check_equivalence.py
 
 # Tests of the guards and the runner, and the test runner itself
 tests/run_all_tests.py
