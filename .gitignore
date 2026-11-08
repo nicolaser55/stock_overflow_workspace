@@ -29,3 +29,6 @@ Thumbs.db
 logs/
 # QUEUE JOB WORKTREES (scripts/run_queue.py)
 .worktrees/
+
+# ACCESS-CHECK SAMPLE LIST (scripts/check_agent_access.py; it belongs in <data root>\control, never in a clone)
+access_samples.txt

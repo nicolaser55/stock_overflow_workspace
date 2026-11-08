@@ -3,7 +3,11 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\setup_so_agent.ps1 `
 #       -DataRoot D:\stock_overflow\data -AgentWorkspace D:\stock_overflow\agent_workspace `
 #       -NicolasWorkspace D:\stock_overflow\workspace -QuarantineRoot <quarantine folder> [-HoldoutPath <folder>] `
-#       [-AclBackupFolder D:\stock_overflow\backup_records]
+#       [-AclBackupFolder D:\stock_overflow\backup_records] [-Owner nico]
+#
+# -Owner names the account that keeps control of the data tree (nico; the Windows CI job passes its own account).
+# -AccountPassword (a SecureString) answers the password question without a prompt; only the Windows CI job uses it
+# (roadmap R7, 2026-11-08: throwaway accounts on a throwaway machine). On nicodesktop leave it out and type the password.
 #
 # Results visible only as grades (roadmap R4, 2026-11-03), on the allow-list model of the machine (rebuilt by hand on
 # 2026-10-26, scripted on 2026-11-04, roadmap R7): so_agent can do only what it is granted. No write-deny entries: a
@@ -38,11 +42,14 @@
 #   7. Reads the ACLs back and stops with an error when an expected entry is missing, so_agent still has an entry where
 #      it must have none, or it has a deny other than the two full denies.
 # Then (see the end of the script for the exact lines):
-#   as nico:      venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list <file>
+#   as nico:      venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list <DataRoot>\control\access_samples.txt
 #   as so_agent:  runas /user:so_agent powershell, then from the agent workspace
-#                 <NicolasWorkspace>\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list <file> ...
+#                 <NicolasWorkspace>\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list <that file> ...
 #   as so_runner: the same check with --role runner
-# Every line must say OK.
+#   as nico:      remove the sample list
+# Every line must say OK. The sample list (paths of real files, no contents) goes in the control folder: both accounts
+# can read it, only nico can write it, and it never lands in a git clone (it was left in the agent's clone until
+# 2026-11-08).
 #
 # Undo: icacls <DataRoot parent> /restore <AclBackupFolder>\acl_data_<timestamp>.txt restores the saved data-root tree;
 # or, entry by entry, icacls <folder> /remove:g so_agent /remove:d so_agent /T /C for each folder above (and the same
@@ -55,7 +62,9 @@ param(
     [Parameter(Mandatory = $true)][string]$NicolasWorkspace,
     [Parameter(Mandatory = $true)][string]$QuarantineRoot,
     [string]$HoldoutPath = "",
-    [string]$AclBackupFolder = ""
+    [string]$AclBackupFolder = "",
+    [string]$Owner = "nico",
+    [SecureString]$AccountPassword = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -143,7 +152,8 @@ Write-Host "saved the ACLs of $DataRoot to $aclSaveFile"
 
 # 1. THE ACCOUNT AND THE TWO READER GROUPS
 if (-not (Get-LocalUser -Name $Agent -ErrorAction SilentlyContinue)) {
-    $password = Read-Host -AsSecureString "Password for $Agent"
+    $password = $AccountPassword
+    if ($null -eq $password) { $password = Read-Host -AsSecureString "Password for $Agent" }
     New-LocalUser -Name $Agent -Password $password -FullName "Stock Overflow agent" -Description "Runs agent sessions" -PasswordNeverExpires | Out-Null
     Add-LocalGroupMember -Group "Users" -Member $Agent
     Write-Host "created $Agent"
@@ -262,7 +272,7 @@ Write-Host "checked: $AgentWorkspace is owned by $Agent"
 Assert-No-Entry $gradeFolder $StatusGroup
 Assert-No-Entry $statusFolder $GradeGroup
 foreach ($path in @($DataRoot, $experimentZone, $visibleFolder, $controlFolder)) {
-    Assert-Read-Entry $path "nico"
+    Assert-Read-Entry $path $Owner
 }
 foreach ($path in @($DataRoot, $experimentZone, $visibleFolder)) {
     if (@(Get-Identity-Rule-List $path "so_runner").Count -eq 0) {
@@ -272,8 +282,9 @@ foreach ($path in @($DataRoot, $experimentZone, $visibleFolder)) {
 
 Write-Host ""
 Write-Host "Done. so_agent's new group memberships apply from its next logon (close every so_agent window first)."
+$sampleList = Join-Path $controlFolder "access_samples.txt"
 Write-Host "Next, as nico (this PowerShell, not elevated is fine), from your workspace:"
-Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list $AgentWorkspace\access_samples.txt"
+Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --make-sample-list $sampleList"
 Write-Host "Then as so_agent (runas /user:so_agent powershell), from the agent workspace:"
-Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list $AgentWorkspace\access_samples.txt --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace$(if ($HoldoutPath -ne '') { " --holdout $HoldoutPath" })"
-Write-Host "And as so_runner: the same line with --role runner."
+Write-Host "  $NicolasWorkspace\venv-main\Scripts\python.exe scripts\check_agent_access.py --sample-list $sampleList --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace$(if ($HoldoutPath -ne '') { " --holdout $HoldoutPath" })"
+Write-Host "And as so_runner: the same line with --role runner. Then, as nico: Remove-Item $sampleList"

@@ -260,9 +260,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   writes its own log, `queue\logs\runner_watch.log`, every line time-stamped, rotated to `.1` past 5 MB, so the
   scheduled task is not changed or re-registered). The agent cannot read `queue\logs\` (the access check samples
   `*.log`).
-- [ ] Windows CI for the setup scripts (decided 2026-11-05, its own package): a `windows-latest` job creates throwaway
-  accounts and a fake tree, runs both setup scripts, runs the access check as the agent account and the fast suite on
-  Windows, so a script error is caught before it reaches nicodesktop.
+- [~] Windows CI for the setup scripts (decided 2026-11-05, its own package; **built 2026-11-08**): CI job
+  `windows-setup` (`.github/ci/windows_setup_check.ps1`) creates throwaway so_runner and so_agent accounts and a fake
+  tree on `windows-latest`, runs each setup script twice (create, then after the first logon, so a rerun is checked
+  too), starts the queue task once (state.json and the watch log must appear), and runs the access check as both
+  accounts through scheduled tasks; job `windows-tests` runs the fast suite on Windows. The setup scripts gained
+  `-AccountPassword` (CI only) and the agent script `-Owner`. The access-check sample list now goes in
+  `<data root>\control\access_samples.txt`, outside every clone (it was left in the agent's clone until 2026-11-08), and
+  is ignored by git. Still to do: both jobs green on `main`.
 - [ ] GitHub machine account and rulesets re-enabled (design 10.3).
 - [ ] NAS backups of trial log, run index, manifests, summaries.
 - [ ] Base Python moved out of Nicolas's profile.

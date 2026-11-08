@@ -8,7 +8,7 @@ from pathlib import Path
 """
 Account Access Check (run as so_agent after scripts/setup_so_agent.ps1, or as so_runner after setup_so_runner.ps1)
 
-    python scripts/check_agent_access.py --make-sample-list <file>                       # as nico, first
+    python scripts/check_agent_access.py --make-sample-list <data root>\\control\\access_samples.txt   # as nico, first
     python scripts/check_agent_access.py --sample-list <file> --quarantine <folder> --nicolas-workspace <folder> [--holdout <folder>]
     python scripts/check_agent_access.py --role runner --sample-list <file> --quarantine <folder> --nicolas-workspace <folder>
 
@@ -125,7 +125,8 @@ def write_sample_list(data_root_str_in, list_path_str_in):
     """
     Args:
         data_root_str_in (str): Data root
-        list_path_str_in (str): File to write (somewhere so_agent can read, e.g. the agent workspace)
+        list_path_str_in (str): File to write (<data root>/control/access_samples.txt: both accounts read it, only nico
+            writes it, and it is not in a git clone)
 
     Returns:
         int: Samples found
