@@ -51,7 +51,7 @@ Environment variables: `SO_DATA_PATH` (the data root, required). Nicolas only: `
 | Append finished runs to `docs/RESULTS_LOG.md` (Nicolas; then a pull request) | `scripts\append_results_log.py` |
 | Reset the development records, keeping the count of designs tried (Nicolas, development phase only) | `scripts\reset_records.py --backup-folder <folder> [--confirm]` |
 | One development run by hand (so_runner, or Nicolas) | `scripts\run_development.py experiments\<exp> --note "<why>"` |
-| Set up the agent / runner accounts (Nicolas, administrator) | `scripts\setup_so_runner.ps1`, `scripts\setup_so_agent.ps1`, then `scripts\check_agent_access.py --make-sample-list <file>` (nico) and `--sample-list <file> [--role runner]` |
+| Set up the agent / runner accounts (Nicolas, administrator) | `scripts\setup_so_runner.ps1`, `scripts\setup_so_agent.ps1`, then `scripts\check_agent_access.py --make-sample-list <data root>\control\access_samples.txt` (nico) and `--sample-list <that file> [--role runner]` as each account; CI repeats both on Windows (`.github/ci/windows_setup_check.ps1`) |
 | Protected files changed by a branch | `scripts\check_protected_paths.py --base main` |
 | Modules protected code imports but the list misses | `scripts\check_protected_paths.py --closure` |
 | Refresh the development view after a download (Nicolas) | `scripts\refresh_development_view.py` |

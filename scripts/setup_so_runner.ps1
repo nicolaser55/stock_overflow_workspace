@@ -6,6 +6,9 @@
 #       [-HoldoutPath D:\stock_overflow\holdout] [-RegisterTask] `
 #       [-SmtpHost smtp.gmail.com -SmtpPort 587 -SmtpUser you@gmail.com -EmailTo you@gmail.com]
 #
+# -AccountPassword (a SecureString) answers the password question without a prompt; only the Windows CI job uses it
+# (roadmap R7, 2026-11-08: throwaway accounts on a throwaway machine). On nicodesktop leave it out and type the password.
+#
 # so_runner is the only account that runs development runs and writes their results (audit S4, 2026-10-25). This
 # script reproduces the machine as it was rebuilt by hand on 2026-10-26 and checked on 2026-11-04 (roadmap R7): an
 # ALLOW-LIST. No write-deny entries anywhere: a deny of icacls "W" also holds SYNCHRONIZE and READ_CONTROL and stops
@@ -33,7 +36,8 @@
 #   9. With -RegisterTask only: the scheduled task "SO queue runner" (run_queue.py watch as so_runner at startup,
 #      restarted every 5 minutes if it stops, no time limit). Without it the existing task is left untouched.
 #  10. Reads everything back and stops with an error when the machine differs from the above.
-# Then, as so_runner (runas /user:so_runner powershell), from the runner workspace:
+# Then, as so_runner (runas /user:so_runner powershell), from the runner workspace (the sample list is written by nico
+# into <DataRoot>\control\access_samples.txt, outside every clone; see setup_so_agent.ps1):
 #   <NicolasWorkspace>\venv-main\Scripts\python.exe scripts\check_agent_access.py --role runner --sample-list <file> `
 #       --quarantine <folder> --nicolas-workspace <folder> --holdout <folder>
 # Every line must say OK.
@@ -55,7 +59,8 @@ param(
     [string]$SmtpHost = "",
     [string]$SmtpPort = "587",
     [string]$SmtpUser = "",
-    [string]$EmailTo = ""
+    [string]$EmailTo = "",
+    [SecureString]$AccountPassword = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -135,10 +140,11 @@ if ($LASTEXITCODE -ne 0) { throw "icacls /save failed for $Root" }
 if ($LASTEXITCODE -ne 0) { throw "icacls /save failed for $Root\*" }
 Write-Host "saved the ACLs of $Root to $aclRootFile and of its first level to $aclChildFile"
 
-# 1. THE ACCOUNT (THE PASSWORD IS ASKED FOR ONLY WHEN IT IS NEEDED: A NEW ACCOUNT, OR -RegisterTask)
-$password = $null
+# 1. THE ACCOUNT (THE PASSWORD IS ASKED FOR ONLY WHEN IT IS NEEDED: A NEW ACCOUNT, OR -RegisterTask; -AccountPassword
+# ANSWERS IT WITHOUT A PROMPT)
+$password = $AccountPassword
 if (-not (Get-LocalUser -Name $Runner -ErrorAction SilentlyContinue)) {
-    $password = Read-Host -AsSecureString "Password for the new account $Runner"
+    if ($null -eq $password) { $password = Read-Host -AsSecureString "Password for the new account $Runner" }
     New-LocalUser -Name $Runner -Password $password -FullName "Stock Overflow runner" -Description "Runs queued development runs" -PasswordNeverExpires | Out-Null
     Add-LocalGroupMember -Group "Users" -Member $Runner
     Write-Host "created $Runner"
@@ -300,4 +306,4 @@ foreach ($folder in $deniedList) { Assert-Full-Deny $folder $Runner }
 
 Write-Host ""
 Write-Host "Done. Then, as so_runner (runas /user:so_runner powershell), from $RunnerWorkspace :"
-Write-Host "  $python scripts\check_agent_access.py --role runner --sample-list <file> --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace$(if ($HoldoutPath -ne '') { " --holdout $HoldoutPath" })"
+Write-Host "  $python scripts\check_agent_access.py --role runner --sample-list $controlFolder\access_samples.txt --quarantine $QuarantineRoot --nicolas-workspace $NicolasWorkspace$(if ($HoldoutPath -ne '') { " --holdout $HoldoutPath" })"
