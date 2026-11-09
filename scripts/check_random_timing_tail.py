@@ -112,6 +112,27 @@ def get_draw_return_list(seed_list_in, ohlcv_array_dict_in, date1_in, date2_in, 
         return list(pool.map(get_draw_return_float, list(seed_list_in), chunksize=50))
 
 
+# FUNCTION: THE DEVELOPMENT BUNDLE ON THE RETURN BASIS OF A RUN'S REPORT (R4b)
+def get_report_basis_bundle_dict(ohlcv_array_dict_in, report_dict_in):
+    """
+    Since R4b the development bundle carries the total-return schedule. A report written before R4b (no
+    return_basis_str) or on a price-only bundle is rebuilt without it, so its numbers reproduce exactly.
+
+    Args:
+        ohlcv_array_dict_in (dict): Development bundle (with its schedule)
+        report_dict_in (dict): The run's report.json
+
+    Returns:
+        tuple: (bundle on the report's basis, basis label)
+    """
+    # THE REPORT'S BASIS; OLD REPORTS ARE PRICE RETURNS
+    from so.runner.total_return import get_bundle_with_schedule_dict, get_zero_schedule_dict, PRICE_ONLY_BASIS_STR
+    basis_str = str(report_dict_in.get("return_basis_str") or PRICE_ONLY_BASIS_STR)
+    if basis_str == PRICE_ONLY_BASIS_STR:
+        return get_bundle_with_schedule_dict(ohlcv_array_dict_in, get_zero_schedule_dict(len(ohlcv_array_dict_in["session_date_list"]))), basis_str
+    return ohlcv_array_dict_in, basis_str
+
+
 # FUNCTION: REBUILD A FINISHED RUN'S PRIOR-ONLY PATH FROM ITS FOLDER (THE STEPS OF so.runner.run, NO DESIGN CALL)
 def get_rebuilt_prior_only_tuple(design_module_in, ohlcv_array_dict_in, run_folder_str_in, run_id_str_in):
     """
@@ -275,6 +296,8 @@ if __name__ == "__main__":
     from so.core.development_span import get_development_ohlcv_dict
     design_module = load_design_module(str(Path(__file__).resolve().parents[1] / "experiments" / experiment_str))
     ohlcv_array_dict = get_development_ohlcv_dict(int(design_module.PERIOD_RULE["embargo_sessions"]))["ohlcv_array_dict"]
+    # REBUILD ON THE REPORT'S RETURN BASIS (A REPORT FROM BEFORE R4b IS A PRICE-RETURN RUN)
+    ohlcv_array_dict, basis_str = get_report_basis_bundle_dict(ohlcv_array_dict, report_dict)
     prior_only_dict, date1, date2 = get_rebuilt_prior_only_tuple(design_module, ohlcv_array_dict, run_folder_str, arg_dict.run_id)
     rebuilt_float = float(prior_only_dict["metric_dict"]["total_return"])
     reported_float = float(report_dict["return_dict"]["strategy_total_return"])
