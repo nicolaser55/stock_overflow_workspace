@@ -41,12 +41,28 @@ before the cutoff. `check_feature_available_ts` raises when a feature row's `ava
 | `VIX_DAILY` | feature | the bar date at 16:15 New York | not revised |
 | `VIX3M_1MIN` | feature | bar start; knowable one minute later | not revised |
 | `VIX3M_DAILY` | feature | the bar date at 16:15 New York | not revised |
+| `SPY_DIVIDENDS` | feature | `available_ts` stored on each row: a first release at the ex-date's 09:30 New York open; a correction at the time it was retrieved | vintage, key `ex_date, distribution_type` |
+| `TBILL_3M` | feature | `available_ts` stored on each row: the later of FRED's first posting (ALFRED vintage date) and the next US federal business day after the observation, at 16:30 New York; before ALFRED's earliest vintage (about late 2005), the next federal business day at 16:30 | vintage, key `observation_date` |
 | `TSIND` | feature | end of the snapshot bar; a swing stored on its own bar waits `PA_EXTREMA_ORDER` bars (3) | not revised (cache recomputed from the bars) |
 | `TSSEG` | feature | same; the snapshot shows a swing only after it is confirmed | not revised |
 | `TSCTX` | feature | end of bar t; the row uses only bars `<= t` | not revised |
 | `TSDAY` | feature | end of the decision bar. Forward-return columns and the after-decision columns (`fill_open`, `session_high`, `session_low`, `session_close`) are not served on this path | not revised |
 | `TSDAY_FWD` | label | same TSDAY files; `label_known_ts` is the end of session i + `LABEL_HORIZON_SESSIONS` (the label sells at that close); unfinished rows dropped | not revised |
 | `TSBAR` | label | `label_known_ts` is the end of the bar where TP or SL was hit, or the end of the horizon | not revised |
+
+**SPY dividends and the 3-month T-bill rate** (approved by Nicolas on 2026-11-08, research-integrity rule 2). They are
+written into the quarantine by the ingest repository `stock_overflow_infra` (data contract version 2,
+`docs/DATA_CONTRACT.md` there) and reach the view only through the refresh. The files carry their own `available_ts`, and
+`date` is its New York date, so the refresh's row cut on `date` and the registry's guard agree. `so.core.external_data`
+reads them and refuses another contract version.
+- Dividends: State Street's historical-distributions file, cross-checked against Yahoo Finance (amounts within 0.0005 USD;
+  Nasdaq gives no history for SPY). Disagreements are settled from State Street's filings and recorded in the quarantine.
+  The 09:30 ex-date clock assumes the amount was public by that open. State Street announces before the ex-date, but this
+  cannot be proven for every past row.
+- T-bill: FRED DTB3 (H.15 secondary market, discount basis, percent). `value_pct` is NaN where FRED published no value.
+- The accounting uses of both (dividends credited on the ex-date to the shares held at the previous close; cash earning
+  day t's rate from close t to close t+1, converted to an investment yield) belong to the engine (R4b). They are not
+  design inputs and do not use these feature clocks.
 
 The SPY evidence is the raw files: 2005-01-03 has 390 bars from 09:30 through 15:59, and the half day 2005-11-25 has
 210 bars from 09:30 through 12:59. That is a start label. VIX 2005-10-03 runs 09:31 through 16:14, and VIX3M
@@ -70,7 +86,7 @@ actually have been seen (a wire delay, or the time until the next decision bar).
 day uses the end of that day, not the open. The body is not revised in place; a correction is a new row with its own
 `available_ts`.
 
-**Dividends and T-bill rates.** `available_ts` is the announcement or publication time, not the ex-date and not the
-accrual period. A dividend known only on the morning of the ex-date is not available at the previous session's 15:58
-decision. A T-bill rate published with the auction result is available at that publication time. If the series is
-revised, use vintage storage, as for macro data.
+**Other dividend or rate series.** `available_ts` is the time the value was public. For SPY's dividends that is the
+ex-date's open (registered above): a dividend first known on the morning of the ex-date is not available at the previous
+session's 15:59 decision. For a rate, it is the publication time. If the series is revised, use vintage storage, as for
+macro data.

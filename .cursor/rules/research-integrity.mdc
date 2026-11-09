@@ -18,7 +18,9 @@ was tuned until it did is a failure of this project.
 2. **Data outside the point-in-time layer.** A design reads data only through the runner's view
    (`so.core.point_in_time`, `docs/DATA_SOURCES.md`). Never use a value whose `available_ts` is after the decision;
    a model trained at time t uses only labels whose `label_known_ts` is before t. No new data source without Nicolas
-   (write the proposal). The VIX files in `store01_rawzone/ibkr_vix_family/` are approved, read-only.
+   (write the proposal). The VIX files in `store01_rawzone/ibkr_vix_family/` are approved, read-only. So are SPY dividends
+   (`store01_rawzone/spy_dividends/`, `SPY_DIVIDENDS`) and the 3-month T-bill rate (`store01_rawzone/fred_dtb3/`, `TBILL_3M`),
+   approved 2026-11-08, read only through the DataContext.
 3. **Protected files** (`protected_paths.txt`): no change. Existing values in `so/config.py` never change; new constants
    with tests are proposed to Nicolas.
 4. **Data files.** Never modify or delete anything in `store01`-`store03`. In `store04_experiments/` add only; the

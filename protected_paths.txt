@@ -29,6 +29,7 @@ so/core/holdout.py
 so/core/point_in_time.py
 so/core/development_span.py
 so/core/raw_data.py
+so/core/external_data.py
 so/core/local_file_management.py
 so/core/trial_log.py
 so/core/csv_append.py
