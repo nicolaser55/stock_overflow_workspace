@@ -11,7 +11,8 @@ session). It has no default, and development code does not read it. The experime
 the data root.
 
 Four zones:
-    store01_rawzone         raw IBKR minute bars (corrected once for bad ticks, records/bad_tick_corrections.csv)
+    store01_rawzone         raw IBKR minute bars (corrected once for bad ticks, records/bad_tick_corrections.csv), and the
+                            SPY dividends and 3-month T-bill rate published by stock_overflow_infra
     store02_workzone        pipeline per-day features (steps 00-04) and the daily table (step 06)
     store03_goldzone        pipeline barrier targets (step 05)
     store04_experiments     everything an experiment produces, one folder per experiment, plus the shared trial log
@@ -36,6 +37,9 @@ _DATA_PATH_SUFFIX_DICT = {
     "LOCAL_VIX_DAILY_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix_daily/",
     "LOCAL_VIX3M_1MIN_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix3m_1min/",
     "LOCAL_VIX3M_DAILY_DATA_FILE_PATH_STR": "store01_rawzone/ibkr_vix_family/vix3m_daily/",
+    # THE PUBLIC NON-PRICE SOURCES WRITTEN BY stock_overflow_infra (DATA CONTRACT VERSION 2; READ ONLY THROUGH so.core.external_data)
+    "LOCAL_SPY_DIVIDENDS_PATH_STR": "store01_rawzone/spy_dividends/",
+    "LOCAL_TBILL_3M_PATH_STR": "store01_rawzone/fred_dtb3/",
     # THE PIPELINE FOLDERS (STEPS 00-04 WORKZONE, STEP 05 GOLDZONE, STEP 06 WORKZONE)
     "LOCAL_DQ_REPORT_DATA_FILE_PATH_STR": "store02_workzone/step00_data_quality_report/",
     "LOCAL_PA_OHLCV_DATA_FILE_PATH_STR": "store02_workzone/step01_PA_ohlcv_data/",

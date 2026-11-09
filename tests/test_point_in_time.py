@@ -35,6 +35,7 @@ from so.core.point_in_time import (add_available_ts_pdf, add_tsbar_label_known_t
                                    check_feature_available_ts, DataContext, register_source_dict, unregister_source,
                                    SOURCE_SPEC_DICT)
 from so.features.vix_features import read_vix_daily_pdf, get_vix_prev_value_pdf
+from so.core.external_data import read_spy_dividends_pdf, read_tbill_3m_pdf, SPY_DIVIDENDS_COLUMN_STR_LIST, TBILL_3M_COLUMN_STR_LIST
 
 # KEEP THE REAL REGISTRY PATHS AND POINT THE SUITE AT TEMPORARY FILES
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
@@ -319,6 +320,124 @@ def test_vix_regression():
     passed("VIX regression (previous close and the loaded close match the file)")
 
 
+# FUNCTION: WRITE THE TWO SYNTHETIC CONTRACT FILES (INGEST DATA CONTRACT VERSION 2) UNDER A ROOT
+def write_external_files(root_str_in):
+    """
+    Writes store01_rawzone/fred_dtb3/dtb3.csv and store01_rawzone/spy_dividends/spy_dividends.csv with invented values.
+
+    Args:
+        root_str_in (str): Data root ending with "/"
+
+    Returns:
+        tuple[str, str]: The T-bill folder and the dividend folder
+    """
+    # T-BILL: A FIRST RELEASE, ITS REVISION, AND A DAY FRED PUBLISHED NO VALUE (".")
+    rate_folder_str = f"{root_str_in}store01_rawzone/fred_dtb3/"
+    os.makedirs(rate_folder_str, exist_ok=True)
+    pd.DataFrame([["2010-01-05", "2010-01-05 16:30:00-05:00", "2010-01-04", "0.08", "2010-01-05", "first_seen", "R1"],
+                  ["2010-02-01", "2010-02-01 16:30:00-05:00", "2010-01-04", "0.09", "2010-02-01", "revision", "R2"],
+                  ["2010-01-06", "2010-01-06 16:30:00-05:00", "2010-01-05", ".", "2010-01-06", "first_seen", "R1"]],
+                 columns=TBILL_3M_COLUMN_STR_LIST).to_csv(f"{rate_folder_str}dtb3.csv", index=False)
+    # DIVIDENDS: A FIRST RELEASE AT THE EX-DATE OPEN AND A LATER CORRECTION
+    dividend_folder_str = f"{root_str_in}store01_rawzone/spy_dividends/"
+    os.makedirs(dividend_folder_str, exist_ok=True)
+    pd.DataFrame([["2010-03-19", "2010-03-19 09:30:00-04:00", "2010-03-19", "2010-03-23", "2010-04-30", "", "0.512800", "regular", "USD", "first_seen", "R1"],
+                  ["2010-06-01", "2010-06-01 10:00:00-04:00", "2010-03-19", "2010-03-23", "2010-04-30", "", "0.513000", "regular", "USD", "revision", "R2"]],
+                 columns=SPY_DIVIDENDS_COLUMN_STR_LIST).to_csv(f"{dividend_folder_str}spy_dividends.csv", index=False)
+    return rate_folder_str, dividend_folder_str
+
+# FUNCTION: TEST THE EXTERNAL-SOURCE LOADERS AND THEIR REGISTRY ENTRIES
+def test_external_sources():
+    """
+    SPY_DIVIDENDS and TBILL_3M: contract header, clocks, cutoff, types, vintage as-of, the holdout guard, the disk loader,
+    and the runner view returning the same release as development.
+
+    Returns:
+        None
+    """
+    # THE FILES, UNDER THE TEMPORARY DATA ROOT (THE PATHS OF so.paths)
+    root_str = TEMP_ROOT_STR.replace("\\", "/").rstrip("/") + "/"
+    rate_folder_str, dividend_folder_str = write_external_files(root_str)
+    assert paths.LOCAL_TBILL_3M_PATH_STR == rate_folder_str and paths.LOCAL_SPY_DIVIDENDS_PATH_STR == dividend_folder_str
+    # LOADERS: TYPES, "." AS NaN, AND THE CUTOFF ON date (THE REVISIONS ARE DATED 2010-02-01 AND 2010-06-01)
+    rate_pdf = read_tbill_3m_pdf("2010-12-31", enforce_holdout_bool_in=False)
+    assert len(rate_pdf) == 3 and rate_pdf["value_pct"].isna().sum() == 1
+    assert str(rate_pdf["available_ts"].iloc[0]) == "2010-01-05 16:30:00-05:00"
+    assert len(read_tbill_3m_pdf("2010-01-31", enforce_holdout_bool_in=False)) == 2
+    dividend_pdf = read_spy_dividends_pdf("2010-12-31", enforce_holdout_bool_in=False)
+    assert len(dividend_pdf) == 2 and float(dividend_pdf["amount_usd"].iloc[0]) == 0.5128 and pd.isna(dividend_pdf["declared_date"].iloc[0])
+    assert len(read_spy_dividends_pdf("2010-05-31", enforce_holdout_bool_in=False)) == 1
+    # NO CUTOFF, ANOTHER CONTRACT VERSION, A date THAT IS NOT THE NEW YORK DATE OF available_ts, A MISSING FILE: ALL RAISE
+    for call in (lambda: read_tbill_3m_pdf(None, enforce_holdout_bool_in=False),):
+        try:
+            call()
+            raise AssertionError("no cutoff accepted")
+        except ValueError:
+            pass
+    bad_folder_str = os.path.join(TEMP_ROOT_STR, "bad_rate").replace("\\", "/") + "/"
+    os.makedirs(bad_folder_str, exist_ok=True)
+    good_pdf = pd.read_csv(f"{rate_folder_str}dtb3.csv", dtype=str, keep_default_na=False)
+    for bad_pdf, error_type in ((good_pdf.drop(columns="ingest_run_id"), ValueError), (good_pdf.assign(date="2010-01-04"), ValueError)):
+        bad_pdf.to_csv(f"{bad_folder_str}dtb3.csv", index=False)
+        try:
+            read_tbill_3m_pdf("2010-12-31", raw_path_str_in=bad_folder_str, enforce_holdout_bool_in=False)
+            raise AssertionError("a file outside the contract was accepted")
+        except error_type:
+            pass
+    try:
+        read_spy_dividends_pdf("2010-12-31", raw_path_str_in=bad_folder_str, enforce_holdout_bool_in=False)
+        raise AssertionError("a missing file was accepted")
+    except FileNotFoundError:
+        pass
+    # REGISTRY: ONE ROW PER KEY, THE RELEASE KNOWN AT as_of (LOOKED UP BY KEY; ROWS COME BACK IN RELEASE ORDER)
+    OBS_DATE = pd.Timestamp("2010-01-04").date()
+    first_pdf = get_as_of_pdf("TBILL_3M", pd.Timestamp("2010-01-20 15:59", tz=NY), pdf_in=rate_pdf)
+    revised_pdf = get_as_of_pdf("TBILL_3M", pd.Timestamp("2010-02-02 15:59", tz=NY), pdf_in=rate_pdf)
+    assert len(first_pdf) == 2 and float(first_pdf.set_index("observation_date")["value_pct"].loc[OBS_DATE]) == 0.08
+    assert float(revised_pdf.set_index("observation_date")["value_pct"].loc[OBS_DATE]) == 0.09
+    # THE FEATURE CLOCK: THE 2010-01-04 RATE IS NOT KNOWN AT THE 2010-01-05 15:59 DECISION (POSTED AT 16:30)
+    assert len(get_as_of_pdf("TBILL_3M", pd.Timestamp("2010-01-05 15:59", tz=NY), pdf_in=rate_pdf)) == 0
+    # THE DIVIDEND IS NOT KNOWN AT THE PREVIOUS SESSION'S DECISION, AND IS AT THE EX-DATE'S
+    assert len(get_as_of_pdf("SPY_DIVIDENDS", pd.Timestamp("2010-03-18 15:59", tz=NY), pdf_in=dividend_pdf)) == 0
+    ex_pdf = get_as_of_pdf("SPY_DIVIDENDS", pd.Timestamp("2010-03-19 15:59", tz=NY), pdf_in=dividend_pdf)
+    assert len(ex_pdf) == 1 and float(ex_pdf["amount_usd"].iloc[0]) == 0.5128
+    assert float(get_as_of_pdf("SPY_DIVIDENDS", pd.Timestamp("2010-06-02", tz=NY), pdf_in=dividend_pdf)["amount_usd"].iloc[0]) == 0.513
+    # BUILT-IN: A TEST CANNOT UNREGISTER THEM
+    for name_str in ("SPY_DIVIDENDS", "TBILL_3M"):
+        try:
+            unregister_source(name_str)
+            raise AssertionError(f"{name_str} was unregistered")
+        except ValueError:
+            pass
+    # THE RUNNER VIEW RETURNS THE SAME RELEASE AS DEVELOPMENT; get_new STILL STREAMS EVERY NEW ROW
+    from so.runner.view import SourceFeed, get_view_source_state_dict, DecisionView
+    moment_ts = pd.Timestamp("2010-02-02 15:59", tz=NY)
+    feed = SourceFeed("TBILL_3M", "feature", add_available_ts_pdf("TBILL_3M", rate_pdf))
+    feed.advance_to_ts(moment_ts)
+    view = DecisionView(moment_ts, 0, 0, moment_ts.date(), {}, get_view_source_state_dict({"TBILL_3M": feed}))
+    view_pdf = view.get("TBILL_3M")
+    assert len(view_pdf) == 2 and float(view_pdf.set_index("observation_date")["value_pct"].loc[OBS_DATE]) == 0.09
+    assert len(view.get("TBILL_3M", pd.Timestamp("2010-01-20 15:59", tz=NY))) == 2
+    assert float(view.get("TBILL_3M", pd.Timestamp("2010-01-20 15:59", tz=NY)).set_index("observation_date")["value_pct"].loc[OBS_DATE]) == 0.08
+    assert len(view.get_new("TBILL_3M")) == 3
+    # WITH A WINDOW FROM 2010-06-01: THE DISK LOADER STOPS BEFORE IT, A CUTOFF ON THE START RAISES
+    pd.DataFrame([{"window_id": "test", "status": "active", "start": "2010-06-01", "end": "2011-05-31", "session_count": 1,
+                   "months_covered": 12, "opened_ts": "2026-11-09T00:00:00", "opened_by": "test", "data_last_session_at_open": "2011-05-31",
+                   "retired_ts": "", "retire_reason": ""}]).to_csv(REGISTRY_PATH_STR, index=False)
+    try:
+        from so.core.point_in_time import get_stamped_source_frame_dict
+        frame_dict = get_stamped_source_frame_dict(["TBILL_3M", "SPY_DIVIDENDS"], "2010-05-31")
+        assert len(frame_dict["TBILL_3M"]) == 3 and len(frame_dict["SPY_DIVIDENDS"]) == 1
+        try:
+            read_spy_dividends_pdf("2010-06-01")
+            raise AssertionError("a cutoff on the window start was accepted")
+        except ValueError:
+            pass
+    finally:
+        os.remove(REGISTRY_PATH_STR)
+    passed("SPY_DIVIDENDS and TBILL_3M: contract, clocks, cutoff, vintage as-of, guard, disk loader, runner view = development")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY FOLDERS
@@ -331,6 +450,7 @@ if __name__ == "__main__":
         test_tsbar_cell_clock()
         test_unregistered()
         test_vix_regression()
+        test_external_sources()
         assert os.path.isfile(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_EXISTS_BOOL
         if REAL_WINDOWS_EXISTS_BOOL:
             assert os.path.getsize(REAL_WINDOWS_PATH_STR) == REAL_WINDOWS_SIZE_INT

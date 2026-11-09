@@ -418,11 +418,44 @@ def test_refresh_refuses_without_roots():
         os.environ["SO_QUARANTINE_PATH"] = saved_quarantine_str
     passed("refresh refuses unless both roots are set, distinct, and the quarantine has store01_rawzone")
 
+# FUNCTION: WRITE THE EXTERNAL CONTRACT FILES INTO THE QUARANTINE
+def write_external_quarantine_files(start_date_in):
+    """
+    Writes the T-bill and dividend contract files into the quarantine with rows on both sides of the holdout start S.
+    A revision of a value observed before S, but published on S, must not reach the view.
+
+    Args:
+        start_date_in (datetime.date): Holdout start S
+
+    Returns:
+        dict: relative path -> the data lines the view must keep
+    """
+    # NEW YORK CLOCK TEXT AS THE INGEST WRITES IT
+    def get_clock_str(day_in, time_str_in):
+        return pd.Timestamp(f"{day_in} {time_str_in}", tz="America/New_York").isoformat(sep=" ")
+    day_list = [start_date_in + pd.Timedelta(days=offset_int).to_pytimedelta() for offset_int in (-30, -7, -6, -1, 0, 2)]
+    before_30, before_7, before_6, before_1, on_s, after_2 = day_list
+    rate_line_list = [f"{before_6},{get_clock_str(before_6, '16:30:00')},{before_7},4.50,{before_6},first_seen,R1",
+                      f"{on_s},{get_clock_str(on_s, '16:30:00')},{before_7},4.51,{on_s},revision,R2",
+                      f"{on_s},{get_clock_str(on_s, '16:30:00')},{before_1},4.52,{on_s},first_seen,R2"]
+    dividend_line_list = [f"{before_30},{get_clock_str(before_30, '09:30:00')},{before_30},{before_30},{after_2},,0.500000,regular,USD,first_seen,R1",
+                          f"{after_2},{get_clock_str(after_2, '10:00:00')},{before_30},{before_30},{after_2},,0.510000,regular,USD,revision,R2"]
+    file_dict = {"store01_rawzone/fred_dtb3/dtb3.csv": ("date,available_ts,observation_date,value_pct,vintage_realtime_start,vintage_kind,ingest_run_id", rate_line_list),
+                 "store01_rawzone/spy_dividends/spy_dividends.csv": ("date,available_ts,ex_date,record_date,pay_date,declared_date,amount_usd,distribution_type,currency,vintage_kind,ingest_run_id", dividend_line_list)}
+    for relative_str, (header_str, line_list) in file_dict.items():
+        file_path_str = os.path.join(TEMP_QUARANTINE_STR, relative_str)
+        os.makedirs(os.path.dirname(file_path_str), exist_ok=True)
+        with open(file_path_str, "w", encoding="utf-8", newline="\n") as external_file:
+            external_file.write("\n".join([header_str] + line_list) + "\n")
+    # ONLY THE ROWS PUBLIC BEFORE S SURVIVE
+    return {"store01_rawzone/fred_dtb3/dtb3.csv": rate_line_list[:1], "store01_rawzone/spy_dividends/spy_dividends.csv": dividend_line_list[:1]}
+
 # FUNCTION: TEST THE FIRST BUILD
 def test_first_view_cut_and_redact():
     """
     The first refresh copies nothing on or after S, keeps raw lines byte-identical, redacts TSBAR exits that land
-    on S and TSDAY forward columns whose horizon ends on or after S, and writes a VIEW.json that matches the window.
+    on S and TSDAY forward columns whose horizon ends on or after S, cuts the undated SPY-dividend and T-bill files on date
+    (a revision published on S stays out), and writes a VIEW.json that matches the window.
 
     Returns:
         dict: Tree description (for later tests)
@@ -437,8 +470,13 @@ def test_first_view_cut_and_redact():
     os.makedirs(os.path.dirname(store04_str), exist_ok=True)
     with open(store04_str, "w", encoding="utf-8") as marker_file:
         marker_file.write("keep\n")
+    # THE TWO UNDATED CONTRACT FILES (SPY DIVIDENDS, T-BILL): ROWS ARE CUT ON date, THE DAY EACH VALUE BECAME PUBLIC
+    external_dict = write_external_quarantine_files(start_date)
     result_dict = run_refresh_development_view_dict(run_pipeline_bool_in=False)
     assert result_dict["slid_bool"] is False
+    for relative_str, kept_line_list in external_dict.items():
+        view_bytes = Path_read_bytes(os.path.join(TEMP_VIEW_STR, relative_str))
+        assert view_bytes.decode("utf-8").splitlines()[1:] == kept_line_list, relative_str
     view_path_str = os.path.join(TEMP_VIEW_STR, "VIEW.json")
     assert os.path.isfile(view_path_str)
     with open(view_path_str, encoding="utf-8") as view_file:

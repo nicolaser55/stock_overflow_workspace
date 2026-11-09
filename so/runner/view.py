@@ -4,7 +4,7 @@ import pandas as pd
 # IMPORT THE POINT-IN-TIME CLOCKS, REGISTRY AND STAMPING (THE VIEW DOES NOT HOLD A CONTEXT)
 from so.core.point_in_time import (NY_TZ_STR, get_ny_timestamp, get_minute_bar_available_ts, get_source_spec_dict,
                                    add_available_ts_pdf, get_feature_column_pdf, get_spy_frame_pdf,
-                                   get_declared_source_name_list)
+                                   get_declared_source_name_list, get_vintage_as_of_pdf)
 # IMPORT THE EMPTY ENGINE SNAPSHOT
 from so.runner.engine import get_empty_engine_state_dict
 
@@ -498,7 +498,8 @@ class DecisionView:
     # FUNCTION: FEATURE ROWS KNOWABLE AT as_of (DEFAULT: THE MOMENT)
     def get(self, source_name_str_in, as_of_ts_in=None, columns_in=None):
         """
-        Feature rows with available_ts <= as_of_ts. A copy. as_of after the decision raises. A label source raises.
+        Feature rows with available_ts <= as_of_ts. A copy. as_of after the decision raises. A label source raises. A vintage
+        source returns, per key, the latest release known at as_of (get_new still returns every new row, revisions included).
 
         Args:
             source_name_str_in (str): Registered feature source
@@ -515,6 +516,10 @@ class DecisionView:
                                             state_dict["visible_count_int"])
         if len(visible_pdf) and as_of_ts < self.decision_ts:
             visible_pdf = visible_pdf.loc[visible_pdf["available_ts"].map(get_ny_timestamp) <= as_of_ts]
+        # A VINTAGE SOURCE COLLAPSES TO THE RELEASE KNOWN AT as_of, AS DataContext.get DOES IN DEVELOPMENT
+        spec_dict = get_source_spec_dict(source_name_str_in)
+        if spec_dict["revision_policy"] == "vintage" and len(visible_pdf):
+            visible_pdf = get_vintage_as_of_pdf(visible_pdf, spec_dict.get("vintage_key_list", []))
         if columns_in is not None:
             visible_pdf = visible_pdf[list(columns_in)]
         return get_detached_pdf(visible_pdf)

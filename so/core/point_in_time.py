@@ -481,6 +481,16 @@ SOURCE_SPEC_DICT = {
                     "availability_func": add_vix_daily_available_ts_pdf, "revision_policy": "not revised",
                     "revision_reason": "Same as VIX_DAILY: the stored print, no vintage.",
                     "role": "feature", "holdout": "development boundary; runner window end"},
+    "SPY_DIVIDENDS": {"loader": "so.core.external_data.read_spy_dividends_pdf", "time_zone": NY_TZ_STR,
+                      "timestamp_convention": "available_ts stored on each row (ingest data contract v2): a first release is public at the ex-date's 09:30 New York open; a revision at the time it was retrieved",
+                      "availability_func": keep_vintage_available_ts_pdf, "revision_policy": "vintage", "vintage_key_list": ["ex_date", "distribution_type"],
+                      "revision_reason": "State Street can correct a published distribution. A correction is a new row with its own available_ts; the first row stays.",
+                      "role": "feature", "holdout": "development boundary; runner window end"},
+    "TBILL_3M": {"loader": "so.core.external_data.read_tbill_3m_pdf", "time_zone": NY_TZ_STR,
+                 "timestamp_convention": "available_ts stored on each row (ingest data contract v2): the later of the ALFRED vintage date and the next US federal business day after the observation, at 16:30 New York",
+                 "availability_func": keep_vintage_available_ts_pdf, "revision_policy": "vintage", "vintage_key_list": ["observation_date"],
+                 "revision_reason": "FRED revises H.15 rates. ALFRED keeps every vintage; the first release and each changed value are rows with their own available_ts.",
+                 "role": "feature", "holdout": "development boundary; runner window end"},
     "TSIND": {"loader": "so.core.local_file_management.read_date_range_csv_files_from_path", "time_zone": NY_TZ_STR,
               "timestamp_convention": "snapshot bar start; extrema confirmed PA_EXTREMA_ORDER bars later",
               "availability_func": add_cache_available_ts_pdf, "revision_policy": "not revised",
@@ -543,7 +553,7 @@ def unregister_source(source_name_str_in):
         None
     """
     # KEEP THE BUILT-IN SOURCES
-    if source_name_str_in not in SOURCE_SPEC_DICT or source_name_str_in in ("SPY_1MIN", "VIX_1MIN", "VIX_DAILY", "VIX3M_1MIN", "VIX3M_DAILY", "TSIND", "TSSEG", "TSCTX", "TSDAY", "TSDAY_FWD", "TSBAR"):
+    if source_name_str_in not in SOURCE_SPEC_DICT or source_name_str_in in ("SPY_1MIN", "VIX_1MIN", "VIX_DAILY", "VIX3M_1MIN", "VIX3M_DAILY", "SPY_DIVIDENDS", "TBILL_3M", "TSIND", "TSSEG", "TSCTX", "TSDAY", "TSDAY_FWD", "TSBAR"):
         raise ValueError(f"{source_name_str_in} is not a test source.")
     # DROP THE TEST SOURCE
     del SOURCE_SPEC_DICT[source_name_str_in]
@@ -1106,6 +1116,13 @@ def get_registry_frame_pdf(source_name_str_in, end_date_in):
             return read_vix_daily_pdf(series_str, end_str, enforce_holdout_bool_in=True)
         from so.features.vix_features import read_vix_1min_pdf
         return read_vix_1min_pdf(series_str, end_str, enforce_holdout_bool_in=True)
+    # THE PUBLIC NON-PRICE SOURCES (ONE UNDATED CONTRACT FILE EACH)
+    if source_name_str_in == "SPY_DIVIDENDS":
+        from so.core.external_data import read_spy_dividends_pdf
+        return read_spy_dividends_pdf(end_str, enforce_holdout_bool_in=True)
+    if source_name_str_in == "TBILL_3M":
+        from so.core.external_data import read_tbill_3m_pdf
+        return read_tbill_3m_pdf(end_str, enforce_holdout_bool_in=True)
     # CACHE FOLDERS (DATE-STAMPED FILES, EXCEPT THE DAILY TABLE)
     from so import paths
     from so.core.local_file_management import read_csv_files_from_path, read_date_range_csv_files_from_path

@@ -20,6 +20,7 @@
 /so/core/point_in_time.py @nicolaser55
 /so/core/development_span.py @nicolaser55
 /so/core/raw_data.py @nicolaser55
+/so/core/external_data.py @nicolaser55
 /so/core/local_file_management.py @nicolaser55
 /so/core/trial_log.py @nicolaser55
 /so/core/csv_append.py @nicolaser55
