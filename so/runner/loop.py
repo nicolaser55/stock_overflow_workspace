@@ -15,6 +15,7 @@ from so.runner.view import (get_empty_bar_buffer_dict, fill_bar_buffer_through_d
                             get_decision_view)
 from so.runner.preflight import check_design_source
 from so.runner.engine import FractionalWeightEngine, get_decision_dict
+from so.runner.total_return import get_session_open_event_dict
 
 """
 Daily Streaming Loop (infrastructure step 4a, stream pause in 4b-1a)
@@ -333,6 +334,9 @@ class DailyLoop:
         start_idx = int(self.start_idx_arr[session_idx])
         is_last_session = session_pos == len(self.window_session_idx_arr) - 1
         session_date = self.ohlcv_array_dict["session_date_list"][session_idx]
+        # DIVIDENDS AND INTEREST ON THE PREVIOUS CLOSE'S HOLDINGS, BEFORE ANYTHING TRADES (R4b; NONE ON THE FIRST SESSION)
+        if session_pos > 0:
+            self.engine.open_session(get_session_open_event_dict(self.ohlcv_array_dict, session_idx, session_date))
         # STOPS THROUGH THE DECISION BAR ARE VISIBLE ON THE VIEW
         morning_event_dict = get_bar_range_event_dict(self.ohlcv_array_dict, start_idx, decision_idx, session_date)
         if morning_event_dict is not None:
@@ -507,6 +511,9 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
         session_date = ohlcv_array_dict_in["session_date_list"][session_idx]
         decision_dict = get_decision_dict(decision_dict_list_in[session_pos])
         decision_dict_list.append(dict(decision_dict))
+        # DIVIDENDS AND INTEREST ON THE PREVIOUS CLOSE'S HOLDINGS, BEFORE ANYTHING TRADES (R4b; NONE ON THE FIRST SESSION)
+        if session_pos > 0:
+            engine.open_session(get_session_open_event_dict(ohlcv_array_dict_in, session_idx, session_date))
         decision_session_list.append(session_date)
         # THE MORNING RUNS ON THE STOP PARAMETERS OF THE PREVIOUS DECISION (THE SAME RULE AS DailyLoop): A DECISION'S k
         # AND VOLATILITY APPLY FROM ITS OWN FILL UNTIL THE NEXT DECISION'S FILL, NEVER TO BARS BEFORE THE DECISION

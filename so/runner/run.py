@@ -789,7 +789,12 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         "judge_hash_str": judge_dict["judge_hash"], "judge_file_count": judge_dict["judge_file_count"],
         "view_stamp_dict": view_stamp_dict, "candidate_list": list(stream_dict_in["candidate_list"]),
         "trial_id_list": list(stream_dict_in["trial_id_list"]), "date1": str(date1_in), "date2": str(date2_in),
-        "grade_dict": grade_dict, **extra_report_dict,
+        "grade_dict": grade_dict,
+        # R4b: WHAT THE RETURNS INCLUDE, AND THE DIVIDENDS AND INTEREST EACH SIDE WAS CREDITED
+        "return_basis_str": str(ohlcv_array_dict_in.get("total_return_basis_str", "price_only")),
+        "income_dict": {"strategy": {key_str: value for key_str, value in (prior_only_dict_in.get("income_dict") or {}).items() if key_str != "income_pdf"},
+                        "buy_hold": dict(baseline_dict.get("buy_hold_income_dict") or {})},
+        **extra_report_dict,
     })
     output_file_list = [REPORT_JSON_FILE_STR, REPORT_MD_FILE_STR, MANIFEST_FILE_STR]
     if lookahead_dict is not None:
@@ -798,6 +803,7 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                      "commit": stream_dict_in["commit_str"], "code_hash": stream_dict_in["code_hash_str"],
                      "judge_hash": judge_dict["judge_hash"], "judge_file_count": judge_dict["judge_file_count"],
                      "view_stamp": view_stamp_dict,
+                     "return_basis": str(ohlcv_array_dict_in.get("total_return_basis_str", "price_only")),
                      "design": {"experiment_name": stream_dict_in["experiment_name_str"],
                                 "protocol_version": str(getattr(design_module_in, "PROTOCOL_VERSION", "")),
                                 "file": stream_dict_in["design_file_path_str"]},

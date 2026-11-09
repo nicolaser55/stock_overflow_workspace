@@ -18,7 +18,8 @@ def get_development_ohlcv_dict(embargo_sessions_in, ohlcv_pdf_in=None):
         ohlcv_pdf_in (pd.DataFrame | None): Bars already loaded (None reads the raw folder through the guard)
 
     Returns:
-        dict: ohlcv_array_dict, development_end, window_start, anchor_session_list, last_price_date
+        dict: ohlcv_array_dict (with its total-return schedule, R4b), development_end, window_start, anchor_session_list,
+              last_price_date
     """
     # IMPORT THE BOUNDARY AND THE ARRAY BUILDER HERE
     from so.core.holdout import get_active_holdout_window_dict, get_development_end_date, get_date, get_truncated_ohlcv_dict
@@ -38,6 +39,10 @@ def get_development_ohlcv_dict(embargo_sessions_in, ohlcv_pdf_in=None):
     development_end = get_development_end_date(int(embargo_sessions_in), anchor_session_list)
     # DROP THE EMBARGO SESSIONS THAT SIT BETWEEN THE DEVELOPMENT END AND THE WINDOW
     cut_dict = get_truncated_ohlcv_dict(ohlcv_array_dict, development_end)
+    # TOTAL RETURNS (R4b): DIVIDENDS AND THE T-BILL RATE THROUGH THE SAME LAST DATE AS THE PRICES, THROUGH THE GUARD.
+    # A MISSING SOURCE FILE RAISES: A DEVELOPMENT RUN IS NEVER SILENTLY A PRICE-RETURN RUN
+    from so.runner.total_return import get_total_return_bundle_dict
+    cut_dict = get_total_return_bundle_dict(cut_dict, str(price_session_list[-1]), enforce_holdout_bool_in=True)
     return {"ohlcv_array_dict": cut_dict, "development_end": development_end, "window_start": window_start,
             "anchor_session_list": anchor_session_list, "last_price_date": price_session_list[-1]}
 

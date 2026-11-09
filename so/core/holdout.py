@@ -977,6 +977,12 @@ def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     truncated_dict["session_start_idx_arr"] = ohlcv_array_dict_in["session_start_idx_arr"][:last_idx + 1]
     truncated_dict["session_end_idx_arr"] = ohlcv_array_dict_in["session_end_idx_arr"][:last_idx + 1]
     truncated_dict["date_session_idx_dict"] = {get_date(session_date): idx for idx, session_date in enumerate(truncated_dict["session_date_list"])}
+    # THE TOTAL-RETURN SCHEDULE (R4b) IS ONE VALUE PER SESSION: THE SAME PREFIX
+    for key_str in ("dividend_per_share_arr", "cash_growth_arr"):
+        if key_str in ohlcv_array_dict_in:
+            truncated_dict[key_str] = ohlcv_array_dict_in[key_str][:last_idx + 1]
+    if "total_return_basis_str" in ohlcv_array_dict_in:
+        truncated_dict["total_return_basis_str"] = ohlcv_array_dict_in["total_return_basis_str"]
     return truncated_dict
 
 # FUNCTION: PERTURB EVERY BAR AFTER A DECISION BAR
@@ -1007,6 +1013,12 @@ def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     perturbed_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"].copy()
     perturbed_dict["session_date_list"] = list(ohlcv_array_dict_in["session_date_list"])
     perturbed_dict["date_session_idx_dict"] = dict(ohlcv_array_dict_in["date_session_idx_dict"])
+    # THE TOTAL-RETURN SCHEDULE (R4b) IS KEPT AS IT IS: IT IS ACCOUNTING, NOT A DESIGN INPUT
+    for key_str in ("dividend_per_share_arr", "cash_growth_arr"):
+        if key_str in ohlcv_array_dict_in:
+            perturbed_dict[key_str] = np.array(ohlcv_array_dict_in[key_str], copy=True)
+    if "total_return_basis_str" in ohlcv_array_dict_in:
+        perturbed_dict["total_return_basis_str"] = ohlcv_array_dict_in["total_return_basis_str"]
     # REBUILD THE BARS AFTER THE DECISION BAR FROM SHUFFLED RETURNS
     bar_count = len(perturbed_dict["close_arr"]) - start_idx
     if bar_count > 0 and start_idx > 0:

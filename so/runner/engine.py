@@ -20,12 +20,14 @@ The design decides. The position engine turns decisions into trades. Anything th
 An engine sees the fill or mark it is given and its own state only.
 
     open_window      buy initial_weight at the first 10:00 open
+    open_session     credit, before any fill of the session, the dividend on the shares held at the previous close and
+                     the interest on the cash held at the previous close (R4b total returns; so.runner.total_return)
     apply_decision   rebalance / enter / flatten at the 15:59 fill (daily mode)
     process_bars     intra-session trailing stops or barrier exits (numba); no-op for fractional
     close_session    mark cash + shares x session close
     close_window     sell everything at the last close
     get_state_dict   read-only snapshot for the view (in position, shares, last exit, cash sessions)
-    get_result_dict  trades, daily equity, metrics
+    get_result_dict  trades, daily equity, metrics, income_dict (dividends and interest credited)
 
 A fill event has bar_idx, timestamp, raw_price (the open, except END which is the close), and may carry close,
 decision_ts, session_idx and session_end_idx. A mark event has session_date and close. A bar-range event has
@@ -134,6 +136,47 @@ class Engine:
         """
         # 4A ENGINES IMPLEMENT THIS
         raise NotImplementedError("open_window")
+
+    # FUNCTION: CREDIT DIVIDENDS AND INTEREST AT THE OPEN OF A SESSION (R4b)
+    def open_session(self, open_event_dict_in):
+        """
+        Called once per session before any fill or bar of that session, except the window's first session. Nothing
+        has traded since the previous close, so the cash and shares now are those held at that close. The dividend
+        goes to the shares held at the previous close (shares bought on the ex-date get none; shares sold at its open
+        still do). The credits land in cash; an engine never reinvests them by itself.
+
+        Args:
+            open_event_dict_in (dict): session_idx, session_date, dividend_per_share, cash_growth
+                                       (so.runner.total_return.get_session_open_event_dict)
+
+        Returns:
+            None
+        """
+        # THE TWO CREDITS, ON THE HOLDINGS AT THE PREVIOUS CLOSE
+        dividend_float = float(self.share_count_int) * float(open_event_dict_in["dividend_per_share"])
+        interest_float = float(self.cash_float) * float(open_event_dict_in["cash_growth"])
+        if dividend_float == 0.0 and interest_float == 0.0:
+            return
+        self.cash_float += dividend_float + interest_float
+        if not hasattr(self, "income_dict_list"):
+            self.income_dict_list = []
+        self.income_dict_list.append({"session_date": open_event_dict_in["session_date"], "share_count": int(self.share_count_int),
+                                      "dividend": dividend_float, "interest": interest_float, "cash_after": self.cash_float})
+
+    # FUNCTION: DIVIDENDS AND INTEREST CREDITED SO FAR
+    def get_income_dict(self):
+        """
+        Args:
+            None
+
+        Returns:
+            dict: dividend_income, interest_income (dollars), income_pdf (one row per credited session)
+        """
+        # SUM THE CREDITS (NONE ON A PRICE-ONLY BUNDLE)
+        income_pdf = pd.DataFrame(getattr(self, "income_dict_list", []), columns=["session_date", "share_count", "dividend", "interest", "cash_after"])
+        return {"dividend_income": float(income_pdf["dividend"].sum()) if len(income_pdf) else 0.0,
+                "interest_income": float(income_pdf["interest"].sum()) if len(income_pdf) else 0.0,
+                "income_pdf": income_pdf}
 
     # FUNCTION: A DAILY FILL AFTER A DECISION
     def apply_decision(self, fill_event_dict_in, decision_dict_in, decision_close_in):
@@ -429,7 +472,7 @@ class FractionalWeightEngine(Engine):
         # THE SAME METRIC KEYS AS the old fractional simulator (tests/fractional_exposure_reference.py)
         trade_pdf, daily_equity_pdf = pd.DataFrame(self.trade_dict_list), pd.DataFrame(self.equity_dict_list)
         if daily_equity_pdf.empty:
-            return {"trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": {}}
+            return {"income_dict": self.get_income_dict(), "trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": {}}
         final_equity = float(daily_equity_pdf["equity"].iloc[-1])
         counted_weight_arr = daily_equity_pdf["weight"].to_numpy(dtype=float)[:-1] if len(daily_equity_pdf) > 1 else daily_equity_pdf["weight"].to_numpy(dtype=float)
         metric_dict = {"total_return": round(final_equity / self.initial_capital_float - 1, 8),
@@ -440,7 +483,7 @@ class FractionalWeightEngine(Engine):
                        "rebalance_count": int((trade_pdf["reason"] == "rebalance").sum()) if not trade_pdf.empty else 0,
                        "mean_weight": float(counted_weight_arr.mean()),
                        "cost_paid": float((trade_pdf["fee"] + trade_pdf["slippage_cost"]).sum()) if not trade_pdf.empty else 0.0}
-        return {"trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": metric_dict}
+        return {"income_dict": self.get_income_dict(), "trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": metric_dict}
 
 
 # FUNCTION: A FINITE FLOAT OR NAN
@@ -804,7 +847,7 @@ class TrailingStopEngine(Engine):
         if not episode_pdf.empty and "exit_fill_price" in episode_pdf.columns and "reentry_fill_price" in episode_pdf.columns:
             episode_pdf["share_gain_pct"] = episode_pdf["exit_fill_price"] / episode_pdf["reentry_fill_price"] - 1
         metric_dict = get_stop_reentry_metric_dict(trade_pdf, episode_pdf, daily_equity_pdf, self.initial_capital_float) if not daily_equity_pdf.empty else {}
-        return {"trade_pdf": trade_pdf, "episode_pdf": episode_pdf, "daily_equity_pdf": daily_equity_pdf,
+        return {"income_dict": self.get_income_dict(), "trade_pdf": trade_pdf, "episode_pdf": episode_pdf, "daily_equity_pdf": daily_equity_pdf,
                 "metric_dict": metric_dict}
 
 
@@ -1134,7 +1177,7 @@ class BarrierEngine(Engine):
         trade_pdf = pd.DataFrame(self.transaction_dict_list)
         daily_equity_pdf = pd.DataFrame(self.equity_dict_list)
         if daily_equity_pdf.empty:
-            return {"trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": {},
+            return {"income_dict": self.get_income_dict(), "trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": {},
                     "skipped_decision_count": int(self.skipped_decision_count_int)}
         final_equity = float(daily_equity_pdf["equity"].iloc[-1])
         exit_reason_series = trade_pdf["exit_reason"] if not trade_pdf.empty else pd.Series(dtype=object)
@@ -1147,7 +1190,7 @@ class BarrierEngine(Engine):
                        "sl_count": int((exit_reason_series == config.EXIT_REASON_SL).sum()),
                        "tl_count": int((exit_reason_series == config.EXIT_REASON_TL).sum()),
                        "skipped_decision_count": int(self.skipped_decision_count_int)}
-        return {"trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": metric_dict,
+        return {"income_dict": self.get_income_dict(), "trade_pdf": trade_pdf, "daily_equity_pdf": daily_equity_pdf, "metric_dict": metric_dict,
                 "skipped_decision_count": int(self.skipped_decision_count_int)}
 
 

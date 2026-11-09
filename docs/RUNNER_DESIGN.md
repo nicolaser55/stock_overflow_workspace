@@ -66,6 +66,38 @@ in the slow strict daily mode.
 - The design returns a decision for its engine (for the fractional engine: a target weight, 0 = cash, 1 = fully
   invested, NaN = keep). Retraining happens inside the design on its pre-registered schedule, through the label door.
 
+## Total returns (R4b, decided 2026-10-29; rules 2026-11-08 and 2026-11-09)
+
+Every return the referee compares is a total return: the strategy, buy-and-hold, the constant-exposure and
+random-timing baselines, the period scores, the cost sensitivity and the holdout report.
+
+- **The schedule.** `so.runner.total_return` adds two numbers per session to the price bundle (`ohlcv_array_dict`),
+  built from the registered sources `SPY_DIVIDENDS` and `TBILL_3M` through the same loaders and cutoffs as the prices
+  (`so.core.development_span` in development, `scripts/holdout_evaluate.py` in the holdout evaluation):
+  - `dividend_per_share_arr`: the distribution whose ex-date is that session (or, if the data has no session on the
+    ex-date, the next one);
+  - `cash_growth_arr`: the interest one dollar of cash earns from the previous close to this close.
+- **The credits.** Every engine has `open_session`, which every loop calls before the first fill or bar of each session
+  except the window's first:
+  - the dividend goes to the shares held at the previous close (shares bought on the ex-date get none; shares sold at
+    its fill still do);
+  - the interest goes to the cash held at the previous close.
+  Both land in cash. An engine never reinvests them on its own: the design's next decision does. Each engine reports
+  the totals in `income_dict`.
+- **The rate.** The investment yield of the day's DTB3 discount rate for a 91-day bill, `y = 365 d / (360 - 91 d)`,
+  accrued over the calendar days between the two closes. A day with no value carries the last one.
+  - The **first release** of each value is used, so a later FRED revision never changes a past result.
+  - Day t's rate pays the night t to t+1 although FRED posts it on t+1 at 16:30. This is accounting, not a decision
+    input; designs read the two sources only through the DataContext, with their feature clocks.
+- **Buy-and-hold** is the fractional engine at weight 1, rebalanced at every fill. A dividend is therefore reinvested
+  at its ex-date's 15:59 fill, with the normal costs. `get_buy_and_hold_result_dict` runs the same engine, so the
+  verdict, the period scores and the holdout report use one buy-and-hold.
+- **The basis.**
+  - A bundle built without the sources (synthetic tests) has a zero schedule and `total_return_basis_str`
+    `"price_only"`; its results equal the earlier price-return results exactly.
+  - Real development and holdout bundles always load the sources, and a missing file raises.
+  - The report and the manifest state the basis.
+
 ## Minute mode (agreed 2026-10-21)
 
 For decisions at minute level (exp01's entries, about 2 million minutes x 12 candidates), where calling Python once per
