@@ -18,6 +18,7 @@ from so.runner.engine import (BarrierEngine, get_decision_dict, get_barrier_buy_
                               FLOAT_DECISION_KEY_LIST)
 # IMPORT THE SHARED BAR EVENTS
 from so.runner.loop import get_bar_range_event_dict, get_fill_event_dict, get_empty_daily_result_dict
+from so.runner.total_return import get_session_open_event_dict
 # IMPORT THE PREFLIGHT
 from so.runner.preflight import check_design_source, check_minute_signal
 
@@ -985,6 +986,9 @@ class MinuteLoop:
         end_idx = int(self.end_idx_arr[session_idx])
         session_date = self.ohlcv_array_dict["session_date_list"][session_idx]
         is_last_session = int(session_pos_in) == len(self.window_session_idx_arr) - 1
+        # DIVIDENDS AND INTEREST ON THE PREVIOUS CLOSE'S HOLDINGS, BEFORE ANYTHING TRADES (R4b; NONE ON THE FIRST SESSION)
+        if int(session_pos_in) > 0:
+            self.engine.open_session(get_session_open_event_dict(self.ohlcv_array_dict, session_idx, session_date))
         last_bar_idx = len(self.close_arr) - 1
         fill_idx_list = []
         for bar_idx in self.session_bar_dict.get(session_idx, []):
@@ -1285,6 +1289,9 @@ def run_engine_minute_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, de
         end_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][session_idx])
         session_date = ohlcv_array_dict_in["session_date_list"][session_idx]
         is_last_session = session_pos == last_window_pos
+        # DIVIDENDS AND INTEREST ON THE PREVIOUS CLOSE'S HOLDINGS, BEFORE ANYTHING TRADES (R4b; NONE ON THE FIRST SESSION)
+        if session_pos > 0:
+            engine.open_session(get_session_open_event_dict(ohlcv_array_dict_in, session_idx, session_date))
         cursor_idx = start_idx
         for fill_idx, bar_idx, recorded_dict in fill_by_session_dict.get(session_idx, []):
             morning_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, cursor_idx, fill_idx - 1, session_date)

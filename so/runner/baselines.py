@@ -482,6 +482,7 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
     return {"buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"]),
             "buy_hold_metric_dict": dict(buy_hold_dict["metric_dict"]),
             "buy_hold_daily_equity_pdf": buy_hold_dict["daily_equity_pdf"],
+            "buy_hold_income_dict": {key_str: value for key_str, value in buy_hold_dict.get("income_dict", {}).items() if key_str != "income_pdf"},
             "constant_exposure_total_return": float(constant_dict["metric_dict"]["total_return"]),
             "constant_exposure_weight": mean_weight,
             "constant_exposure_metric_dict": dict(constant_dict["metric_dict"]),

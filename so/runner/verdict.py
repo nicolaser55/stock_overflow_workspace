@@ -379,6 +379,19 @@ def get_report_markdown_str(report_dict_in):
         line_list.extend(["", f"Grade (what the planner sees): {grade_dict.get('grade_str')}; "
                               f"{grade_dict.get('reason_str')} ({grade_dict.get('reason_code_str')})."])
     line_list.extend(["", "### Return", ""])
+    basis_str = str(report_dict_in.get("return_basis_str") or "price_only")
+    if basis_str == "total_return":
+        line_list.append("Total returns on both sides: SPY dividends credited at the ex-date open; cash earns the 3-month T-bill rate.")
+        income_dict = report_dict_in.get("income_dict") or {}
+        strategy_income_dict, buy_hold_income_dict = income_dict.get("strategy") or {}, income_dict.get("buy_hold") or {}
+        if strategy_income_dict or buy_hold_income_dict:
+            line_list.append(
+                f"Credited (dollars): strategy dividends {get_report_float_str(strategy_income_dict.get('dividend_income', np.nan))}, "
+                f"interest {get_report_float_str(strategy_income_dict.get('interest_income', np.nan))}; buy-and-hold dividends "
+                f"{get_report_float_str(buy_hold_income_dict.get('dividend_income', np.nan))}, interest "
+                f"{get_report_float_str(buy_hold_income_dict.get('interest_income', np.nan))}.")
+    else:
+        line_list.append("Price returns: no dividends, cash at 0% (a bundle without the total-return schedule).")
     line_list.append(
         f"Prior-only total return {get_report_float_str(return_dict['strategy_total_return'])} vs buy-and-hold "
         f"{get_report_float_str(return_dict['buy_hold_total_return'])}: "

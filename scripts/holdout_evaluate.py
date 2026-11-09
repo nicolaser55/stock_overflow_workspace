@@ -8,6 +8,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # IMPORT THE ARRAY CONVERSION
 from so.core.trade_execution import get_ohlcv_array_dict
+from so.runner.total_return import get_total_return_bundle_dict
+
+# THE SOURCES THE ENGINE NEEDS FOR TOTAL RETURNS (R4b), LOADED FOR EVERY DESIGN, AND THE KEY THAT CARRIES THEM
+TOTAL_RETURN_SOURCE_NAME_LIST = ["SPY_DIVIDENDS", "TBILL_3M"]
+TOTAL_RETURN_FRAME_KEY_STR = "_total_return_frame_tuple"
 # IMPORT THE HOLDOUT EVALUATION AND THE QUARANTINE WINDOW-END LOADER
 from so.core.holdout import load_evaluation_source_frame_dict
 from so.core.point_in_time import (get_declared_source_name_list, get_minute_bar_available_ts, get_runner_context)
@@ -74,11 +79,15 @@ def get_evaluation_frame_dict(design_module_in, token_file_path_str_in):
     """
     # THE DECLARED NAMES, WITH SPY ALWAYS LOADED FOR THE SIMULATOR ARRAYS
     declared_name_list = get_declared_source_name_list(design_module_in)
-    load_name_list = list(dict.fromkeys(["SPY_1MIN"] + declared_name_list))
+    load_name_list = list(dict.fromkeys(["SPY_1MIN"] + declared_name_list + TOTAL_RETURN_SOURCE_NAME_LIST))
     # THE QUARANTINE LOADER CHECKS THE TOKEN AND SO_QUARANTINE_PATH, THEN READS THROUGH THE WINDOW END
     frame_dict = load_evaluation_source_frame_dict(load_name_list, token_file_path_str_in)
+    # THE TOTAL-RETURN SOURCES (R4b) ARE KEPT FOR THE ENGINE UNDER THEIR OWN KEY; THE DESIGN STILL GETS ONLY WHAT IT DECLARED
+    total_return_frame_tuple = tuple(frame_dict[source_name_str] for source_name_str in TOTAL_RETURN_SOURCE_NAME_LIST)
     # RETURN ONLY WHAT THE DESIGN DECLARED, PLUS SPY WHEN IT DECLARED SPY
-    return {source_name_str: frame_dict[source_name_str] for source_name_str in load_name_list if source_name_str in declared_name_list or source_name_str == "SPY_1MIN"}
+    returned_dict = {source_name_str: frame_dict[source_name_str] for source_name_str in load_name_list if source_name_str in declared_name_list or source_name_str == "SPY_1MIN"}
+    returned_dict[TOTAL_RETURN_FRAME_KEY_STR] = total_return_frame_tuple
+    return returned_dict
 
 # FUNCTION: LOAD BARS UP TO THE WINDOW END
 if __name__ == "__main__":
@@ -93,6 +102,8 @@ if __name__ == "__main__":
         raise SystemExit(f"{arg_dict.design} has no get_candidate_design: only runner designs are evaluated.")
     frame_dict = get_evaluation_frame_dict(design_module, arg_dict.token_file)
     ohlcv_array_dict = get_ohlcv_array_dict(frame_dict["SPY_1MIN"])
+    # TOTAL RETURNS (R4b): THE SCHEDULE FROM THE QUARANTINE FRAMES LOADED ABOVE, THROUGH THE WINDOW END
+    ohlcv_array_dict = get_total_return_bundle_dict(ohlcv_array_dict, None, frame_tuple_in=frame_dict[TOTAL_RETURN_FRAME_KEY_STR])
     declared_name_list = get_declared_source_name_list(design_module)
     source_frame_dict = {source_name_str: frame_dict[source_name_str] for source_name_str in declared_name_list}
     design_id_str = os.path.basename(os.path.abspath(arg_dict.design))

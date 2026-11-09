@@ -483,6 +483,35 @@ def test_history_and_shared_fit():
            f"2 candidates share {refit_count} fits")
 
 
+# FUNCTION: MINUTE MODE CREDITS DIVIDENDS AND INTEREST AS ITS REPLAY DOES (R4b)
+def test_minute_total_return_matches_replay():
+    """
+    Returns:
+        None
+    """
+    # TWO WEEKS WITH A DIVIDEND ON THE SIXTH SESSION AND INTEREST EVERY NIGHT
+    from so.runner.minute import run_engine_minute_decisions_dict
+    from so.runner.total_return import get_zero_schedule_dict, get_bundle_with_schedule_dict, TOTAL_RETURN_BASIS_STR
+    register_minute_test_sources()
+    price_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-18", seed_in=8))
+    schedule_dict = get_zero_schedule_dict(len(price_dict["session_date_list"]))
+    schedule_dict["total_return_basis_str"] = TOTAL_RETURN_BASIS_STR
+    schedule_dict["dividend_per_share_arr"][5] = 1.0
+    schedule_dict["cash_growth_arr"][1:] = 0.0002
+    ohlcv_array_dict = get_bundle_with_schedule_dict(price_dict, schedule_dict)
+    data_context = get_minute_context(ohlcv_array_dict)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    design = minute_design.get_candidate_design("lo")
+    runner_dict = run_minute_dict(design, ohlcv_array_dict, date1, date2, data_context, None, 0.0, 0.0,
+                                  config.INITIAL_CAPITAL, config.ENTRY_SLIPPAGE_PER_SHARE,
+                                  config.MARKET_EXIT_SLIPPAGE_PER_SHARE, None, minute_design)
+    replay_dict = run_engine_minute_decisions_dict(ohlcv_array_dict, date1, date2, runner_dict["decision_dict_list"], None, 0.0)
+    assert np.allclose(runner_dict["daily_equity_pdf"]["equity"], replay_dict["daily_equity_pdf"]["equity"], atol=1e-9)
+    assert runner_dict["income_dict"]["interest_income"] == replay_dict["income_dict"]["interest_income"] > 0
+    assert runner_dict["income_dict"]["dividend_income"] == replay_dict["income_dict"]["dividend_income"]
+    passed("minute mode and its replay credit the same dividends and interest (R4b)")
+
+
 # FUNCTION: MINUTE MODE MATCHES THE OLD EXP01 SIMULATOR ON A FIXED MODEL
 def test_parity_with_old_exp01_replay():
     """
@@ -642,6 +671,7 @@ def run_all_tests():
     test_model_windows_and_label_door()
     test_history_and_shared_fit()
     test_parity_with_old_exp01_replay()
+    test_minute_total_return_matches_replay()
     test_lookahead_minute_passes()
     test_checkpoint_resume_matches()
     test_speed_four_year_lgbm()

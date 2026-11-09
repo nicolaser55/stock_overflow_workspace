@@ -232,8 +232,9 @@ def simulate_buy_and_hold_dict(ohlcv_array_dict_in, date1_str_in, date2_str_in, 
                                market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
     """
     Simulates the buy-and-hold benchmark: buy at the first allowed entry of the first session (10:00 open), sell at the
-    close of the last bar of the last session, with the same slippage and fees as the model. Dividends are ignored
-    (decided 2026-10-01; this understates buy-and-hold).
+    close of the last bar of the last session, with the same slippage and fees as the model. Price returns only: no
+    dividends, no interest. The runner's buy-and-hold is reentry_simulation.get_buy_and_hold_result_dict, which uses
+    the fractional engine and counts both (R4b); on a price-only bundle the two are equal.
 
     Args:
         ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict

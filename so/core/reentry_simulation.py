@@ -346,7 +346,11 @@ def get_buy_and_hold_result_dict(ohlcv_array_dict_in, date1_in, date2_in, initia
                                  entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
                                  market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
     """
-    Simulates buy-and-hold over the window (10:00 open of the first session -> last close) with the same costs.
+    Buy-and-hold over the window (10:00 open of the first session -> last close) with the same costs: the fractional
+    engine at weight 1, rebalanced at every daily fill (the verdict's buy-and-hold, so.runner.baselines). On a bundle
+    with a total-return schedule (R4b) each dividend lands in cash at its ex-date open and is reinvested at that
+    session's fill, and cash earns the T-bill rate (decided 2026-11-09). On a price-only bundle the result equals the
+    former buy-once simulator (backtest_simulation.simulate_buy_and_hold_dict) exactly.
 
     Args:
         ohlcv_array_dict_in (dict): Output of trade_execution.get_ohlcv_array_dict
@@ -357,16 +361,22 @@ def get_buy_and_hold_result_dict(ohlcv_array_dict_in, date1_in, date2_in, initia
     Returns:
         dict: daily_equity_pdf, metric_dict (total_return, sharpe_ratio, max_drawdown, final_equity)
     """
-    # SIMULATE BUY AND HOLD
-    buy_hold_dict = simulate_buy_and_hold_dict(ohlcv_array_dict_in, str(date1_in), str(date2_in), initial_capital_in, entry_slippage_in, market_exit_slippage_in)
-    daily_equity_pdf = buy_hold_dict["daily_equity_pdf"]
+    # THE SAME ENGINE AS THE VERDICT'S BUY-AND-HOLD (IMPORTED HERE: so.runner IMPORTS THIS MODULE)
+    from so.runner.baselines import run_weight_path_dict
+    session_count = len(get_window_session_idx_arr(ohlcv_array_dict_in, date1_in, date2_in))
+    if session_count == 0:
+        return {"daily_equity_pdf": pd.DataFrame(), "metric_dict": {}}
+    buy_hold_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, np.ones(session_count, dtype=float), 1.0, 0.0,
+                                         initial_capital_in, entry_slippage_in, market_exit_slippage_in)
+    daily_equity_pdf = buy_hold_dict["daily_equity_pdf"][["date", "equity", "in_position"]].reset_index(drop=True)
     final_equity = float(daily_equity_pdf["equity"].iloc[-1])
     # RETURN THE RESULTS
     return {"daily_equity_pdf": daily_equity_pdf,
             "metric_dict": {"total_return": round(final_equity / initial_capital_in - 1, 8),
                             "sharpe_ratio": get_sharpe_ratio(daily_equity_pdf, initial_capital_in),
                             "max_drawdown": get_max_drawdown(daily_equity_pdf, initial_capital_in),
-                            "final_equity": round(final_equity, 6)}}
+                            "final_equity": round(final_equity, 6)},
+            "income_dict": {key_str: value for key_str, value in buy_hold_dict.get("income_dict", {}).items() if key_str != "income_pdf"}}
 
 
 """

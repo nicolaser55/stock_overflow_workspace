@@ -43,8 +43,10 @@ def get_ohlcv_array_dict(complete_ohlcv_pdf_in):
             "bar_session_idx_arr": session position of every bar,
             "session_date_list": sorted list of session dates (datetime.date),
             "session_start_idx_arr", "session_end_idx_arr": first and last bar index of every session,
-            "date_session_idx_dict": session date -> session position
+            "date_session_idx_dict": session date -> session position,
+            "dividend_per_share_arr", "cash_growth_arr": zeros (one per session), "total_return_basis_str": "price_only"
         }
+        so.runner.total_return.get_total_return_bundle_dict replaces the zeros with the registered sources (R4b).
     """
     # SORT THE DATAFRAME BY TIMESTAMP
     ohlcv_pdf = complete_ohlcv_pdf_in.sort_values("timestamp").reset_index(drop=True)
@@ -69,6 +71,10 @@ def get_ohlcv_array_dict(complete_ohlcv_pdf_in):
         "session_start_idx_arr": session_start_idx_arr,
         "session_end_idx_arr": session_end_idx_arr,
         "date_session_idx_dict": {date_object: idx for idx, date_object in enumerate(session_date_arr)},
+        # NO TOTAL-RETURN SCHEDULE YET: PRICE RETURNS UNTIL so.runner.total_return ATTACHES ONE (R4b)
+        "dividend_per_share_arr": np.zeros(len(session_date_arr), dtype=float),
+        "cash_growth_arr": np.zeros(len(session_date_arr), dtype=float),
+        "total_return_basis_str": "price_only",
     }
 
 # FUNCTION: GET THE BAR INDEX OF A LIST OF TIMESTAMPS

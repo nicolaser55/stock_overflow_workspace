@@ -28,6 +28,7 @@ Suite (fast set marked F):
     test_execute_notebook.py      F  notebook execution saves a failed run
     test_runner.py                F  runner view, daily loop, fractional engine
     test_runner_engines.py        F  barrier and trailing-stop engines vs the old simulators
+    test_total_return.py          F  total returns (R4b): dividends and T-bill interest, buy-and-hold reinvestment
     test_runner_candidates.py     F  candidates, selection, trial log, checkpoints, parallel
     test_runner_verdict.py        F  baselines, verdict, report, manifest, imported-folder guards
     test_runner_guard.py          F  design-code guard (data files, subprocesses, so.* rewrites), preflight write rule
@@ -43,7 +44,7 @@ Suite (fast set marked F):
 # DEFINE THE SUITES AND THE FAST SET
 SUITE_LIST = ["test_pipeline_shared.py", "test_daily_shared.py", "test_vix_features.py", "test_holdout.py",
               "test_point_in_time.py", "test_rolling_retrain.py", "test_trial_log_append.py", "test_tools.py", "test_grades.py",
-              "test_execute_notebook.py", "test_runner.py", "test_runner_engines.py", "test_runner_candidates.py",
+              "test_execute_notebook.py", "test_runner.py", "test_runner_engines.py", "test_total_return.py", "test_runner_candidates.py",
               "test_runner_verdict.py", "test_runner_guard.py", "test_runner_judge.py", "test_runner_protocol.py", "test_runner_lookahead.py", "test_runner_holdout.py",
               "test_refresh_development_view.py", "test_runner_minute.py", "test_experiments.py"]
 SLOW_SUITE_SET = {"test_runner_minute.py", "test_experiments.py"}
