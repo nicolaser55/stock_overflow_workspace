@@ -161,11 +161,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] R4 (judge hash changes; no number changes).
 - [x] Pilot ledger and pilot scope (judge hash changes; the verdict's N falls from 260 to the trial log's count).
 - [x] R4b total returns (every number changes; PR #31, 2026-11-09).
-- [ ] Counted check of the deflated Sharpe ratio: a diagnostic script first (like `check_random_timing_tail.py`, on
+- [x] Counted check of the deflated Sharpe ratio: a diagnostic script first (like `check_random_timing_tail.py`, on
   exp04 and exp02); a core change only if the approximation lets too many designs through; or dropped with a reason.
   **The diagnostic is built (2026-11-09):** `scripts/check_deflated_sharpe_tail.py <run id> --draws 10000` rebuilds the
   run and its registered draws on the report's return basis, recomputes its DSR, and counts no-skill random-timing
   draws (raw and centered per quarter) whose DSR is at least 0.95, against draws x alpha / N.
+  **Done 2026-11-09:** on exp04 and exp02 (price-only reports, 10,000 draws) every centered count is at most
+  0.24 times the expected count at N = 30, 100 and 260: the approximation is conservative here. Kept as is, no
+  core change; the cost is lower power.
 - [ ] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
   nine: the baseline.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
