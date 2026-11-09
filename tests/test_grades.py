@@ -343,8 +343,12 @@ def test_agent_view_end_to_end():
     # TWO JOBS: AN INCONSISTENT RUN, THEN A RUN WITH A LOOK-AHEAD FAILURE
     path_dict = get_fresh_path_dict()
     git_func = lambda arg_list_in, **kwarg_dict_in: FAKE_COMMIT_STR + "\n" if arg_list_in[0] == "rev-parse" else ""
-    first_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "first", git_func_in=git_func)
-    second_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "second", git_func_in=git_func)
+    # EXPLICIT CLOCKS: THE QUEUE RUNS OLDEST FIRST BY JOB ID, AND TWO ADDS IN ONE WINDOWS CLOCK TICK GET THE SAME
+    # TIMESTAMP (THEN THE RANDOM SUFFIX DECIDES THE ORDER; WINDOWS CI, 2026-11-09)
+    added_now = datetime.datetime.now()
+    first_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "first", now_in=added_now, git_func_in=git_func)
+    second_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "second", now_in=added_now + datetime.timedelta(seconds=1),
+                                         git_func_in=git_func)
     verdict_by_note_dict = {"first": get_verdict_dict("pass", True, False, False, False),
                             "second": get_verdict_dict("fail", False, False, False, False)}
     sent_list = []
