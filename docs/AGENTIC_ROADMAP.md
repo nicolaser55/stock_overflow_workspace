@@ -160,9 +160,12 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 
 - [x] R4 (judge hash changes; no number changes).
 - [x] Pilot ledger and pilot scope (judge hash changes; the verdict's N falls from 260 to the trial log's count).
-- [ ] R4b total returns (every number changes).
+- [x] R4b total returns (every number changes; PR #31, 2026-11-09).
 - [ ] Counted check of the deflated Sharpe ratio: a diagnostic script first (like `check_random_timing_tail.py`, on
   exp04 and exp02); a core change only if the approximation lets too many designs through; or dropped with a reason.
+  **The diagnostic is built (2026-11-09):** `scripts/check_deflated_sharpe_tail.py <run id> --draws 10000` rebuilds the
+  run and its registered draws on the report's return basis, recomputes its DSR, and counts no-skill random-timing
+  draws (raw and centered per quarter) whose DSR is at least 0.95, against draws x alpha / N.
 - [ ] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
   nine: the baseline.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
@@ -181,12 +184,17 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 
-- [ ] Nicolas supplies SPY dividends (ex-date, pay date, amount) and the daily 3-month T-bill rate from 2005
+- [x] Nicolas supplies SPY dividends (ex-date, pay date, amount) and the daily 3-month T-bill rate from 2005
   (`docs/STAGE1_RESEARCH_PLAN.md` 5.1); both registered in `docs/DATA_SOURCES.md` with their availability clocks.
-- [ ] Engine and baselines: dividends credited to shares held at the ex-date open; cash earns the T-bill rate; buy-and-
-  hold, constant-exposure and random-timing baselines on the same basis; the report says "total return".
-- [ ] Tests on synthetic data; `docs/RUNNER_DESIGN.md` updated.
-- [ ] Then the full rerun of the nine (see C).
+  Done 2026-11-09: ingested by `stock_overflow_infra` (State Street, cross-checked against Yahoo; FRED/ALFRED DTB3 with
+  vintages) and registered as `SPY_DIVIDENDS` and `TBILL_3M` (PR #30).
+- [x] Engine and baselines: dividends credited to shares held at the previous close, at the ex-date open; cash earns
+  the T-bill rate (first release, 91-day investment yield); buy-and-hold reinvests at the ex-date fill; buy-and-hold,
+  constant-exposure and random-timing baselines on the same basis; the report states the basis (PR #31, 2026-11-09).
+- [x] Tests on synthetic data (`tests/test_total_return.py`, a minute-mode replay test); `docs/RUNNER_DESIGN.md`
+  updated. Sanity check on the development view, 2005-2024: buy-and-hold 8.19% a year price only, 10.24% total return;
+  all cash 1.64% a year.
+- [ ] Then the full rerun of the nine (see C), after the counted check of the deflated Sharpe ratio (judge v1 freeze).
 
 **Done when** every verdict compares total returns on both sides.
 

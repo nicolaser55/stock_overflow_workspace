@@ -1034,6 +1034,63 @@ def test_random_timing_tail_script():
            "its summary flags a heavy right tail and not a normal one")
 
 
+# FUNCTION: THE DEFLATED-SHARPE TAIL SCRIPT REPRODUCES THE DRAWS, COUNTS AS DESIGNED, AND REBUILDS ON THE REPORT'S BASIS
+def test_deflated_sharpe_tail_script():
+    """
+    Returns:
+        None
+    """
+    # THE SAME SYNTHETIC SETUP AS THE RANDOM-TIMING TAIL TEST
+    import numpy as np
+    import pandas as pd
+    import check_deflated_sharpe_tail as dsr_script
+    import check_random_timing_tail as tail_script
+    from so.core.trade_execution import get_ohlcv_array_dict
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    from so.runner.baselines import get_runner_baseline_dict, get_random_timing_seed_list
+    from so.runner.verdict import get_equity_daily_return_pdf
+    from so.runner.total_return import TOTAL_RETURN_BASIS_STR, PRICE_ONLY_BASIS_STR
+    from synthetic_data import get_synthetic_ohlcv_pdf
+    ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2010-01-04", "2010-12-31", seed_in=7))
+    session_list = list(ohlcv_array_dict["session_date_list"])
+    date1, date2 = session_list[0], session_list[-1]
+    in_position_arr = np.ones(len(session_list), dtype=bool)
+    in_position_arr[[5, 6, 7, 60, 61, 140, 141, 142, 143, 200]] = False
+    prior_only_dict = {"daily_equity_pdf": pd.DataFrame({"in_position": in_position_arr}), "metric_dict": {"total_return": 0.01}}
+    baseline_dict = get_runner_baseline_dict(ohlcv_array_dict, date1, date2, prior_only_dict, seed_count_int_in=4,
+                                             realized_exposure_bool_in=True)
+    exposure_arr = in_position_arr.astype(float)
+    exposure_arr[-1] = np.nan
+    buy_hold_return_pdf = get_equity_daily_return_pdf(get_buy_and_hold_result_dict(ohlcv_array_dict, date1, date2)["daily_equity_pdf"])
+    seed_list = get_random_timing_seed_list(4)
+    draw_list = dsr_script.get_draw_tuple_list(seed_list, ohlcv_array_dict, date1, date2, exposure_arr, buy_hold_return_pdf, 1)
+    assert np.allclose([draw[0] for draw in draw_list], baseline_dict["random_timing_return_list"], rtol=0, atol=1e-12)
+    assert all(len(draw[1]) == 4 for draw in draw_list)
+    pool_list = dsr_script.get_draw_tuple_list(seed_list, ohlcv_array_dict, date1, date2, exposure_arr, buy_hold_return_pdf, 2)
+    assert np.allclose(np.asarray([draw[1] for draw in pool_list]), np.asarray([draw[1] for draw in draw_list]), rtol=0, atol=1e-12)
+    # THE COUNT: AT N = 1 THE DSR IS THE PROBABILISTIC SHARPE RATIO, SO NORMAL NOISE PASSES ABOUT 5% OF THE TIME; A LARGE
+    # COMMON HANDICAP STOPS EVERY RAW DRAW BUT NOT THE CENTERED ONES
+    rng = np.random.default_rng(3)
+    noise_matrix = rng.normal(0.0, 0.05, (4000, 80))
+    count_dict = dsr_script.get_count_dict(noise_matrix - 0.05, 1.0 / 80, 1, 0.05)
+    assert count_dict["expected_count"] == 200.0 and count_dict["raw_count"] == 0
+    assert 100 <= count_dict["centered_count"] <= 400, count_dict
+    # THE REPORT'S BASIS: A REPORT WITHOUT ONE (BEFORE R4b) IS REBUILT ON PRICE RETURNS; A TOTAL-RETURN REPORT ON THE BUNDLE AS IT IS
+    scheduled_dict = {**ohlcv_array_dict, "dividend_per_share_arr": np.full(len(session_list), 0.1),
+                      "cash_growth_arr": np.full(len(session_list), 0.0001), "total_return_basis_str": TOTAL_RETURN_BASIS_STR}
+    old_dict, old_basis_str = tail_script.get_report_basis_bundle_dict(scheduled_dict, {})
+    assert old_basis_str == PRICE_ONLY_BASIS_STR and not old_dict["dividend_per_share_arr"].any() and not old_dict["cash_growth_arr"].any()
+    new_dict, new_basis_str = tail_script.get_report_basis_bundle_dict(scheduled_dict, {"return_basis_str": TOTAL_RETURN_BASIS_STR})
+    assert new_basis_str == TOTAL_RETURN_BASIS_STR and new_dict is scheduled_dict
+    markdown_str = dsr_script.get_markdown_str("r", {"return_basis_str": "price_only", "draw_count": 4000, "quarter_count": 80,
+                                                     "rebuilt_return": 0.1, "registered_count": 100, "max_abs_difference": 0.0,
+                                                     "report_dsr": 0.01, "report_design_count": 1, "trial_sharpe_variance": 0.0125,
+                                                     "trial_sharpe_variance_source_str": "null_1_over_T", "count_list": [count_dict]})
+    assert "centered / expected" in markdown_str
+    passed("deflated-Sharpe tail script: reproduces the referee's draws (in process and with workers); at N = 1 normal noise "
+           "passes about 5%; centering removes a common handicap; old reports are rebuilt on price returns")
+
+
 # FUNCTION: AN OLD run_index.csv IS BROUGHT TO THE CURRENT COLUMNS BEFORE THE NEXT APPEND
 def test_queue_run_index_upgrade():
     """
@@ -1289,6 +1346,7 @@ if __name__ == "__main__":
     test_queue_waits_for_deployed_judge()
     test_queue_windows_robustness()
     test_random_timing_tail_script()
+    test_deflated_sharpe_tail_script()
     test_queue_run_index_upgrade()
     test_run_email_content()
     test_queue_kill_switch()

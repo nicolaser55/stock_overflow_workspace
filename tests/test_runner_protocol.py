@@ -204,8 +204,21 @@ def test_cost_sensitivity_in_report():
     exposure_arr = get_exposure_weight_arr(rebuilt_dict, get_realized_exposure_bool(cand_design))
     draw_list = tail_script.get_draw_return_list([42, 43], ohlcv_array_dict, date1, date2, exposure_arr, 1)
     assert np.allclose(draw_list, report_dict["baseline_dict"]["random_timing_return_list"][:2], rtol=0, atol=1e-12)
+    # THE DEFLATED-SHARPE TAIL SCRIPT'S IDENTITY: THE RUN'S DSR, RECOMPUTED FROM THE REBUILT PATH, EQUALS THE REPORT'S
+    import check_deflated_sharpe_tail as dsr_script
+    from so.core.multiple_testing import get_quarter_excess_arr
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    from so.runner.verdict import get_equity_daily_return_pdf
+    basis_dict, basis_str = tail_script.get_report_basis_bundle_dict(ohlcv_array_dict, report_dict)
+    assert basis_str == report_dict["return_basis_str"]
+    multiple_dict = report_dict["multiple_testing_dict"]
+    buy_hold_return_pdf = get_equity_daily_return_pdf(get_buy_and_hold_result_dict(basis_dict, date1, date2)["daily_equity_pdf"])
+    path_excess_arr = get_quarter_excess_arr(get_equity_daily_return_pdf(rebuilt_dict["daily_equity_pdf"]), buy_hold_return_pdf)
+    recomputed_float = float(dsr_script.get_dsr_arr([path_excess_arr], float(multiple_dict["trial_sharpe_variance"]),
+                                                     int(multiple_dict["design_count"]))[0])
+    assert abs(recomputed_float - float(multiple_dict["deflated_sharpe_probability"])) <= 1e-9, (recomputed_float, multiple_dict)
     passed("tail-check script rebuilds a finished run's prior-only path from its pruned folder (same return) and "
-           "reproduces its registered random-timing draws")
+           "reproduces its registered random-timing draws; the deflated-Sharpe script recomputes the run's DSR exactly")
 
 
 # FUNCTION: THE HELPER HASH: WHICH FILES, WHAT CHANGES IT, AND THE RERUN RULE (R3, 2026-10-29)
