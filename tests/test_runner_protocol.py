@@ -34,7 +34,8 @@ from so import paths
 from so.core.trade_execution import get_ohlcv_array_dict
 from so.runner import run_development_dict
 from so.runner.preregistration import (check_preregistration_dict, get_protocol_missing_list, get_design_helper_dict,
-                                      get_design_helper_file_list)
+                                      get_design_helper_file_list, get_trial_log_version_row_list,
+                                      REGISTERED_VERSION_COLUMN_LIST)
 from synthetic_data import get_synthetic_ohlcv_pdf
 import runner_candidate_design as cand_design
 
@@ -65,6 +66,78 @@ def get_full_protocol_str():
     return ("# expZZ\n\nDerived from: none\n\n## 1. Background and research question\nq\n## 2. Success criteria\ns\n"
             "## 3.1 Data sources\nd\n## 4. Rules\nr\n## 5. Walk-forward and selection\nw\n## 6. Baselines\nb\n"
             "## 7. Stopping rules\nx\n## 9. Discipline, implementation, limitations\nl\n## 11. Change log\nc\n")
+
+
+# FUNCTION: THE GUARD KEEPS ITS MEMORY ACROSS A RESET (records/legacy/registered_versions.csv; 2026-11-09)
+def test_registered_versions_survive_reset():
+    """
+    With the trial log moved away (a reset), a logged version is still a rerun when the registered-versions file holds
+    it: the same code passes even with an old protocol; changed folder code, changed helper code and a fourth version
+    are still refused. Without the file the old protocol is refused (the crash of the first baseline rerun). A file
+    without the columns is refused, never read as empty.
+
+    Returns:
+        None
+    """
+    # A LOG WITH THREE VERSIONS, ITS REGISTERED ROWS, THEN NO LOG
+    folder_str = tempfile.mkdtemp(prefix="so_prereg_reset_", dir=TEMP_ROOT_STR)
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write("# expYY\n\n## Hypothesis\nold protocol, before the lint\n")
+    log_path_str = os.path.join(TEMP_ROOT_STR, "reset_trial_log.csv")
+    registered_str = os.path.join(TEMP_ROOT_STR, "reset_registered_versions.csv")
+    missing_log_str = os.path.join(TEMP_ROOT_STR, "moved_trial_log.csv")
+
+    def git_func(arg_list_in):
+        return "port expYY\n"
+
+    def refused_bool(call_in):
+        try:
+            call_in()
+        except ValueError:
+            return True
+        return False
+
+    base_dict = {"experiment": "expYY_reset", "stage": "validation", "metric_json": "{}"}
+    pd.DataFrame([{**base_dict, "protocol_version": "1.0", "setting_json": json.dumps({"design_folder_hash": "f1", "helper_hash": "h1"})},
+                  {**base_dict, "protocol_version": "1.0", "setting_json": json.dumps({"design_folder_hash": "f1", "helper_hash": "h1"})},
+                  {**base_dict, "protocol_version": "1.1", "setting_json": json.dumps({"design_folder_hash": "f2"})},
+                  {**base_dict, "protocol_version": "1.2", "stage": "note", "setting_json": "{}"}]).to_csv(log_path_str, index=False)
+    row_list = get_trial_log_version_row_list(log_path_str, "test")
+    assert [(row_dict["protocol_version"], row_dict["design_folder_hash"], row_dict["helper_hash"]) for row_dict in row_list] == \
+        [("1.0", "f1", "h1"), ("1.1", "f2", ""), ("1.2", "", "")]
+    pd.DataFrame(row_list, columns=REGISTERED_VERSION_COLUMN_LIST).to_csv(registered_str, index=False)
+    module = types.SimpleNamespace(EXPERIMENT_NAME="expYY_reset", PROTOCOL_VERSION="1.0")
+    call_dict = {"git_func_in": git_func, "registered_path_str_in": registered_str}
+    # THE SAME CODE RERUNS WITH ITS OLD PROTOCOL; CHANGED CODE OR HELPERS DO NOT
+    assert check_preregistration_dict(module, folder_str, "f1", missing_log_str, helper_hash_str_in="h1", **call_dict)["status_str"] == "rerun"
+    assert refused_bool(lambda: check_preregistration_dict(module, folder_str, "f9", missing_log_str, helper_hash_str_in="h1", **call_dict))
+    assert refused_bool(lambda: check_preregistration_dict(module, folder_str, "f1", missing_log_str, helper_hash_str_in="h9", **call_dict))
+    # A VERSION WITHOUT LOGGED HELPER HASHES ACCEPTS THE FIRST ONE; A FOURTH VERSION IS STILL REFUSED
+    module_11 = types.SimpleNamespace(EXPERIMENT_NAME="expYY_reset", PROTOCOL_VERSION="1.1")
+    assert check_preregistration_dict(module_11, folder_str, "f2", missing_log_str, helper_hash_str_in="h5", **call_dict)["status_str"] == "rerun"
+    module_13 = types.SimpleNamespace(EXPERIMENT_NAME="expYY_reset", PROTOCOL_VERSION="1.3")
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write(get_full_protocol_str())
+    assert refused_bool(lambda: check_preregistration_dict(module_13, folder_str, "f3", missing_log_str,
+                                                           git_func_in=lambda arg_list_in: "preregister expYY v1.3",
+                                                           registered_path_str_in=registered_str))
+    # TRIAL LOG AND FILE TOGETHER: A HASH IN EITHER IS ACCEPTED
+    pd.DataFrame([{**base_dict, "protocol_version": "1.0", "setting_json": json.dumps({"design_folder_hash": "f7", "helper_hash": "h1"})}]).to_csv(log_path_str, index=False)
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write("# expYY\n\n## Hypothesis\nold protocol, before the lint\n")
+    for hash_str in ["f1", "f7"]:
+        assert check_preregistration_dict(module, folder_str, hash_str, log_path_str, helper_hash_str_in="h1", **call_dict)["status_str"] == "rerun"
+    # WITHOUT THE FILE (THE FIRST RESET): THE OLD PROTOCOL IS REFUSED AS A NEW VERSION
+    empty_registered_str = os.path.join(TEMP_ROOT_STR, "no_registered_versions.csv")
+    assert refused_bool(lambda: check_preregistration_dict(module, folder_str, "f1", missing_log_str, git_func_in=git_func,
+                                                           helper_hash_str_in="h1", registered_path_str_in=empty_registered_str))
+    # A FILE WITHOUT THE COLUMNS IS REFUSED
+    bad_str = os.path.join(TEMP_ROOT_STR, "bad_registered_versions.csv")
+    pd.DataFrame([{"experiment": "expYY_reset", "protocol_version": "1.0"}]).to_csv(bad_str, index=False)
+    assert refused_bool(lambda: check_preregistration_dict(module, folder_str, "f1", missing_log_str, git_func_in=git_func,
+                                                           registered_path_str_in=bad_str))
+    passed("registered versions survive a reset (old protocol reruns; changed code, changed helper and a fourth version "
+           "refused; trial log and file merged; no file = the 2026-11-09 refusal; a malformed file refused)")
 
 
 # FUNCTION: EVERY BRANCH OF THE PRE-REGISTRATION GUARD
@@ -284,6 +357,7 @@ if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY DATA ROOT
     try:
         test_preregistration_guard()
+        test_registered_versions_survive_reset()
         test_helper_hash()
         test_cost_sensitivity_in_report()
         print("\nAll runner protocol tests passed ✅")

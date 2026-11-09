@@ -180,6 +180,9 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   transitively, LF-normalized) in each trial row; a version whose rows carry helper hashes may rerun only with one of
   them, so a changed helper needs a new protocol version. Rows from before R3 have none; the first run records it. The
   helper hash is bookkeeping in the multiple-testing design key (a rerun of an unchanged design is not a new design).
+  **Across resets (2026-11-09):** "logged" means in the trial log or in `records/legacy/registered_versions.csv`
+  (experiment, version, folder hash, helper hash; no results), which `scripts/reset_records.py` fills before it moves
+  the trial log and checks to cover it. The file is in the judge hash; the runner reads the deployed copy.
 - **Queue and runner account (audit S3 / S4, 2026-10-26; hardened A2, 2026-10-27):** `scripts/run_queue.py`. A job
   names a design commit. The runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`)
   fetches origin once per pass (before it validates pending files) and builds the run commit from two sources:
