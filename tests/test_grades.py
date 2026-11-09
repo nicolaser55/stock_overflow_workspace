@@ -471,18 +471,21 @@ def test_reset_records():
     pd.DataFrame([{"source": "s", "experiment": "exp02_stop_reentry", "stage": "validation",
                    "setting_json": json.dumps({"candidate": "A"})}]).to_csv(ledger_str, index=False, lineterminator="\n")
     trial_log_str = os.path.join(zone_str, "trial_log.csv")
-    pd.DataFrame([{"experiment": "exp02_stop_reentry_v2", "stage": "validation", "setting_json": json.dumps({"candidate": "A", "run_id": "r1"}), "metric_json": "{\"excess_return\": 0.1}"},
-                  {"experiment": "exp04_trend_exit", "stage": "validation", "setting_json": json.dumps({"ma": 200, "window": "w"}), "metric_json": "{\"excess_return\": -0.2}"},
-                  {"experiment": "exp04_trend_exit", "stage": "note", "setting_json": json.dumps({"x": 1}), "metric_json": "{}"}]).to_csv(trial_log_str, index=False)
+    pd.DataFrame([{"experiment": "exp02_stop_reentry_v2", "stage": "validation", "setting_json": json.dumps({"candidate": "A", "run_id": "r1"}), "metric_json": "{\"excess_return\": 0.1}", "protocol_version": "1.0"},
+                  {"experiment": "exp04_trend_exit", "stage": "validation", "setting_json": json.dumps({"ma": 200, "window": "w", "design_folder_hash": "f4", "helper_hash": "h4"}), "metric_json": "{\"excess_return\": -0.2}", "protocol_version": "1.0"},
+                  {"experiment": "exp04_trend_exit", "stage": "note", "setting_json": json.dumps({"x": 1}), "metric_json": "{}", "protocol_version": "1.0"}]).to_csv(trial_log_str, index=False)
     Path(path_dict["run_index"]).write_text("run_id\nr1\n", encoding="utf-8")
     Path(path_dict["runs"], "r1").mkdir()
     Path(path_dict["runs"], "r1", "report.json").write_text("{}", encoding="utf-8")
+    Path(path_dict["grades"], "r1.json").write_text("{}", encoding="utf-8")
+    Path(path_dict["status"], "j1.json").write_text("{}", encoding="utf-8")
+    registered_str = os.path.join(os.path.dirname(ledger_str), "registered_versions.csv")
     log_path = Path(tempfile.mkdtemp(prefix="so_log_")) / "RESULTS_LOG.md"
     log_path.write_text("# Results log\n", encoding="utf-8")
     backup_str = tempfile.mkdtemp(prefix="so_backup_")
     before_int = get_tried_design_count_dict(trial_log_str, [ledger_str])["pilot_included_count"]
     assert before_int == 2
-    keyword_dict = {"ledger_path_str_in": ledger_str, "results_log_path_in": log_path}
+    keyword_dict = {"ledger_path_str_in": ledger_str, "results_log_path_in": log_path, "registered_path_str_in": registered_str}
     # REFUSALS
     assert "agent phase" in reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="agents", **keyword_dict)["refused_str"]
     inside_str = os.path.join(os.environ["SO_DATA_PATH"], "inside_backup")
@@ -494,6 +497,7 @@ def test_reset_records():
     # A DRY RUN CHANGES NOTHING
     dry_dict = reset_records.reset_records_dict(path_dict, backup_str, False, phase_str_in="development", **keyword_dict)
     assert not dry_dict["refused_str"] and dry_dict["new_ledger_row_count"] == 1 and not dry_dict["done_bool"]
+    assert dry_dict["new_registered_row_count"] == 3 and not os.path.exists(registered_str)
     assert os.path.isfile(trial_log_str) and len(pd.read_csv(ledger_str)) == 1 and os.listdir(backup_str) == []
     # THE RESET
     done_dict = reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development",
@@ -504,13 +508,39 @@ def test_reset_records():
     assert json.loads(ledger_pdf["setting_json"].iloc[-1]) == {"ma": 200}        # BOOKKEEPING DROPPED, NO METRIC COLUMN
     assert "metric_json" not in ledger_pdf.columns
     assert not os.path.exists(trial_log_str) and not os.path.exists(path_dict["run_index"]) and not os.path.exists(path_dict["runs"])
+    # THE REGISTERED VERSIONS KEEP WHAT THE GUARD READ (NO METRICS); THE GRADE AND STATUS FOLDERS STAY, EMPTIED
+    registered_pdf = pd.read_csv(registered_str, dtype=str, keep_default_na=False)
+    assert list(registered_pdf.columns) == ["source", "experiment", "protocol_version", "design_folder_hash", "helper_hash"]
+    assert len(registered_pdf) == 3 and set(registered_pdf["source"]) == {"trial_log_reset_20261103"}
+    assert ("exp04_trend_exit", "1.0", "f4", "h4") in set(zip(registered_pdf["experiment"], registered_pdf["protocol_version"],
+                                                            registered_pdf["design_folder_hash"], registered_pdf["helper_hash"]))
+    assert os.path.isdir(path_dict["grades"]) and os.listdir(path_dict["grades"]) == []
+    assert os.path.isdir(path_dict["status"]) and os.listdir(path_dict["status"]) == []
+    assert os.path.isfile(os.path.join(done_dict["target_str"], "visible", "grades", "r1.json"))
+    assert os.path.isfile(os.path.join(done_dict["target_str"], "visible", "status", "j1.json"))
+    # REGISTERING THE MOVED LOG AGAIN ADDS NOTHING; A DRY RUN CHANGES NOTHING; A MISSING LOG IS AN ERROR
+    moved_log_str = os.path.join(done_dict["target_str"], "trial_log.csv")
+    assert reset_records.register_versions_dict(moved_log_str, False, registered_str)["new_row_count"] == 0
+    again_dict = reset_records.register_versions_dict(moved_log_str, True, registered_str)
+    assert again_dict["done_bool"] and again_dict["new_row_count"] == 0 and again_dict["gap_list"] == []
+    assert len(pd.read_csv(registered_str)) == 3
+    fresh_registered_str = os.path.join(tempfile.mkdtemp(prefix="so_registered_"), "registered_versions.csv")
+    seed_dict = reset_records.register_versions_dict(moved_log_str, True, fresh_registered_str)
+    assert seed_dict["new_row_count"] == 3 and seed_dict["experiment_count"] == 2
+    assert set(pd.read_csv(fresh_registered_str, dtype=str)["source"]) == {f"trial_log_{os.path.basename(done_dict['target_str'])}"}
+    try:
+        reset_records.register_versions_dict(os.path.join(backup_str, "no_such_log.csv"), True, fresh_registered_str)
+        raise AssertionError("a missing trial log was registered")
+    except FileNotFoundError:
+        pass
     target_str = done_dict["target_str"]
     assert os.path.isfile(os.path.join(target_str, "trial_log.csv")) and os.path.isfile(os.path.join(target_str, "runs", "r1", "report.json"))
     assert get_tried_design_count_dict(trial_log_str, [ledger_str]) == {"current_count": 0, "pilot_count": 2, "total_count": 1,
                                                                          "pilot_included_count": 2}
     assert "| withdrawn |" in log_path.read_text(encoding="utf-8").splitlines()[-1]
     passed("reset of the development records (refused in the agent phase / with pending jobs / backup inside the data root; dry run; "
-           "designs kept in the ledger, N with the pilot unchanged, results moved, one note row)")
+           "designs kept in the ledger, N with the pilot unchanged, versions kept in registered_versions.csv, grade and status "
+           "folders kept, results moved, one note row; --register-from idempotent)")
 
 
 # RUN THE SUITE

@@ -29,6 +29,13 @@ new versions per experiment. Until now only the holdout evaluation checked this.
 
 Versions logged before 2026-10-25 keep their protocols as they are (the lint applies to new versions only).
 
+Registered versions survive a reset (2026-11-09). "Logged" means logged in the trial log OR in
+records/legacy/registered_versions.csv (REGISTERED_VERSIONS_REL_STR): one row per experiment, protocol version, design
+folder hash and helper hash ever logged, without results. scripts/reset_records.py adds the trial log's rows to it
+before it moves the trial log away, so a reset no longer makes every logged version look new: the folder-hash lock, the
+helper-hash lock and the three-version limit hold across resets. The file is protected and part of the judge hash;
+the runner reads the copy of the deployed commit, so a reset that adds rows is followed by a merge and a deploy.
+
 Shared helpers (roadmap R3, audit S2, 2026-10-29). A design may import unprotected shared code from so/ (for example
 so/features/rule_design.py). That code is not in the design folder, so a change to it would change a pre-registered
 design without changing its folder hash. Every run therefore also records a helper hash: the content of the
@@ -46,6 +53,9 @@ PROTOCOL_REQUIRED_SECTION_LIST = ["question", "success criteria", "data sources"
 DERIVED_FROM_PREFIX_STR = "derived from:"
 # AT MOST 1.0 PLUS TWO AMENDMENTS
 RUNNER_MAX_PROTOCOL_VERSION_COUNT = 3
+# THE VERSIONS THAT SURVIVE A RESET (ONE ROW PER EXPERIMENT, VERSION, FOLDER HASH AND HELPER HASH; NO RESULTS)
+REGISTERED_VERSIONS_REL_STR = "records/legacy/registered_versions.csv"
+REGISTERED_VERSION_COLUMN_LIST = ["source", "experiment", "protocol_version", "design_folder_hash", "helper_hash"]
 
 
 # FUNCTION: MISSING SECTIONS OF A PROTOCOL
@@ -198,6 +208,101 @@ def get_logged_helper_dict(trial_log_path_str_in, experiment_str_in):
     return helper_dict
 
 
+# FUNCTION: THE REGISTERED-VERSIONS FILE OF THIS WORKSPACE (IN A RUN: THE WORKTREE OF THE DEPLOYED JUDGE COMMIT)
+def get_registered_versions_path_str():
+    """
+    Returns:
+        str: <workspace>/records/legacy/registered_versions.csv
+    """
+    # THE SAME ROOT AS THE PILOT LEDGER
+    return os.path.join(paths.WORKSPACE_PATH_STR, *REGISTERED_VERSIONS_REL_STR.split("/"))
+
+
+# FUNCTION: THE REGISTERED-VERSION ROWS A TRIAL LOG HOLDS
+def get_trial_log_version_row_list(trial_log_path_str_in, source_str_in):
+    """
+    The same rows get_logged_version_dict and get_logged_helper_dict read (every row with a protocol_version column,
+    notes included), reduced to distinct (experiment, version, folder hash, helper hash); a missing hash is "".
+
+    Args:
+        trial_log_path_str_in (str): Trial log
+        source_str_in (str): Source label of the rows
+
+    Returns:
+        list[dict]: Rows with REGISTERED_VERSION_COLUMN_LIST, in first-seen order
+    """
+    # NO protocol_version COLUMN: NOTHING THE GUARD COULD READ
+    record_pdf = read_trial_record_pdf(trial_log_path_str_in)
+    row_list, seen_set = [], set()
+    if len(record_pdf) == 0 or "protocol_version" not in record_pdf.columns:
+        return row_list
+    for experiment_str, version_str, setting_str in zip(record_pdf["experiment"], record_pdf["protocol_version"],
+                                                        record_pdf["setting_json"]):
+        try:
+            setting_dict = json.loads(setting_str)
+        except (ValueError, TypeError):
+            setting_dict = {}
+        if not isinstance(setting_dict, dict):
+            setting_dict = {}
+        key_tuple = (str(experiment_str), str(version_str), str(setting_dict.get("design_folder_hash") or ""),
+                     str(setting_dict.get("helper_hash") or ""))
+        if key_tuple in seen_set:
+            continue
+        seen_set.add(key_tuple)
+        row_list.append(dict(zip(REGISTERED_VERSION_COLUMN_LIST, (str(source_str_in),) + key_tuple)))
+    return row_list
+
+
+# FUNCTION: VERSIONS, FOLDER HASHES AND HELPER HASHES OF AN EXPERIMENT IN THE REGISTERED-VERSIONS FILE
+def get_registered_version_tuple(registered_path_str_in, experiment_str_in):
+    """
+    Args:
+        registered_path_str_in (str): records/legacy/registered_versions.csv (a missing file holds nothing)
+        experiment_str_in (str): Experiment name
+
+    Returns:
+        tuple[dict, dict]: protocol version -> set of folder hashes, protocol version -> set of helper hashes (the
+                           shapes of get_logged_version_dict and get_logged_helper_dict)
+    """
+    # A MISSING FILE IS AN EMPTY REGISTER; A FILE WITHOUT THE COLUMNS IS AN ERROR (NEVER READ AS EMPTY)
+    version_dict, helper_dict = {}, {}
+    record_pdf = read_trial_record_pdf(registered_path_str_in)
+    if len(record_pdf) == 0:
+        return version_dict, helper_dict
+    missing_list = [name_str for name_str in REGISTERED_VERSION_COLUMN_LIST if name_str not in record_pdf.columns]
+    if missing_list:
+        raise ValueError(f"{registered_path_str_in} lacks columns {missing_list}.")
+    for experiment_str, version_str, folder_hash_str, helper_hash_str in zip(
+            record_pdf["experiment"], record_pdf["protocol_version"], record_pdf["design_folder_hash"],
+            record_pdf["helper_hash"]):
+        if str(experiment_str) != str(experiment_str_in):
+            continue
+        folder_set = version_dict.setdefault(str(version_str), set())
+        helper_set = helper_dict.setdefault(str(version_str), set())
+        if str(folder_hash_str):
+            folder_set.add(str(folder_hash_str))
+        if str(helper_hash_str):
+            helper_set.add(str(helper_hash_str))
+    return version_dict, helper_dict
+
+
+# FUNCTION: MERGE TWO VERSION -> SET DICTS
+def get_merged_set_dict(first_dict_in, second_dict_in):
+    """
+    Args:
+        first_dict_in (dict): version -> set
+        second_dict_in (dict): version -> set
+
+    Returns:
+        dict: version -> union of the sets (a version in either dict is present)
+    """
+    # COPY, THEN ADD
+    merged_dict = {key_str: set(value_set) for key_str, value_set in first_dict_in.items()}
+    for key_str, value_set in second_dict_in.items():
+        merged_dict.setdefault(key_str, set()).update(value_set)
+    return merged_dict
+
+
 # FUNCTION: THE SUBJECT OF THE LAST COMMIT THAT TOUCHED A FOLDER
 def get_last_folder_commit_subject_str(design_folder_str_in, git_func_in=None):
     """
@@ -224,7 +329,7 @@ def get_last_folder_commit_subject_str(design_folder_str_in, git_func_in=None):
 
 # FUNCTION: REFUSE A DEVELOPMENT RUN THAT BREAKS PRE-REGISTRATION
 def check_preregistration_dict(design_module_in, design_folder_str_in, design_folder_hash_str_in, trial_log_path_str_in,
-                               git_func_in=None, helper_hash_str_in=None):
+                               git_func_in=None, helper_hash_str_in=None, registered_path_str_in=None):
     """
     Args:
         design_module_in (module): Design (EXPERIMENT_NAME, PROTOCOL_VERSION)
@@ -232,6 +337,9 @@ def check_preregistration_dict(design_module_in, design_folder_str_in, design_fo
         design_folder_hash_str_in (str): Its content hash (run.get_design_folder_hash_str)
         trial_log_path_str_in (str): Trial log
         git_func_in (callable | None): Injected git (tests)
+        helper_hash_str_in (str | None): Helper hash of the design (get_design_helper_dict)
+        registered_path_str_in (str | None): Registered versions (None = records/legacy/registered_versions.csv of
+                                             this workspace)
 
     Returns:
         dict: status_str ("rerun" or "first_run"), experiment, protocol_version, derived_from_str
@@ -241,7 +349,10 @@ def check_preregistration_dict(design_module_in, design_folder_str_in, design_fo
     version_str = str(getattr(design_module_in, "PROTOCOL_VERSION", ""))
     if not experiment_str or not version_str:
         raise ValueError("a development run needs EXPERIMENT_NAME and PROTOCOL_VERSION.")
-    version_dict = get_logged_version_dict(trial_log_path_str_in, experiment_str)
+    registered_version_dict, registered_helper_dict = get_registered_version_tuple(
+        registered_path_str_in or get_registered_versions_path_str(), experiment_str)
+    version_dict = get_merged_set_dict(get_logged_version_dict(trial_log_path_str_in, experiment_str),
+                                       registered_version_dict)
     protocol_path_str = os.path.join(design_folder_str_in, "PROTOCOL.md")
     protocol_text_str = open(protocol_path_str, encoding="utf-8").read() if os.path.isfile(protocol_path_str) else ""
     derived_line_list = [line_str.strip()[len(DERIVED_FROM_PREFIX_STR):].strip() for line_str in protocol_text_str.splitlines()
@@ -252,7 +363,8 @@ def check_preregistration_dict(design_module_in, design_folder_str_in, design_fo
         if logged_hash_set and design_folder_hash_str_in not in logged_hash_set:
             raise ValueError(f"{experiment_str} version {version_str} already ran with different code; a change after a "
                              f"run is a new PROTOCOL_VERSION (research-integrity.mdc).")
-        logged_helper_set = get_logged_helper_dict(trial_log_path_str_in, experiment_str).get(version_str, set())
+        logged_helper_set = get_merged_set_dict(get_logged_helper_dict(trial_log_path_str_in, experiment_str),
+                                                registered_helper_dict).get(version_str, set())
         if helper_hash_str_in is not None and logged_helper_set and str(helper_hash_str_in) not in logged_helper_set:
             raise ValueError(f"{experiment_str} version {version_str} already ran with different shared helper code "
                              f"(unprotected so/ files it imports); a change after a run is a new PROTOCOL_VERSION.")
