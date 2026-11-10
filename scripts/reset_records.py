@@ -27,8 +27,14 @@ Reset The Development Records (Nicolas only, development phase only; roadmap R4,
 Results produced while the system is still being built are disposable; the count of what was tried is not. This
 script discards the results and keeps the count:
 
-    1. refuses unless records/agent_phase.txt says "development" (from R6 nothing is ever reset), the runner is not
-       running and queue/pending and queue/running are empty;
+    1. refuses unless records/agent_phase.txt says "development" (from R6 nothing is ever reset), the kill switch
+       <SO_DATA_PATH>/control/STOP exists (decided 2026-11-10), the runner holds no lock and queue/pending and
+       queue/running are empty. The kill switch must be confirmed: a flag that is missing or cannot be read refuses (the
+       runner reads an unreadable flag as set; for a reset the safe reading is the opposite), and so does
+       SO_STOP_FLAG_PATH set in this window (the reset could not tell which flag the runner's account reads). Why: the
+       runner takes its lock only during a pass, so the lock alone cannot show that the task is stopped (on 2026-11-09 a
+       reset ran with the task still running, after a PowerShell check failed open). With STOP set the runner starts no
+       job and resumes none; only Nicolas can write control/;
     2. adds every design of the trial log that the tried-designs ledger (records/legacy/pilot_designs.csv) does not
        hold yet: family and settings only, bookkeeping keys and numbers dropped, source "trial_log_reset_<date>";
     3. checks that N with the pilot included is the same before and after (nothing tried is forgotten);
@@ -43,7 +49,11 @@ script discards the results and keeps the count:
        scripts/setup_so_agent.ps1 gave them (a folder the runner recreates would only inherit);
     6. appends a dated "withdrawn" note row to docs/RESULTS_LOG.md (the log stays append-only).
 
-Stop the scheduled task "SO queue runner" first (Stop-ScheduledTask). Then commit records/legacy/pilot_designs.csv,
+Create the kill switch first (New-Item <SO_DATA_PATH>\\control\\STOP) and stop the scheduled task "SO queue runner"
+(Stop-ScheduledTask, in an elevated window). Both: with STOP set the runner's idle loop still rewrites
+visible/state.json and recreates empty queue folders about every 60 s, without the lock, so a reset during a running
+task may leave a new state.json that lists pre-reset run and job ids (status only, no numbers). A refused command prints
+the plan, then the reason, and exits 1; nothing changes. Then commit records/legacy/pilot_designs.csv,
 records/legacy/registered_versions.csv and docs/RESULTS_LOG.md on a branch and open a pull request. When either records
 file changed, merge and deploy before starting the task again: the runner reads the deployed copies.
 
@@ -257,20 +267,55 @@ def get_move_list(path_dict_in):
     return move_list
 
 
+# FUNCTION: WHY THE KILL SWITCH DOES NOT ALLOW A RESET ("" WHEN IT IS CONFIRMED SET)
+def get_stop_flag_refusal_str(path_dict_in, environment_dict_in=None):
+    """
+    The opposite reading of run_queue.get_stop_flag_bool, on the same path (run_queue.get_stop_flag_path_str): there, a
+    flag that cannot be read counts as set (the runner stops); here only a flag whose existence is confirmed allows the
+    reset.
+
+    Args:
+        path_dict_in (dict): Queue paths (stop_flag)
+        environment_dict_in (dict | None): Environment (None = os.environ; tests)
+
+    Returns:
+        str: The reason, or ""
+    """
+    # AN OVERRIDE IN THIS WINDOW MAY NOT BE WHAT THE RUNNER'S ACCOUNT READS
+    environment_dict = os.environ if environment_dict_in is None else environment_dict_in
+    if str(environment_dict.get("SO_STOP_FLAG_PATH", "")).strip():
+        return ("SO_STOP_FLAG_PATH is set in this window: the reset cannot tell which kill switch the runner reads; "
+                "remove it ($env:SO_STOP_FLAG_PATH = $null) and use <SO_DATA_PATH>\\control\\STOP")
+    flag_str = path_dict_in.get("stop_flag") or ""
+    if not flag_str:
+        return "no kill-switch path (SO_DATA_PATH is not set)"
+    try:
+        os.stat(flag_str)
+    except FileNotFoundError:
+        return f"the kill switch {flag_str} does not exist: create it first (then the runner starts no job)"
+    except OSError as error:
+        return f"the kill switch {flag_str} cannot be checked ({type(error).__name__}): a reset needs it confirmed"
+    return ""
+
+
 # FUNCTION: WHY A RESET IS REFUSED ("" WHEN IT MAY RUN)
-def get_refusal_str(path_dict_in, backup_folder_str_in, phase_str_in):
+def get_refusal_str(path_dict_in, backup_folder_str_in, phase_str_in, environment_dict_in=None):
     """
     Args:
         path_dict_in (dict): Queue paths
         backup_folder_str_in (str): Backup folder
         phase_str_in (str): The phase switch
+        environment_dict_in (dict | None): Environment for the kill-switch check (None = os.environ; tests)
 
     Returns:
         str: The reason, or ""
     """
-    # THE PHASE, THE RUNNER, THE QUEUE, THE BACKUP FOLDER
+    # THE PHASE, THE KILL SWITCH, THE RUNNER, THE QUEUE, THE BACKUP FOLDER
     if phase_str_in != PHASE_DEVELOPMENT_STR:
         return f"records/agent_phase.txt says {phase_str_in!r}: from the agent phase on nothing is reset"
+    stop_refusal_str = get_stop_flag_refusal_str(path_dict_in, environment_dict_in)
+    if stop_refusal_str:
+        return stop_refusal_str
     if os.path.exists(path_dict_in["lock"]):
         return f"the runner holds {path_dict_in['lock']}: stop the task (or wait for the job) first"
     for key_str in ["pending", "running"]:
@@ -289,7 +334,7 @@ def get_refusal_str(path_dict_in, backup_folder_str_in, phase_str_in):
 # FUNCTION: THE RESET
 def reset_records_dict(path_dict_in, backup_folder_str_in, confirm_bool_in=False, now_in=None,
                        ledger_path_str_in=None, results_log_path_in=RESULTS_LOG_PATH, phase_str_in=None,
-                       registered_path_str_in=None):
+                       registered_path_str_in=None, environment_dict_in=None):
     """
     Args:
         path_dict_in (dict): Queue paths
@@ -300,16 +345,18 @@ def reset_records_dict(path_dict_in, backup_folder_str_in, confirm_bool_in=False
         results_log_path_in (Path): docs/RESULTS_LOG.md
         phase_str_in (str | None): Phase (None = records/agent_phase.txt)
         registered_path_str_in (str | None): None = records/legacy/registered_versions.csv of this workspace
+        environment_dict_in (dict | None): Environment for the kill-switch check (None = os.environ; tests)
 
     Returns:
         dict: refused_str, new_ledger_row_count, new_registered_row_count, pilot_included_before,
               pilot_included_after, move_list, target_str
     """
-    # REFUSE FIRST; A DRY RUN STILL SHOWS WHAT WOULD HAPPEN
+    # REFUSE FIRST; THE PLAN IS STILL RETURNED (THE COMMAND PRINTS IT BEFORE THE REASON)
     now = now_in or datetime.datetime.now()
     ledger_path_str = ledger_path_str_in or os.path.join(paths.WORKSPACE_PATH_STR, *PILOT_LEDGER_REL_STR.split("/"))
     trial_log_path_str = os.path.join(os.path.dirname(path_dict_in["old_state"]), "trial_log.csv")
-    refused_str = get_refusal_str(path_dict_in, backup_folder_str_in, phase_str_in or get_agent_phase_str())
+    refused_str = get_refusal_str(path_dict_in, backup_folder_str_in, phase_str_in or get_agent_phase_str(),
+                                  environment_dict_in)
     source_str = f"trial_log_reset_{now:%Y%m%d}"
     new_row_list = get_new_ledger_row_list(trial_log_path_str, ledger_path_str, source_str)
     registered_path_str = registered_path_str_in or get_registered_versions_path_str()
@@ -377,12 +424,13 @@ if __name__ == "__main__":
     if not arg_dict.backup_folder:
         raise SystemExit("refused: --backup-folder is required for a reset")
     outcome_dict = reset_records_dict(get_queue_path_dict(), arg_dict.backup_folder, arg_dict.confirm)
-    if outcome_dict["refused_str"]:
-        raise SystemExit(f"refused: {outcome_dict['refused_str']}")
     print(f"ledger rows to add: {outcome_dict['new_ledger_row_count']}; registered-version rows to add: "
           f"{outcome_dict['new_registered_row_count']}; N with the pilot included: {outcome_dict['pilot_included_before']}")
     for source_path_str, name_str in outcome_dict["move_list"]:
         print(f"{'moved' if outcome_dict['done_bool'] else 'would move'} {source_path_str} -> {outcome_dict['target_str']}\\{name_str}")
+    if outcome_dict["refused_str"]:
+        # THE PLAN ABOVE, THEN THE REASON; EXIT 1 (A DRY RUN TOO: A BLOCK THAT CHECKS THE EXIT CODE STOPS HERE)
+        raise SystemExit(f"refused: {outcome_dict['refused_str']} (nothing changed)")
     if outcome_dict["done_bool"]:
         print(f"done; N with the pilot included after the reset: {outcome_dict['pilot_included_after']}. Commit "
               f"records/legacy/pilot_designs.csv, records/legacy/registered_versions.csv and docs/RESULTS_LOG.md on a "

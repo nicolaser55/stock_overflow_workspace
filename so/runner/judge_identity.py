@@ -9,7 +9,7 @@ Judge Identity (design 2026-10-27, docs/AGENTIC_DESIGN.md section 4: judge versi
 
 The judge is what scores a run: every protected .py file under so/ and scripts/ (protected_paths.txt), plus two
 inputs that change reports without being code (roadmap R3, 2026-10-29): the tried-designs ledger in
-records/legacy/*.csv (the pilot-included multiple-testing view since R4) and the package lock requirements/venv_main_lock.txt (it fixes
+records/legacy/*.csv (part of the verdict's N since 2026-11-10; before that, a reported view) and the package lock requirements/venv_main_lock.txt (it fixes
 the numerics). Its identity is a content hash of those files, recorded in every report and manifest and in the run
 index. Two runs with the same judge hash were scored by identical rules, whatever their commits; a different hash means
 the rules changed and the results are not directly comparable. Nothing has to be bumped by hand.

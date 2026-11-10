@@ -750,13 +750,13 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                                              seed_count_int_in=baseline_seed_count_int_in,
                                              realized_exposure_bool_in=get_realized_exposure_bool(design_module_in))
     # THE MULTIPLE-TESTING RANDOM-TIMING COUNT: EXTRA DRAWS ONLY WHEN THE PATH IS STILL NEAR PASSING (ROADMAP R3,
-    # 2026-11-02); N IS COUNTED AS THE VERDICT COUNTS IT. A REDUCED SEED COUNT (TESTS) DRAWS NOTHING EXTRA (STRICTER).
+    # 2026-11-02); N IS COUNTED AS THE VERDICT COUNTS IT (THE PILOT-INCLUDED COUNT SINCE 2026-11-10). A REDUCED SEED
+    # COUNT (TESTS) DRAWS NOTHING EXTRA (STRICTER).
     tail_count_dict = get_tried_design_count_dict(stream_dict_in.get("trial_log_path_str"))
     baseline_dict["random_timing_tail_dict"] = get_random_timing_tail_dict(
         ohlcv_array_dict_in, date1_in, date2_in, baseline_dict, prior_only_dict_in, tail_count_dict["total_count"],
         realized_exposure_bool_in=get_realized_exposure_bool(design_module_in),
-        extend_bool_in=baseline_seed_count_int_in is None,
-        pilot_design_count_int_in=tail_count_dict["pilot_included_count"])
+        extend_bool_in=baseline_seed_count_int_in is None)
     lookahead_dict = None
     look_ahead_status_str = look_ahead_status_str_in
     if run_lookahead_bool_in:

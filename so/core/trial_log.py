@@ -22,9 +22,9 @@ result was obtained (multiple testing) and of whether a test window had already 
 
 The designs tried before the judge v1 freeze (the pilot phase, including the records from before the 2026-10-22
 reset) are kept, as family and settings only, in the tried-designs ledger records/legacy/pilot_designs.csv
-(2026-11-03). They are shown in every report's pilot-included multiple-testing view but do not enter the verdict's N
-(so.core.multiple_testing). scripts/reset_records.py (development phase only) adds this log's designs to the ledger
-before it moves the log aside.
+(2026-11-03). Since 2026-11-10 they count in the verdict's N together with this log (so.core.multiple_testing);
+before that they were only a reported view. scripts/reset_records.py (development phase only) adds this log's designs
+to the ledger before it moves the log aside.
 
 From 2026-10-20 a new trial_id includes the process id, so two processes that log in the same microsecond do not
 share an id. One row is "{timestamp}_{pid}_{config_hash}". A row written in a batch is

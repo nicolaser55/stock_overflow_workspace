@@ -458,9 +458,10 @@ def test_results_log_switch():
 # FUNCTION: THE RESET KEEPS THE COUNT AND DISCARDS THE RESULTS
 def test_reset_records():
     """
-    Refused in the agent phase, with a pending job, or with a backup folder inside the data root; a dry run changes
-    nothing; a reset adds the trial log's designs to the ledger, keeps N with the pilot included, moves the results and
-    appends one note row to the results log.
+    Refused in the agent phase, without a confirmed kill switch (missing, unreadable, or SO_STOP_FLAG_PATH set), with
+    the runner lock, with a pending job, or with a backup folder inside the data root; a refusal still returns the plan
+    and changes nothing; a dry run changes nothing; a reset adds the trial log's designs to the ledger, keeps N with the
+    pilot included, moves the results and appends one note row to the results log.
 
     Returns:
         None
@@ -489,16 +490,55 @@ def test_reset_records():
     backup_str = tempfile.mkdtemp(prefix="so_backup_")
     before_int = get_tried_design_count_dict(trial_log_str, [ledger_str])["pilot_included_count"]
     assert before_int == 2
-    keyword_dict = {"ledger_path_str_in": ledger_str, "results_log_path_in": log_path, "registered_path_str_in": registered_str}
-    # REFUSALS
+    keyword_dict = {"ledger_path_str_in": ledger_str, "results_log_path_in": log_path, "registered_path_str_in": registered_str,
+                    "environment_dict_in": {}}
+    # THE KILL SWITCH OF THIS ZONE (NOT YET SET); EVERY REFUSAL KEEPS THE FILES AS THEY ARE
+    flag_str = os.path.join(tempfile.mkdtemp(prefix="so_control_"), "control", "STOP")
+    path_dict = {**path_dict, "stop_flag": flag_str}
+
+    def assert_unchanged():
+        assert os.path.isfile(trial_log_str) and len(pd.read_csv(ledger_str)) == 1 and os.listdir(backup_str) == []
+        assert not os.path.exists(registered_str) and log_path.read_text(encoding="utf-8") == "# Results log\n"
+    # REFUSALS: THE PHASE COMES FIRST, THEN THE KILL SWITCH (MISSING WITH ITS FOLDER, UNREADABLE, OVERRIDE, NO PATH)
     assert "agent phase" in reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="agents", **keyword_dict)["refused_str"]
+    missing_dict = reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development", **keyword_dict)
+    assert "does not exist" in missing_dict["refused_str"] and flag_str in missing_dict["refused_str"]
+    assert not missing_dict["done_bool"] and missing_dict["move_list"] and missing_dict["new_ledger_row_count"] == 1
+    dry_missing_dict = reset_records.reset_records_dict(path_dict, backup_str, False, phase_str_in="development", **keyword_dict)
+    assert "does not exist" in dry_missing_dict["refused_str"] and dry_missing_dict["move_list"] == missing_dict["move_list"]
+    assert_unchanged()
+    os.makedirs(os.path.dirname(flag_str))
+    Path(flag_str).write_text("stop", encoding="utf-8")
+    assert reset_records.get_stop_flag_refusal_str(path_dict, {}) == ""
+    real_stat_func = os.stat
+    def denying_stat_func(path_in, *args_in, **kwarg_dict_in):
+        if str(path_in) == flag_str:
+            raise PermissionError(13, "Access is denied")
+        return real_stat_func(path_in, *args_in, **kwarg_dict_in)
+    os.stat = denying_stat_func
+    try:
+        denied_str = reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development", **keyword_dict)["refused_str"]
+        assert "cannot be checked (PermissionError)" in denied_str, denied_str
+        assert run_queue.get_stop_flag_bool(path_dict) is True              # THE RUNNER READS THE SAME FLAG AS SET
+    finally:
+        os.stat = real_stat_func
+    override_dict = {**keyword_dict, "environment_dict_in": {"SO_STOP_FLAG_PATH": flag_str}}
+    assert "SO_STOP_FLAG_PATH" in reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development", **override_dict)["refused_str"]
+    assert "SO_STOP_FLAG_PATH" not in reset_records.get_stop_flag_refusal_str(path_dict, {"SO_STOP_FLAG_PATH": "  "})
+    assert "no kill-switch path" in reset_records.get_stop_flag_refusal_str({**path_dict, "stop_flag": ""}, {})
+    assert_unchanged()
+    # THE SWITCH IS SET: THE RUNNER LOCK STILL REFUSES (A PASS IN PROGRESS)
+    Path(path_dict["lock"]).write_text("{}", encoding="utf-8")
+    assert "runner holds" in reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development", **keyword_dict)["refused_str"]
+    os.remove(path_dict["lock"])
+    assert_unchanged()
     inside_str = os.path.join(os.environ["SO_DATA_PATH"], "inside_backup")
     os.makedirs(inside_str, exist_ok=True)
     assert "outside the data root" in reset_records.reset_records_dict(path_dict, inside_str, True, phase_str_in="development", **keyword_dict)["refused_str"]
     Path(path_dict["pending"], "job.json").write_text("{}", encoding="utf-8")
     assert "pending" in reset_records.reset_records_dict(path_dict, backup_str, True, phase_str_in="development", **keyword_dict)["refused_str"]
     os.remove(os.path.join(path_dict["pending"], "job.json"))
-    # A DRY RUN CHANGES NOTHING
+    # A DRY RUN CHANGES NOTHING (THE KILL SWITCH IS SET FROM HERE ON)
     dry_dict = reset_records.reset_records_dict(path_dict, backup_str, False, phase_str_in="development", **keyword_dict)
     assert not dry_dict["refused_str"] and dry_dict["new_ledger_row_count"] == 1 and not dry_dict["done_bool"]
     assert dry_dict["new_registered_row_count"] == 3 and not os.path.exists(registered_str)
@@ -539,10 +579,11 @@ def test_reset_records():
         pass
     target_str = done_dict["target_str"]
     assert os.path.isfile(os.path.join(target_str, "trial_log.csv")) and os.path.isfile(os.path.join(target_str, "runs", "r1", "report.json"))
-    assert get_tried_design_count_dict(trial_log_str, [ledger_str]) == {"current_count": 0, "pilot_count": 2, "total_count": 1,
+    assert get_tried_design_count_dict(trial_log_str, [ledger_str]) == {"current_count": 0, "pilot_count": 2, "total_count": 2,
                                                                          "pilot_included_count": 2}
     assert "| withdrawn |" in log_path.read_text(encoding="utf-8").splitlines()[-1]
-    passed("reset of the development records (refused in the agent phase / with pending jobs / backup inside the data root; dry run; "
+    passed("reset of the development records (refused in the agent phase / without a confirmed kill switch: missing, unreadable, "
+           "SO_STOP_FLAG_PATH set / with the runner lock / with pending jobs / backup inside the data root, the plan still shown; dry run; "
            "designs kept in the ledger, N with the pilot unchanged, versions kept in registered_versions.csv, grade and status "
            "folders kept, results moved, one note row; --register-from idempotent)")
 

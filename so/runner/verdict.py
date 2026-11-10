@@ -453,8 +453,9 @@ def get_report_markdown_str(report_dict_in):
     if multiple_dict:
         line_list.extend(["", "### Multiple testing", ""])
         line_list.append(
-            f"Designs tried on the development data since the pilot (the verdict's N, the trial log): "
-            f"{multiple_dict['design_count']} (counted once each). Deflated Sharpe probability "
+            f"Designs tried on the development data (the verdict's N, pilot included: the trial log and "
+            f"records/legacy/pilot_designs.csv): {multiple_dict['design_count']} (counted once each; "
+            f"{multiple_dict.get('current_design_count', 'n/a')} of them in the trial log). Deflated Sharpe probability "
             f"{get_report_float_str(multiple_dict['deflated_sharpe_probability'])} over {multiple_dict['quarter_count']} "
             f"quarters (need {get_report_float_str(multiple_dict['deflated_sharpe_min'])}; trial spread from "
             f"{str(multiple_dict['trial_sharpe_variance_source_str']).replace('_', ' ')}). Random-timing p-value "
@@ -474,16 +475,6 @@ def get_report_markdown_str(report_dict_in):
                 f"Random timing counted, not fitted: {tail_dict.get('at_or_above_count')} of "
                 f"{tail_dict.get('draw_count')} draws at or above the path (budget {tail_dict.get('draw_target')} draws, "
                 f"at most {tail_dict.get('at_or_above_max')} allowed; {how_str}); p = (k + 1) / (budget + 1).")
-        pilot_dict = multiple_dict.get("pilot_included_dict") or {}
-        if pilot_dict:
-            line_list.append(
-                f"With the pilot designs included (reported, not part of the verdict; "
-                f"{multiple_dict.get('pilot_design_count')} in records/legacy/pilot_designs.csv): N = "
-                f"{pilot_dict.get('design_count')}, deflated Sharpe probability "
-                f"{get_report_float_str(pilot_dict.get('deflated_sharpe_probability'))}, random timing "
-                f"{'pass' if pilot_dict.get('random_pass_bool') else 'fail'} "
-                f"({str(pilot_dict.get('random_source_str', '')).replace('_', ' ')}): "
-                f"{'pass' if pilot_dict.get('pass_bool') else 'fail'}.")
     unread_dict = report_dict_in.get("unread_dict") or {}
     if unread_dict:
         line_list.extend(["", "### Never-read tail", ""])
