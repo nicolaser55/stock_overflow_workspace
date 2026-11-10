@@ -12,8 +12,9 @@ section 4 decides which ideas are still allowed; the planner picks among them, m
 
 **Note (2026-11-04).** Written before the pilot scope (design 6.7): the verdict's N is no longer 260 but counts the
 trial log only, from the judge v1 freeze on; "existing experiments" in the family ledger means the nine as rerun at
-the freeze, not their pilot versions. The numbers in sections 2, 6 and 7 are price returns before R4b (cash at 0%) and
-are Nicolas's records: the planner gets a numbers-free brief instead (roadmap R5). After the freeze, a few ideas from
+the freeze, not their pilot versions. **Update (2026-11-10):** section 2 now gives the judge v1 baseline on total
+returns (R4b); the earlier price-only numbers (cash at 0%) are kept in section 2.1 and marked as such where sections 6
+and 7 quote them. All these numbers are Nicolas's records: the planner gets a numbers-free brief instead (roadmap R5). After the freeze, a few ideas from
 this list are run by hand before the agents (roadmap, judge v1 freeze).
 
 ---
@@ -33,9 +34,43 @@ in the multiple-testing N; a pass is frozen and paper-traded on data after its f
 
 ---
 
-## 2. Baseline: the nine experiments under the current referee (phase C, 2026-10-28/29)
+## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-09/10)
 
-First valid baseline. Judge hash `ad4a601ec218bc09`, judge commit `cc094bd`, run commit `1685b17`, N = 260 designs
+Judge hash `3b51ca4a3578852a`, judge commit `1b6bd11` (deployed), development records reset twice on 2026-11-09 (the
+first attempt crashed in the pre-registration guard; fixed by PR #34, `records/legacy/registered_versions.csv`). Total
+returns on both sides: SPY dividends reinvested and T-bill interest on cash, for the strategy, buy-and-hold and the
+baselines (R4b). Results-log rows of 2026-11-09/10 (PR #36).
+
+| Experiment | Family (sec. 4) | Prior-only vs buy-and-hold | Failed parts | Look-ahead |
+|---|---|---|---|---|
+| exp01_minute_entry | L | +131.61% vs +280.26% | return, consistency, baselines, multiple-testing | pass |
+| exp02_stop_reentry | L | +194.57% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp03_ath_exit | X | +173.08% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp04_trend_exit | T | +86.10% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp05_vol_scaled_exposure | V | +196.47% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp06_capped_regret_reentry | T | +196.19% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp07_warning_lights_exit | T | +88.19% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp12_vix_fear_reentry | V | +167.89% vs +256.72% | return, consistency, baselines, multiple-testing | pass |
+| exp13_e1m1_robustness | V (part of exp12's idea) | +344.27% vs +256.72% | consistency, multiple-testing | pass |
+
+Notes:
+- All nine fail the verdict; eight of nine lose to buy-and-hold on return. exp01's buy-and-hold differs because minute
+  mode scores a different span. These returns are not comparable with section 2.1 (price returns, cash at 0%):
+  buy-and-hold now also earns the dividends that time in cash misses.
+- exp13 beats buy-and-hold on return only because its rule was selected after seeing the data (section 7); the verdict
+  fails it on consistency and multiple testing, as on price returns.
+- **The verdict's N grows in queue order:** it counts the designs in the trial log so far, and the trial log started
+  empty after the reset, so exp02 (first) was judged at N = 18 and exp04 (third) at N = 42; later runs at more. No
+  verdict here depends on it (every multiple-testing part fails), but it is an open question for Nicolas (roadmap,
+  judge v1 freeze). The pilot-included N, 260, is reported beside it in every report.
+- **Deflated-Sharpe check on total returns (2026-11-10):** 10,000 no-skill draws on exp04 and exp02; the centered counts
+  are at most 1.20 times the expected count (exp02 at N = 100; 1.04 at N = 260; exp04 at most 0.59). Below the 3x rule,
+  so the DSR is kept; but on total returns it is about fair, no longer conservative as on price returns (at most 0.24).
+  The counts are small (6 against 5 expected, 2 against 1.9), so these ratios are noisy.
+
+### 2.1 Earlier baseline, price returns (phase C, 2026-10-28/29; withdrawn by the 2026-11-09 resets)
+
+First valid baseline at the time. Judge hash `ad4a601ec218bc09`, judge commit `cc094bd`, run commit `1685b17`, N = 260 designs
 tried. The rows of 2026-10-23..25 in `docs/RESULTS_LOG.md` were withdrawn by the 2026-10-25 audit; these replace them.
 Every return reproduced the earlier run exactly; the only change is the new multiple-testing part of the verdict.
 
@@ -65,12 +100,13 @@ about 77% average exposure, above 58 of 100 random-timing draws (needed 95), def
 
 - **R2** referee = the deployed commit; **R3** core fixes from the audit; **R4** results visible only as grades.
 - **R4b** total returns: SPY dividends and T-bill interest on cash in the engine and the baselines (decided
-  2026-10-29). Needs the data of section 5.1.
+  2026-10-29). **Done** (PR #31, 2026-11-09).
 - **Full rerun of the nine experiments** after R2-R4b (one batch, exp01 included because its returns change too:
-  about 3 hours for the eight daily ones plus 11-14 hours for exp01). The ledger of section 4 and section 2 are then
-  updated with the new numbers.
+  about 3 hours for the eight daily ones plus 11-14 hours for exp01). **Done 2026-11-09/10** (section 2); the family
+  ledger of section 4 is unchanged (no experiment was added or dropped).
 - **Judge v1 freeze** (added 2026-11-04): R4b plus the deflated-Sharpe diagnostic; then the development records are
   reset (`scripts/reset_records.py`, the count of designs kept) and the nine rerun once, which is the baseline.
+  **Done 2026-11-10** apart from the open items in the roadmap's freeze section.
 - **A few hand-designed experiments** from this list (decided 2026-11-04), pre-registered and queued by Nicolas and
   Claude under the same rules, to check the queue, the grades and the status files in practice before agents rely on
   them.
@@ -131,14 +167,14 @@ The first five spend little time out of the market, state a mechanism, and (exce
 ### 6.0 What the constraints imply
 
 Our question is narrow: **a long-only, unlevered SPY strategy must beat buy-and-hold's total return after costs**
-(price returns only and cash at 0% today; R4b adds dividends and T-bill interest before agents run). That shapes which ideas can work at all:
+(total returns since R4b, 2026-11-09: dividends reinvested and interest on cash, on both sides). That shapes which ideas can work at all:
 
 1. **A strategy that is out of the market must be out at bad times, on net.** With no leverage, the only way to beat
    buy-and-hold's return is that the days skipped had a negative total return. Lower risk does not count.
 2. **So many famous ideas improve risk, not return.** Trend-following and volatility targeting mostly cut drawdowns
    and raise the Sharpe ratio (Zakamulin 2015; Harvey et al. 2018). Our own runs agree: exp04 (200-day trend exit)
-   +45.46%, exp05 (volatility-scaled exposure) +148.95%, both against +199.04% for buy-and-hold over the same span
-   (phase C reruns, 2026-10-28).
+   +86.10%, exp05 (volatility-scaled exposure) +196.47%, both against +256.72% for buy-and-hold over the same span
+   (judge v1 baseline on total returns, 2026-11-10; on price returns +45.46% and +148.95% against +199.04%).
 3. **The ideas with a real chance are those that stay invested most of the time** and step aside only in narrow
    windows that, according to the literature, earn little or lose: calendar windows, intraday windows, specific
    risk states.
@@ -363,7 +399,8 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 - *Status (2026-10-29):* **eligible**
 - *Mechanism:* nearness to the Dow's **52-week high predicts higher** future market returns (underreaction), while
   nearness to the **historical high predicts lower** returns (overreaction) (Li & Yu, *JFE* 2012; G7 evidence).
-  Our exp03 sold near the all-time high and lost (+134.86%), consistent only with the second half failing to pay.
+  Our exp03 sold near the all-time high and lost (+173.08% vs +256.72% on total returns; +134.86% vs +199.04% on
+  price returns), consistent only with the second half failing to pay.
 - *Rule sketch:* stay invested while SPY is within y of its 52-week high or the 52-week high is far below the
   all-time high; out when far below the 52-week high. Variants: y.
 - *Caveats:* close to drawdown-from-high lights in exp07.
@@ -380,7 +417,7 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 | **Overnight drift** (S&P futures, 2-3 a.m. ET) | Needs futures we don't have; and it **averaged close to zero in 2021-2025** after ~3.7%/year in 1998-2020 | Boyarchenko, Larsen & Whelan (NY Fed staff report); Liberty Street Economics, July 2026 |
 | **Opening-range breakout** (first 5-minute candle) | An independent replication on 5 index CFDs, 2015-2026: gross results reproduced, **net of spread and slippage zero or negative** | Zarattini & Aziz 2023; replication on MQL5 blog, Sept 2026 |
 | **Pure volatility targeting** | Raises Sharpe, not unlevered return; real-time versions do not beat the market factor; our exp05 failed | Harvey et al. 2018; Cederburg et al. 2020 |
-| **Daily 200-day trend exit** | Already exp04 (+45.46%) | phase C rerun |
+| **Daily 200-day trend exit** | Already exp04 (+86.10% vs +256.72% on total returns; +45.46% on price returns) | judge v1 baseline, 2026-11-10 |
 | **Pre-holiday effect** | I could not access a recent study; not checked | — |
 | **Day-of-week (Monday) effect** | Not researched; generally reported to have weakened | — |
 
@@ -401,7 +438,8 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
   buy-and-hold (E1M1 ranked 1 of 36, "a spike"); a selection-aware placebo gave p = 0.088; without its single best
   episode (2020-03-16) it falls below buy-and-hold.
 - On 2026-10-23 the rule was ported to the new runner as a one-candidate experiment (exp13 v1.0). Its +273.85% vs
-  +199.04% is the same after-the-fact selection; the runner's consistency and multiple-testing parts reject it.
+  +199.04% (price returns) is the same after-the-fact selection; the runner's consistency and multiple-testing parts
+  reject it. On total returns (judge v1 baseline, 2026-11-10): +344.27% vs +256.72%, rejected by the same two parts.
 - **For the thesis:** exp13 is a worked example of selection bias: a rule chosen because it looked best can beat
   buy-and-hold on return and still be noise. The results log gets a note row saying so.
 

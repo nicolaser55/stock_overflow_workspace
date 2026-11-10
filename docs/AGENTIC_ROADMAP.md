@@ -60,7 +60,8 @@ was checked: so_agent's write was refused).
 after-the-fact selection). Timing: the eight daily runs took about 3 hours (exp02 54 minutes), exp01 about 11.5 hours.
 
 **Next full rerun:** after R2, R3, R4 and R4b, all nine (exp01 included, since R4b changes every return): about
-3 hours plus 11-14 hours.
+3 hours plus 11-14 hours. **Done 2026-11-09/10** as the judge v1 baseline (see the judge v1 freeze below): the eight
+daily runs took about 3 hours 45 minutes (exp02 55 minutes), exp01 about 11.5 hours.
 
 ## R2. The referee is the deployed commit (decided)
 
@@ -151,8 +152,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   Nicolas's workspace or start Python there; this was already true of the earlier script, whose access check only
   listed folders. Denies now name the write rights one by one (PR #23).
 - [ ] The scrubber on a real crash: `queue\failed` and `queue\rejected` were empty on 2026-11-04, so it has only been
-  tested on synthetic tracebacks; read the first real crash's status file.
-- [ ] The first real grade file read by so_agent (comes with the freeze rerun).
+  tested on synthetic tracebacks; read the first real crash's status file. **Real crashes exist now (2026-11-09):** the
+  nine status files of the first baseline attempt (a `ValueError` from the pre-registration guard) are in
+  `D:\stock_overflow\backup_records\reset_20261109_221644\visible\status`; one still has to be read.
+- [ ] The first real grade file read by so_agent (comes with the freeze rerun). **Grade files exist now
+  (2026-11-10).** Before the check: the first reset of 2026-11-09 moved `visible\grades` and `visible\status`
+  themselves, and the runner recreated them with inherited permissions only, so the `so_grade_readers` and
+  `so_status_readers` grants are probably gone; rerun `scripts/setup_so_agent.ps1` once (resets keep the folders since
+  PR #34), then read a grade as so_agent.
 
 **Done when** an agent account can read the grade of a run and nothing else about it.
 
@@ -169,8 +176,31 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   **Done 2026-11-09:** on exp04 and exp02 (price-only reports, 10,000 draws) every centered count is at most
   0.24 times the expected count at N = 30, 100 and 260: the approximation is conservative here. Kept as is, no
   core change; the cost is lower power.
-- [ ] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
-  nine: the baseline.
+  **Confirmed on total returns (2026-11-10)** on the judge v1 baseline runs of exp04 and exp02 (10,000 draws): every
+  centered count is below the 3x rule, at most 1.20 times expected (exp02 at N = 100; 1.04 at N = 260; exp04 at most
+  0.59). Kept; but on total returns the DSR is about fair, no longer conservative (small counts: 6 against 5
+  expected, 2 against 1.9). Reports in `store04_experiments\checks`.
+- [x] Reset the development records (`scripts/reset_records.py --confirm`, task stopped), then the full rerun of the
+  nine: the baseline. **Done 2026-11-09/10**, judge hash `3b51ca4a3578852a`, judge commit `1b6bd11`; all nine fail
+  the verdict (`docs/STAGE1_RESEARCH_PLAN.md` section 2; results-log rows PR #36). What it took:
+  - first reset (PR #33) and rerun: all nine crashed in the pre-registration guard, because the reset had moved the
+    trial log the guard reads to tell a rerun of a logged version from a new one;
+  - fix (PR #34): `records/legacy/registered_versions.csv` (experiment, version, folder hash, helper hash; no
+    results), seeded from the moved log; the guard reads it with the trial log, `reset_records.py` fills it before
+    each reset and keeps the grade and status folders; a Windows-only order flake in `tests/test_grades.py` fixed;
+  - second reset (PR #35) and rerun: nine runs, no crash. The second reset ran with the scheduled task still running
+    (`Stop-ScheduledTask` was refused in a non-elevated window and the block's check failed open); no harm (the
+    runner was idle with nothing pending, the dry run and the reset moved the same items), but see the next item.
+  Baseline run ids for the equivalence check: exp02 `exp02_stop_reentry_20261109221716650764`, exp04
+  `exp04_trend_exit_20261109234625241939`.
+- [ ] Proposed (2026-11-10), for Nicolas to decide: `reset_records.py` refuses unless the kill switch
+  `control\STOP` exists (and no pass holds the lock), so a reset no longer relies on a PowerShell check that the task
+  is stopped; blocks that stop the task also check that the window is elevated and fail closed when the task cannot
+  be read.
+- [ ] Open question (2026-11-10), for Nicolas to decide: **the verdict's N grows in queue order.** It counts the
+  designs in the trial log so far, so the first run after a reset faces a lower hurdle (exp02 N = 18, exp04 N = 42).
+  Options: keep it (the count of designs tried by then is what the DSR asks for), or judge every run at the
+  pilot-included N (260 today, reported beside it). No baseline verdict depends on it.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
   fast daily experiments reproduce every number exactly); a scoring change means a full rerun. **The check is built
   (2026-11-05)**: `scripts/check_equivalence.py --baseline <run id> --new <run id>` (Nicolas or so_runner; it prints
@@ -197,7 +227,8 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] Tests on synthetic data (`tests/test_total_return.py`, a minute-mode replay test); `docs/RUNNER_DESIGN.md`
   updated. Sanity check on the development view, 2005-2024: buy-and-hold 8.19% a year price only, 10.24% total return;
   all cash 1.64% a year.
-- [ ] Then the full rerun of the nine (see C), after the counted check of the deflated Sharpe ratio (judge v1 freeze).
+- [x] Then the full rerun of the nine (see C), after the counted check of the deflated Sharpe ratio (judge v1 freeze).
+  **Done 2026-11-09/10** (judge v1 baseline).
 
 **Done when** every verdict compares total returns on both sides.
 
