@@ -306,11 +306,14 @@ def test_email_worthy_needs_every_part():
     assert one_dict["multiple_testing_dict"]["design_count"] == 1 and "multiple-testing" not in one_dict["failed_list"]
     assert many_dict["multiple_testing_dict"]["design_count"] == 2000
     assert "multiple-testing" in many_dict["failed_list"] and not many_dict["email_worthy_bool"]
-    # PILOT SCOPE (2026-11-03): 2,000 PILOT DESIGNS DO NOT RAISE THE VERDICT'S N; THE PILOT-INCLUDED VIEW SHOWS THEM
+    # PILOT INCLUDED (2026-11-10): 2,000 DESIGNS IN THE LEDGER RAISE THE VERDICT'S N AS IF THEY WERE IN THE TRIAL LOG
     pilot_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, close_baseline_dict, LOOK_AHEAD_PASS_STR, None, [many_path_str])
-    assert pilot_dict["multiple_testing_dict"]["design_count"] == 1 and "multiple-testing" not in pilot_dict["failed_list"]
-    assert pilot_dict["multiple_testing_dict"]["pilot_included_dict"]["design_count"] == 2000
-    assert not pilot_dict["multiple_testing_dict"]["pilot_included_dict"]["pass_bool"]
+    pilot_multiple_dict = pilot_dict["multiple_testing_dict"]
+    assert pilot_multiple_dict["design_count"] == 2000 and pilot_multiple_dict["current_design_count"] == 0
+    assert pilot_multiple_dict["pilot_design_count"] == 2000 and pilot_multiple_dict["design_count_scope_str"] == "pilot_included"
+    assert "multiple-testing" in pilot_dict["failed_list"] and not pilot_dict["email_worthy_bool"]
+    assert "pilot_included_dict" not in pilot_multiple_dict                 # ONE N, NO SIDE VERDICT
+    assert pilot_multiple_dict["random_timing_p_max"] == many_dict["multiple_testing_dict"]["random_timing_p_max"]
     passed("email-worthy only when every verdict part passes, including the multiple-testing part")
 
 
@@ -318,8 +321,8 @@ def test_email_worthy_needs_every_part():
 def test_multiple_testing_parts():
     """
     The deflated Sharpe ratio reproduces the paper's example (0.9004). Designs are counted once: folds, runs and a _v2
-    port of the same rule do not add designs; notes do not count; the verdict's N is the trial log, and the pilot ledger
-    joins it by union only in the pilot-included view (2026-11-03). The random-timing
+    port of the same rule do not add designs; notes do not count; the verdict's N is the union of the trial log and the
+    pilot ledger (2026-11-10; the trial log alone from 2026-11-03 to 2026-11-10). The random-timing
     p-value falls as the path moves above the draws.
 
     Returns:
@@ -343,12 +346,13 @@ def test_multiple_testing_parts():
     pd.DataFrame([{"experiment": "exp02_stop_reentry_v2", "stage": "validation", "setting_json": json.dumps({"candidate": "A", "window": "w1"}), "metric_json": "{}"},
                   {"experiment": "exp03_ath_exit", "stage": "exploration", "setting_json": json.dumps({"rule": "x"}), "metric_json": "{}"}]).to_csv(legacy_path_str, index=False)
     count_dict = get_tried_design_count_dict(log_path_str, [legacy_path_str])
-    assert count_dict == {"current_count": 2, "pilot_count": 2, "total_count": 2, "pilot_included_count": 3}, count_dict
+    assert count_dict == {"current_count": 2, "pilot_count": 2, "total_count": 3, "pilot_included_count": 3}, count_dict
+    assert get_tried_design_count_dict(os.path.join(TEMP_ROOT_STR, "mt_no_log.csv"), [])["total_count"] == 1
     assert get_design_key_str("exp02_stop_reentry_v2_1", {"candidate": "A", "commit": "y"}) == get_design_key_str("exp02_stop_reentry", {"candidate": "A"})
     # THE PILOT LEDGER IS IN THE REPOSITORY: 260 DESIGNS (THE TWO PRE-RESET RECORDS SLIMMED TO FAMILY AND SETTINGS ON
-    # 2026-11-03, SAME KEYS); IT JOINS ONLY THE PILOT-INCLUDED COUNT
+    # 2026-11-03, SAME KEYS); IT IS PART OF THE VERDICT'S N (2026-11-10)
     restored_dict = get_tried_design_count_dict(log_path_str)
-    assert restored_dict["pilot_count"] == 260 and restored_dict["total_count"] == 2, restored_dict
+    assert restored_dict["pilot_count"] == 260 and restored_dict["total_count"] == restored_dict["pilot_included_count"] >= 260, restored_dict
     # RANDOM TIMING, COUNTED (R3, 2026-11-02): THE BUDGET AND THE ALLOWED COUNT
     assert get_random_timing_draw_target_int(260) == 10399 and get_random_timing_at_or_above_max_int(10399, 260) == 1
     assert get_random_timing_draw_target_int(1) == 39 and get_random_timing_at_or_above_max_int(39, 1) == 1
@@ -449,19 +453,16 @@ def test_random_timing_tail_count():
                                                {**baseline_dict, "random_timing_seed_list": list(range(7, 13))},
                                                path_dict_for(float(ordered_arr[0]) + 1.0), 1, realized_exposure_bool_in=True)
     assert shifted_dict["draw_count"] == 6 and not shifted_dict["extension_bool"]
-    # THE PILOT-INCLUDED VIEW (R4): A LARGER N SIZES THE BUDGET (N = 2: 79 DRAWS); THE VERDICT STAYS AT N = 1
-    pilot_dict = tail_for(float(ordered_arr[0]) + 1.0, pilot_design_count_int_in=2)
-    assert pilot_dict["draw_target"] == 79 and pilot_dict["draw_count"] == 79 and pilot_dict["design_count"] == 1
-    assert pilot_dict["at_or_above_max"] == 3 and pilot_dict["pilot_at_or_above_max"] == 1
-    assert pilot_dict["pass_bool"] and pilot_dict["pilot_pass_bool"] and pilot_dict["pilot_budget_bool"]
-    big_pilot_dict = tail_for(float(ordered_arr[0]) + 1.0, pilot_design_count_int_in=1000, max_draw_int_in=100)
-    assert big_pilot_dict["draw_count"] == 39 and big_pilot_dict["pass_bool"] and not big_pilot_dict["pilot_budget_bool"]
-    assert not big_pilot_dict["pilot_pass_bool"]
-    none_dict = tail_for(float(ordered_arr[0]) + 1.0, pilot_design_count_int_in=None)
-    assert none_dict["draw_count"] == 39 and none_dict["pilot_pass_bool"] == none_dict["pass_bool"]
+    # ONE N SIZES THE BUDGET (2026-11-10: NO SECOND, PILOT-INCLUDED BUDGET); NO PILOT FIELDS ARE LEFT
+    assert not any(key_str.startswith("pilot") for key_str in pool_dict)
+    try:
+        tail_for(float(ordered_arr[0]) + 1.0, pilot_design_count_int_in=2)
+        raise AssertionError("the removed pilot budget argument was accepted")
+    except TypeError:
+        pass
     passed("random-timing count: extra draws are the same seeds and code, the stop point follows the batch rule exactly, "
            "workers give the same count; budget above the maximum, extension off and other seeds draw nothing extra; "
-           "a pilot-included N sizes the budget without changing the verdict's N")
+           "one N sizes the budget")
 
 
 # FUNCTION: RANDOM TIMING IS REPRODUCIBLE AND CONSTANT WEIGHT 1 EQUALS BUY-AND-HOLD

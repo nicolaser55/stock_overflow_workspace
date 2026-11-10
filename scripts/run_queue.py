@@ -96,6 +96,8 @@ Kill switch (section 10): a file named STOP in <SO_DATA_PATH>/control (SO_STOP_F
 exists the runner starts no job, resumes no interrupted job, and the job that is running finishes; state.json shows
 "stopped": true. Nicolas creates and deletes the file (every other account can only read it). A flag that cannot be
 read (access denied) counts as set; a flag that does not exist, including a missing control folder, does not.
+scripts/reset_records.py reads the same path the other way (2026-11-10): it resets only when the flag is confirmed to
+exist.
 """
 
 # THE NUMBER OF RECENT RESULTS IN state.json AND OF LOG LINES KEPT FOR A FAILED JOB
@@ -1472,26 +1474,25 @@ def get_percent_str(value_in):
         return "n/a"
 
 
-# FUNCTION: THE PILOT-INCLUDED VIEW FOR THE EMAIL ("" WHEN THE REPORT HAS NONE)
-def get_pilot_email_str(path_dict_in, run_id_str_in):
+# FUNCTION: THE TRIAL LOG'S SHARE OF N FOR THE EMAIL ("" WHEN THE REPORT HAS NONE)
+def get_trial_log_count_email_str(path_dict_in, run_id_str_in):
     """
     Args:
         path_dict_in (dict): Queue paths
         run_id_str_in (str): Run id
 
     Returns:
-        str: "; with the pilot designs included N = ..., multiple testing pass/fail" or ""
+        str: " (pilot included; ... in the trial log)" or ""
     """
-    # report.json HOLDS IT SINCE R4
+    # report.json HOLDS IT; N HAS COUNTED THE PILOT DESIGNS SINCE 2026-11-10
     try:
         report_dict = read_json(os.path.join(path_dict_in["runs"], run_id_str_in, "report.json"))
     except (OSError, ValueError):
         return ""
-    pilot_dict = (report_dict.get("multiple_testing_dict") or {}).get("pilot_included_dict") or {}
-    if not pilot_dict:
+    multiple_dict = report_dict.get("multiple_testing_dict") or {}
+    if multiple_dict.get("design_count_scope_str") != "pilot_included":
         return ""
-    return (f"; with the pilot designs included N = {pilot_dict.get('design_count')}, multiple testing "
-            f"{'pass' if pilot_dict.get('pass_bool') else 'fail'} (reported, not part of the verdict)")
+    return f" (pilot included; {multiple_dict.get('current_design_count', 'n/a')} in the trial log)"
 
 
 # FUNCTION: THE EMAIL OF A FINISHED RUN (ONE PER FULL RUN, POSITIVE OR NEGATIVE)
@@ -1523,7 +1524,7 @@ def get_finished_run_email_tuple(path_dict_in, result_dict_in, manifest_dict_in)
                  f"Grade (what the planner sees) {verdict_dict.get('grade') or 'n/a'} "
                  f"({verdict_dict.get('grade_reason_code') or 'no reason code'})",
                  f"Designs tried (the multiple-testing N) {number_dict['design_count'] or 'n/a'}"
-                 f"{get_pilot_email_str(path_dict_in, result_dict_in['run_id'])}",
+                 f"{get_trial_log_count_email_str(path_dict_in, result_dict_in['run_id'])}",
                  f"Judge hash {str(number_dict['judge_hash'])[:16] or 'n/a'}",
                  f"Commits: design {result_dict_in.get('commit')}, judge {result_dict_in.get('judge_commit')}, "
                  f"run {result_dict_in.get('run_commit')}",

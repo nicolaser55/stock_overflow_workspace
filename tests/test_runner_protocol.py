@@ -246,7 +246,7 @@ def test_cost_sensitivity_in_report():
     assert tail_dict["method_str"] == "empirical" and tail_dict["draw_count"] == 2 and not tail_dict["extension_bool"]
     assert not tail_dict["pass_bool"] and not tail_dict["tail_mismatch_bool"]
     # R4: EACH LEVEL RE-APPLIES THE RETURN CHECK; THE 0.01 LEVEL AGREES WITH THE VERDICT; THE GRADE IS IN THE REPORT,
-    # THE MANIFEST AND report.md, AND THE PILOT-INCLUDED VIEW IS REPORTED
+    # THE MANIFEST AND report.md, AND N COUNTS THE PILOT LEDGER (2026-11-10)
     assert all(isinstance(row_dict["return_pass_bool"], bool) and row_dict["return_reason_str"] for row_dict in cost_list)
     assert cost_list[1]["return_pass_bool"] == result_dict["verdict_dict"]["return_dict"]["pass_bool"]
     from so.runner.grade import REASON_DICT
@@ -255,11 +255,14 @@ def test_cost_sensitivity_in_report():
     assert grade_dict["reason_code_str"] == "look_ahead_not_run"           # THE LOOK-AHEAD CHECK WAS SKIPPED HERE
     assert result_dict["manifest_dict"]["verdict"]["grade"] == grade_dict["grade_str"]
     assert result_dict["manifest_dict"]["verdict"]["grade_reason_code"] == grade_dict["reason_code_str"]
-    assert "Grade (what the planner sees)" in report_md_str and "With the pilot designs included" in report_md_str
-    pilot_dict = result_dict["report_dict"]["multiple_testing_dict"]["pilot_included_dict"]
-    assert pilot_dict["design_count"] >= 260 and result_dict["report_dict"]["multiple_testing_dict"]["design_count"] < 260
+    assert "Grade (what the planner sees)" in report_md_str and "the verdict's N, pilot included" in report_md_str
+    assert "With the pilot designs included" not in report_md_str
+    multiple_dict = result_dict["report_dict"]["multiple_testing_dict"]
+    assert multiple_dict["design_count"] >= 260 and multiple_dict["design_count_scope_str"] == "pilot_included"
+    assert multiple_dict["current_design_count"] < multiple_dict["design_count"] and "pilot_included_dict" not in multiple_dict
+    assert multiple_dict["random_timing_tail_dict"]["design_count"] == multiple_dict["design_count"]
     passed("development report carries the prior-only path and buy-and-hold at slippage 0.00 / 0.01 / 0.02, each with the "
-           "return check, the grade and the pilot-included view")
+           "return check, the grade, and N with the pilot ledger included")
     # THE TAIL-CHECK SCRIPT REBUILDS THIS FINISHED RUN'S PRIOR-ONLY PATH FROM THE PRUNED FOLDER (R3B, 2026-11-02)
     sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "scripts"))
     import check_random_timing_tail as tail_script

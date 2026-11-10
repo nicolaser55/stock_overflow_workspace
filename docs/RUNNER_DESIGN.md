@@ -156,10 +156,13 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   windows; audit S1, a data-dependent amendment because exp13 failed only the old rule); baselines (constant exposure
   with a 0.05 dead band, random timing on the realized exposure); look-ahead; multiple testing (deflated Sharpe
   ratio of quarterly excess returns at 0.95 or more, and random-timing p-value at most 0.05 / N, N = designs tried on
-  the development data in the trial log; `so.core.multiple_testing`, audit B5). **Pilot scope (R4, decided
-  2026-11-03):** the designs of the pilot phase (before the judge v1 freeze, `records/legacy/pilot_designs.csv`, family
-  and settings only) do not enter the verdict's N; the report also shows the part with them included (deflated Sharpe at
-  that N, random timing from the same counted draws, whose budget is sized for the larger N when it fits the maximum). **The random-timing
+  the development data; `so.core.multiple_testing`, audit B5). **N counts the pilot (decided 2026-11-10):** the
+  distinct designs of the trial log and of the tried-designs ledger `records/legacy/pilot_designs.csv` (the pilot
+  phase before the judge v1 freeze, family and settings only), 260 at the judge v1 baseline; the report also gives the
+  trial log's own count. From 2026-11-03 to 2026-11-10 N was the trial log only and the pilot-included part was a
+  reported view; the change revisits that rule after the baseline, in the stricter direction, with no verdict depending
+  on it. A reset keeps N; a rerun of an unchanged design adds nothing; N still grows as new designs are logged.
+  **The random-timing
   p-value is counted, not fitted (R3, 2026-11-02):** p = (k + 1) / (M + 1), k = draws at or above the path; the runner
   extends the 100 registered draws (same seed sequence, same code, 4 worker processes, batches of 1,000) up to the
   budget M + 1 = ceil(2 N / 0.05) (10,400 draws at N = 260; at most 1 draw at or above the path passes) and stops as
@@ -231,7 +234,7 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
 - **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected
-  `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (the tried-designs ledger; the pilot-included multiple-testing view since R4) and the package
+  `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (the tried-designs ledger; part of the verdict's N since 2026-11-10) and the package
   lock `requirements/venv_main_lock.txt` (R3, 2026-10-29), as paths and LF-normalized contents. The report
   (`judge_hash_str`), the manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge
   hash were scored by identical rules; a core change changes the hash, so results judged by different rules are never

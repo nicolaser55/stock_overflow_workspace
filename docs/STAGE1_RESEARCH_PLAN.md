@@ -10,8 +10,9 @@ our data**; "evidence" means what the cited authors report. Use this document wh
 (section 6): remove, add or reorder. (3) Collect the data of section 5 for the ideas that stay. (4) The ledger of
 section 4 decides which ideas are still allowed; the planner picks among them, most promising first.
 
-**Note (2026-11-04).** Written before the pilot scope (design 6.7): the verdict's N is no longer 260 but counts the
-trial log only, from the judge v1 freeze on; "existing experiments" in the family ledger means the nine as rerun at
+**Note (2026-11-04).** Written before the pilot scope (design 6.7): the verdict's N then counted the trial log only,
+from the judge v1 freeze on (**since 2026-11-10 it counts the pilot designs again**: trial log and ledger together, 260
+at the baseline); "existing experiments" in the family ledger means the nine as rerun at
 the freeze, not their pilot versions. **Update (2026-11-10):** section 2 now gives the judge v1 baseline on total
 returns (R4b); the earlier price-only numbers (cash at 0%) are kept in section 2.1 and marked as such where sections 6
 and 7 quote them. All these numbers are Nicolas's records: the planner gets a numbers-free brief instead (roadmap R5). After the freeze, a few ideas from
@@ -59,10 +60,11 @@ Notes:
   buy-and-hold now also earns the dividends that time in cash misses.
 - exp13 beats buy-and-hold on return only because its rule was selected after seeing the data (section 7); the verdict
   fails it on consistency and multiple testing, as on price returns.
-- **The verdict's N grows in queue order:** it counts the designs in the trial log so far, and the trial log started
+- **The verdict's N grew in queue order:** it counted the designs in the trial log so far, and the trial log started
   empty after the reset, so exp02 (first) was judged at N = 18 and exp04 (third) at N = 42; later runs at more. No
-  verdict here depends on it (every multiple-testing part fails), but it is an open question for Nicolas (roadmap,
-  judge v1 freeze). The pilot-included N, 260, is reported beside it in every report.
+  verdict here depends on it (every multiple-testing part fails at both counts). **Decided 2026-11-10:** the verdict
+  judges at the pilot-included N (trial log and ledger, 260 here); a full rerun of the nine under that rule, after a
+  reset, becomes the baseline (roadmap, judge v1 freeze).
 - **Deflated-Sharpe check on total returns (2026-11-10):** 10,000 no-skill draws on exp04 and exp02; the centered counts
   are at most 1.20 times the expected count (exp02 at N = 100; 1.04 at N = 260; exp04 at most 0.59). Below the 3x rule,
   so the DSR is kept; but on total returns it is about fair, no longer conservative as on price returns (at most 0.24).

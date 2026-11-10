@@ -1150,7 +1150,13 @@ def test_run_email_content():
                          "Designs tried (the multiple-testing N) 12", "Judge hash abcdef0123456789", f"run {FAKE_RUN_COMMIT_STR}",
                          "report.md", "Log L.log", "| row |"]:
         assert fragment_str in body_str, (fragment_str, body_str)
-    assert "audit" not in body_str
+    assert "audit" not in body_str and "pilot included" not in body_str         # A REPORT WITHOUT THE N SCOPE (BEFORE 2026-11-10)
+    Path(path_dict["runs"], "run_s").mkdir()
+    Path(path_dict["runs"], "run_s", "report.json").write_text(json.dumps({
+        "multiple_testing_dict": {"design_count": 260, "design_count_scope_str": "pilot_included", "current_design_count": 18}}),
+        encoding="utf-8")
+    scope_body_str = run_queue.get_finished_run_email_tuple(path_dict, {**result_dict, "run_id": "run_s"}, negative_dict)[1]
+    assert "Designs tried (the multiple-testing N) 260 (pilot included; 18 in the trial log)" in scope_body_str, scope_body_str
     positive_dict = {"verdict": {"label": "match or beat", "email_worthy": True, "failed_list": [], "look_ahead": "pass"}}
     subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, result_dict, positive_dict)
     assert subject_str == "Stock Overflow: PASS, audit pending - exp13_e1m1_robustness"

@@ -278,14 +278,17 @@ the NAS exists, Nicolas copies `trial_log.csv` and `run_index.csv` by hand after
 
 ### 6.7 Pilot scope, the tried-designs ledger and resets (decided 2026-11-03)
 Everything tried before the judge v1 freeze (4.4) is a **pilot phase** run with earlier, less robust code; its results
-were discarded. The verdict's multiple-testing N counts the trial log only; reruns of the same design add nothing.
-Every report and email also shows the multiple-testing part with the pilot designs included (reported, not part of the
-verdict), so the effect of this scope choice is visible; the thesis states the pilot count (260 designs) and this rule,
-and current settings chosen from pilot results are labelled data-dependent (exp13). The **tried-designs ledger**
+were discarded. **The verdict's multiple-testing N counts the pilot designs (decided 2026-11-10):** the distinct
+designs of the trial log and the tried-designs ledger together (260 at the judge v1 baseline); reruns of the same design
+add nothing, and every report and email also gives the trial log's own count. From 2026-11-03 to 2026-11-10 the N was
+the trial log only, with the pilot-included part reported beside it; that rule was revisited after the judge v1
+baseline, in the stricter direction and with no verdict depending on it, because the pilot designs were tried on the
+same data and shaped later choices, and because a trial-log N restarted after every reset. Current settings chosen
+from pilot results stay labelled data-dependent (exp13). The **tried-designs ledger**
 `records/legacy/pilot_designs.csv` holds the pilot's designs as family and settings only (made from the two pre-reset
 records, whose numbers were removed from `main`); it only grows. **Resets:** until R6, `scripts/reset_records.py`
-(Nicolas, development phase only) adds the trial log's designs to the ledger, checks that the pilot-included N is
-unchanged, moves the trial log, run index, run folders, queue records and agent view to a backup folder outside the data
+(Nicolas, development phase only, kill switch set) adds the trial log's designs to the ledger, checks that the
+pilot-included N is unchanged, moves the trial log, run index, run folders, queue records and agent view to a backup folder outside the data
 root, and appends a "withdrawn" note row to the results log. The first reset is at the freeze, before the rerun of the
 nine. Pilot variants do not use up the planner's budgets (section 5); the protocol-version limit starts again after a
 reset. From R6, nothing is reset and everything counts.

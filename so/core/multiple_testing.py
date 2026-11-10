@@ -14,25 +14,36 @@ Multiple-Testing Adjustment (audit B5, decided by Nicolas on 2026-10-25)
 Every design tried on the development data is a chance to beat buy-and-hold by luck. The runner's verdict therefore
 has a "multiple testing" part that raises the bar with N, the number of distinct designs tried on this data so far:
 
-    N                 distinct designs in the trial log (store04_experiments/trial_log.csv). A design is (experiment
-                      family, its rule settings): the family drops a trailing _v2 / _v2_1 suffix (a port of the same
-                      rules), and run bookkeeping (run id, commit, folder hash, windows, folds, cut dates, seeds) is not
-                      part of the key. Rows of stage note / summary are not designs. The count is approximate and errs
-                      high: the same rule written two ways counts twice. A rerun of an unchanged design adds nothing.
-    pilot             (decided by Nicolas on 2026-11-03, roadmap R4) everything tried before the judge v1 freeze is a
-                      pilot phase run with earlier, less robust code. Its results were discarded; the list of what was
-                      tried (family and settings only, no numbers) is the tried-designs ledger
+    design            what N counts, in the trial log (store04_experiments/trial_log.csv) and in the ledger below: an
+                      (experiment family, its rule settings) pair. The family drops a trailing _v2 / _v2_1 suffix (a
+                      port of the same rules), and run bookkeeping (run id, commit, folder hash, windows, folds, cut
+                      dates, seeds) is not part of the key. Rows of stage note / summary are not designs. The count
+                      is approximate and errs high: the same rule written two ways counts twice. A rerun of an
+                      unchanged design adds nothing.
+    pilot             everything tried before the judge v1 freeze is a pilot phase run with earlier, less robust
+                      code (decided by Nicolas on 2026-11-03, roadmap R4). Its results were discarded; the list of what
+                      was tried (family and settings only, no numbers) is the tried-designs ledger
                       records/legacy/pilot_designs.csv, which only grows (scripts/reset_records.py adds the trial log's
-                      designs to it before a reset). The verdict's N is the trial log only; every report also shows
-                      the multiple-testing part with the pilot included (N over the trial log and the ledger), so the
-                      effect of that scope choice is visible. Until the first reset (at the freeze) the trial log still
-                      holds the phase C reruns of 2026-10-28/29, which therefore count.
+                      designs to it before a reset).
+    the verdict's N   distinct designs over the trial log AND the ledger (the pilot-included count; decided by Nicolas on
+                      2026-11-10). This revisits the 2026-11-03 rule (N = the trial log only, the pilot-included count
+                      reported beside it), after the judge v1 baseline: in the stricter direction, with no verdict
+                      depending on it (all nine baseline runs failed at both counts). Why: the pilot designs were tried
+                      on the same development data and shaped later choices, and with the trial log alone N restarted
+                      after every reset. A reset keeps this N (the ledger takes the trial log's designs first) and a
+                      rerun of an unchanged design adds nothing. The trial log's own count is still reported. Known
+                      limits: N still grows in queue order (the deflated Sharpe asks how many designs were tried by
+                      then); it counts close variants as separate tries, so it overstates the independent ones (errs
+                      strict); and the spread V below comes from the trial log only (the ledger holds no numbers).
     deflated Sharpe   the probability that the prior-only path's Sharpe ratio of quarterly excess returns over
                       buy-and-hold is above the best Sharpe ratio expected from N worthless designs (Bailey and Lopez de
                       Prado, "The Deflated Sharpe Ratio", 2014). The spread of Sharpe ratios across designs is measured
                       on the trial log's candidate-period excess returns (validation quarters); with fewer than
                       MT_MIN_DESIGN_COUNT designs of at least MT_MIN_PERIOD_COUNT quarters, it falls back to 1 / T, the
                       variance of a Sharpe estimate under the null. Pass at RUNNER_DSR_MIN_PROBABILITY (0.95) or more.
+                      Open (2026-11-10, not changed): the spread also follows queue order (the runs logged so far), and
+                      a rerun of an unchanged design appends its quarters again, so they count twice in that design's
+                      Sharpe ratio; a reset before a full rerun avoids it, and from R6 (no resets) it needs a fix.
     random timing     the path's total return against random-timing draws, COUNTED, not fitted (roadmap R3,
                       2026-11-02). p = (k + 1) / (M + 1), k = draws at or above the path, M = draws; pass when p is at
                       most RUNNER_MULTIPLE_TESTING_ALPHA / N (Bonferroni). The runner (so.runner.baselines) extends the
@@ -148,10 +159,10 @@ def get_tried_design_count_dict(trial_log_path_str_in=None, legacy_path_list_in=
         legacy_path_list_in (list[str] | None): Pilot ledger files (None = records/legacy/pilot_designs.csv)
 
     Returns:
-        dict: current_count (trial log), pilot_count (ledger), total_count (the verdict's N: the trial log, at least 1),
-            pilot_included_count (distinct keys over both, at least 1)
+        dict: current_count (trial log), pilot_count (ledger), pilot_included_count (distinct keys over both, at
+            least 1), total_count (the verdict's N: the pilot-included count since 2026-11-10)
     """
-    # BOTH SOURCES; THE VERDICT COUNTS THE TRIAL LOG ONLY (PILOT SCOPE, 2026-11-03)
+    # BOTH SOURCES; THE VERDICT COUNTS BOTH (2026-11-10)
     trial_log_path_str = trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR
     legacy_path_list = (legacy_path_list_in if legacy_path_list_in is not None
                         else [os.path.join(paths.WORKSPACE_PATH_STR, rel_str) for rel_str in LEGACY_RECORD_REL_LIST])
@@ -159,8 +170,9 @@ def get_tried_design_count_dict(trial_log_path_str_in=None, legacy_path_list_in=
     pilot_set = set()
     for path_str in legacy_path_list:
         pilot_set |= get_design_key_set(read_trial_record_pdf(path_str))
-    return {"current_count": len(current_set), "pilot_count": len(pilot_set), "total_count": max(1, len(current_set)),
-            "pilot_included_count": max(1, len(current_set | pilot_set))}
+    pilot_included_int = max(1, len(current_set | pilot_set))
+    return {"current_count": len(current_set), "pilot_count": len(pilot_set), "total_count": pilot_included_int,
+            "pilot_included_count": pilot_included_int}
 
 
 # FUNCTION: SAMPLE SKEWNESS AND KURTOSIS (NON-EXCESS)
@@ -390,12 +402,12 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
             (so.runner.baselines.get_random_timing_tail_dict); None = count random_return_list_in only (strict)
 
     Returns:
-        dict: pass_bool, design counts, deflated Sharpe numbers, random-timing counts, p-value and its threshold
+        dict: pass_bool, design_count (the verdict's N), design_count_scope_str, current_design_count (trial log),
+            pilot_design_count (ledger), deflated Sharpe numbers, random-timing counts, p-value and its threshold
     """
-    # N, THEN BOTH TESTS (THE VERDICT'S N; THE SAME TESTS WITH THE PILOT INCLUDED ARE REPORTED, NOT USED)
+    # N (THE PILOT-INCLUDED COUNT), THEN BOTH TESTS
     count_dict = get_tried_design_count_dict(trial_log_path_str_in, legacy_path_list_in)
     design_count = int(count_dict["total_count"])
-    pilot_design_count = int(count_dict["pilot_included_count"])
     excess_arr = get_quarter_excess_arr(strategy_return_pdf_in, buy_hold_return_pdf_in)
     sharpe_float = get_sharpe_float(excess_arr)
     skew_float, kurtosis_float = get_moment_tuple(excess_arr)
@@ -407,7 +419,6 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
     tail_dict = dict(random_timing_tail_dict_in or {})
     tail_mismatch_bool = bool(tail_dict) and (int(tail_dict.get("design_count", -1)) != design_count
                                               or abs(float(tail_dict.get("alpha", -1.0)) - alpha_float) > 1e-12)
-    pilot_tail_bool = bool(tail_dict) and not tail_mismatch_bool and int(tail_dict.get("pilot_design_count", -1)) == pilot_design_count
     if not tail_dict or tail_mismatch_bool:
         tail_dict = get_random_timing_count_dict(path_return_in, random_return_list_in, design_count, alpha_float)
     tail_dict["tail_mismatch_bool"] = tail_mismatch_bool
@@ -415,25 +426,10 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
     random_threshold_float = alpha_float / design_count
     dsr_pass_bool = dsr_dict["probability"] >= float(config.RUNNER_DSR_MIN_PROBABILITY)
     random_pass_bool = bool(tail_dict["pass_bool"])
-    # THE PILOT-INCLUDED VIEW: THE DEFLATED SHARPE AT THAT N; RANDOM TIMING FROM THE RUNNER'S COUNT WHEN ITS BUDGET WAS
-    # SIZED FOR THAT N, OTHERWISE THE STRICT COUNT OF THE GIVEN DRAWS
-    pilot_dsr_dict = get_deflated_sharpe_dict(sharpe_float, len(excess_arr), skew_float, kurtosis_float,
-                                              variance_dict["variance"], pilot_design_count)
-    pilot_dsr_pass_bool = pilot_dsr_dict["probability"] >= float(config.RUNNER_DSR_MIN_PROBABILITY)
-    if pilot_tail_bool:
-        pilot_random_pass_bool = bool(tail_dict.get("pilot_pass_bool"))
-        pilot_source_str = "runner_count"
-    else:
-        pilot_random_pass_bool = bool(get_random_timing_count_dict(path_return_in, random_return_list_in, pilot_design_count,
-                                                                   alpha_float)["pass_bool"])
-        pilot_source_str = "strict_count"
-    pilot_dict = {"design_count": pilot_design_count, "deflated_sharpe_probability": float(pilot_dsr_dict["probability"]),
-                  "dsr_pass_bool": bool(pilot_dsr_pass_bool), "random_timing_p_max": alpha_float / pilot_design_count,
-                  "random_pass_bool": pilot_random_pass_bool, "random_source_str": pilot_source_str,
-                  "pass_bool": bool(pilot_dsr_pass_bool and pilot_random_pass_bool)}
     return {"pass_bool": bool(dsr_pass_bool and random_pass_bool), "design_count": design_count,
+            "design_count_scope_str": "pilot_included",
             "current_design_count": int(count_dict["current_count"]),
-            "pilot_design_count": int(count_dict["pilot_count"]), "pilot_included_dict": pilot_dict,
+            "pilot_design_count": int(count_dict["pilot_count"]),
             "quarter_count": int(len(excess_arr)), "quarter_excess_sharpe": sharpe_float,
             "quarter_excess_skew": skew_float, "quarter_excess_kurtosis": kurtosis_float,
             "trial_sharpe_design_count": int(variance_dict["design_count"]),

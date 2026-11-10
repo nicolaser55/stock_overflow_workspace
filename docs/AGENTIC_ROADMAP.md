@@ -136,6 +136,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] Pilot scope (design 6.7): the verdict's N is the trial log; the pre-reset records slimmed into the tried-designs
   ledger `records/legacy/pilot_designs.csv` (family and settings only, 260 designs, same keys; their numbers removed
   from `main`); every report shows the pilot-included view; `scripts/reset_records.py` for development resets.
+  **Superseded 2026-11-10:** the verdict's N is the pilot-included count (judge v1 freeze section).
 - [x] Tests: `tests/test_grades.py` (every combination of verdict parts, vocabulary without digits, scrubber, trimmed
   state, grade and status files end to end on an allow-list, retry from the status, the switch both ways, the reset);
   additions to `tests/test_runner_protocol.py`, `tests/test_runner_verdict.py`, `tests/test_tools.py`.
@@ -151,15 +152,23 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   read-back); **a deny of icacls `W` holds SYNCHRONIZE and READ_CONTROL**, so so_agent could not open any file in
   Nicolas's workspace or start Python there; this was already true of the earlier script, whose access check only
   listed folders. Denies now name the write rights one by one (PR #23).
-- [ ] The scrubber on a real crash: `queue\failed` and `queue\rejected` were empty on 2026-11-04, so it has only been
+- [x] The scrubber on a real crash: `queue\failed` and `queue\rejected` were empty on 2026-11-04, so it has only been
   tested on synthetic tracebacks; read the first real crash's status file. **Real crashes exist now (2026-11-09):** the
   nine status files of the first baseline attempt (a `ValueError` from the pre-registration guard) are in
   `D:\stock_overflow\backup_records\reset_20261109_221644\visible\status`; one still has to be read.
-- [ ] The first real grade file read by so_agent (comes with the freeze rerun). **Grade files exist now
+  **Done 2026-11-10** on exp02's status from the first attempt: error type, message and four code locations kept;
+  source lines and values dropped. The message carries the runner's absolute worktree path (machine layout, no data);
+  left as is.
+- [x] The first real grade file read by so_agent (comes with the freeze rerun). **Grade files exist now
   (2026-11-10).** Before the check: the first reset of 2026-11-09 moved `visible\grades` and `visible\status`
   themselves, and the runner recreated them with inherited permissions only, so the `so_grade_readers` and
   `so_status_readers` grants are probably gone; rerun `scripts/setup_so_agent.ps1` once (resets keep the folders since
   PR #34), then read a grade as so_agent.
+  **Done 2026-11-10:** `setup_so_agent.ps1` rerun as administrator (every read-back passed, the reader grants on
+  `visible\grades` and `visible\status` restored); so_agent read a real grade file (grade, reason code and reason, no
+  digit in any); `check_agent_access.py` passed as so_agent (52 checks) and so_runner (36). On 2026-11-04 the counts
+  were 53 and 37, probably one sample kind missing this time (a rejected job: `queue\rejected` empty after the
+  resets), not confirmed.
 
 **Done when** an agent account can read the grade of a run and nothing else about it.
 
@@ -193,14 +202,27 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
     runner was idle with nothing pending, the dry run and the reset moved the same items), but see the next item.
   Baseline run ids for the equivalence check: exp02 `exp02_stop_reentry_20261109221716650764`, exp04
   `exp04_trend_exit_20261109234625241939`.
-- [ ] Proposed (2026-11-10), for Nicolas to decide: `reset_records.py` refuses unless the kill switch
-  `control\STOP` exists (and no pass holds the lock), so a reset no longer relies on a PowerShell check that the task
-  is stopped; blocks that stop the task also check that the window is elevated and fail closed when the task cannot
-  be read.
-- [ ] Open question (2026-11-10), for Nicolas to decide: **the verdict's N grows in queue order.** It counts the
-  designs in the trial log so far, so the first run after a reset faces a lower hurdle (exp02 N = 18, exp04 N = 42).
-  Options: keep it (the count of designs tried by then is what the DSR asks for), or judge every run at the
-  pilot-included N (260 today, reported beside it). No baseline verdict depends on it.
+- [ ] **Decided 2026-11-10 (Nicolas):** `reset_records.py` refuses unless the kill switch `control\STOP` is
+  confirmed to exist (missing or unreadable refuses; so does `SO_STOP_FLAG_PATH` set in the window), as well as with the
+  runner lock or pending jobs; a refused command prints the plan, then the reason, and exits 1. Blocks that stop the
+  task also check that the window is elevated and fail closed when the task cannot be read. Limit: with STOP set, the
+  runner's idle loop still rewrites `visible\state.json` and recreates empty queue folders about every 60 s (no lock),
+  so resets also stop the task.
+- [ ] **Decided 2026-11-10 (Nicolas): the verdict judges at the pilot-included N** (trial log and ledger, 260 at the
+  baseline), revisiting the 2026-11-03 rule after the baseline, in the stricter direction, with no verdict depending on
+  it (all nine fail at both counts). Why: the pilot designs were tried on the same data and shaped later choices
+  (exp13), and a trial-log N restarted after every reset (exp02 was judged at N = 18, exp04 at 42). Reports keep the
+  trial log's count as information; the pilot-included side verdict is gone (one N), and so is the runner's second
+  draw budget. The random-timing budget was already sized for the pilot N, so runs take no longer. Known limits: N
+  still grows as designs are logged; it counts close variants separately (overstates independent tries; a
+  correlation-based effective N only if a promising design later fails narrowly on multiple testing); the spread V
+  stays from the trial log only (the ledger holds no numbers). Both changes in one PR (a scoring change), then: reset
+  (kill switch set, task stopped), one deploy, and a **full rerun of the nine**, which becomes the baseline.
+- [ ] Open (2026-11-10, not changed): **the trial-Sharpe spread V also follows queue order, and a rerun of an
+  unchanged design appends its validation quarters again**, so they count twice in that design's Sharpe ratio. A reset
+  before the rerun above avoids it; from R6 (no resets) it needs a fix (count each design and quarter once). The
+  equivalence check files any V difference under "explained by N" (it treats the whole multiple-testing part as
+  N-dependent); worth narrowing with that fix.
 - [ ] From then on: a judge-hash change that touches no scoring code is accepted by an equivalence check (one or two
   fast daily experiments reproduce every number exactly); a scoring change means a full rerun. **The check is built
   (2026-11-05)**: `scripts/check_equivalence.py --baseline <run id> --new <run id>` (Nicolas or so_runner; it prints
