@@ -35,12 +35,14 @@ in the multiple-testing N; a pass is frozen and paper-traded on data after its f
 
 ---
 
-## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-09/10)
+## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-11)
 
-Judge hash `3b51ca4a3578852a`, judge commit `1b6bd11` (deployed), development records reset twice on 2026-11-09 (the
-first attempt crashed in the pre-registration guard; fixed by PR #34, `records/legacy/registered_versions.csv`). Total
-returns on both sides: SPY dividends reinvested and T-bill interest on cash, for the strategy, buy-and-hold and the
-baselines (R4b). Results-log rows of 2026-11-09/10 (PR #36).
+Judge hash `b7ec40bc1d31be1f`, judge commit `c0924b9` (deployed), the verdict's N = 260 (pilot included, decided
+2026-11-10), development records reset on 2026-11-10 with the kill switch set (PR #39). Total returns on both sides:
+SPY dividends reinvested and T-bill interest on cash, for the strategy, buy-and-hold and the baselines (R4b).
+Results-log rows of 2026-11-11. This rerun supersedes the 2026-11-09/10 one (judge `3b51ca4a3578852a`, N in queue
+order, results-log rows PR #36, withdrawn by the reset note): every total return and failed part below is the same in
+both; only the multiple-testing part's N changed, and it failed in both.
 
 | Experiment | Family (sec. 4) | Prior-only vs buy-and-hold | Failed parts | Look-ahead |
 |---|---|---|---|---|
@@ -60,11 +62,11 @@ Notes:
   buy-and-hold now also earns the dividends that time in cash misses.
 - exp13 beats buy-and-hold on return only because its rule was selected after seeing the data (section 7); the verdict
   fails it on consistency and multiple testing, as on price returns.
-- **The verdict's N grew in queue order:** it counted the designs in the trial log so far, and the trial log started
-  empty after the reset, so exp02 (first) was judged at N = 18 and exp04 (third) at N = 42; later runs at more. No
-  verdict here depends on it (every multiple-testing part fails at both counts). **Decided 2026-11-10:** the verdict
-  judges at the pilot-included N (trial log and ledger, 260 here); a full rerun of the nine under that rule, after a
-  reset, becomes the baseline (roadmap, judge v1 freeze).
+- **N:** every run was judged at N = 260 (pilot included). In the superseded 2026-11-09/10 rerun, N grew in queue
+  order (exp02 at 18, exp04 at 42); the equivalence check of exp02 and exp04 shows that only the multiple-testing part
+  changed between the two (deflated Sharpe probability 0.025 -> 0.0038 for exp02, 0.00016 -> 0.000028 for exp04).
+- exp06 was interrupted twice by Windows Update restarts and resumed the same run; its result equals the earlier one
+  (roadmap, open item).
 - **Deflated-Sharpe check on total returns (2026-11-10):** 10,000 no-skill draws on exp04 and exp02; the centered counts
   are at most 1.20 times the expected count (exp02 at N = 100; 1.04 at N = 260; exp04 at most 0.59). Below the 3x rule,
   so the DSR is kept; but on total returns it is about fair, no longer conservative as on price returns (at most 0.24).

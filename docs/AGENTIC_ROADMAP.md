@@ -202,13 +202,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
     runner was idle with nothing pending, the dry run and the reset moved the same items), but see the next item.
   Baseline run ids for the equivalence check: exp02 `exp02_stop_reentry_20261109221716650764`, exp04
   `exp04_trend_exit_20261109234625241939`.
-- [ ] **Decided 2026-11-10 (Nicolas):** `reset_records.py` refuses unless the kill switch `control\STOP` is
+- [x] **Decided 2026-11-10 (Nicolas):** `reset_records.py` refuses unless the kill switch `control\STOP` is
   confirmed to exist (missing or unreadable refuses; so does `SO_STOP_FLAG_PATH` set in the window), as well as with the
   runner lock or pending jobs; a refused command prints the plan, then the reason, and exits 1. Blocks that stop the
   task also check that the window is elevated and fail closed when the task cannot be read. Limit: with STOP set, the
   runner's idle loop still rewrites `visible\state.json` and recreates empty queue folders about every 60 s (no lock),
-  so resets also stop the task.
-- [ ] **Decided 2026-11-10 (Nicolas): the verdict judges at the pilot-included N** (trial log and ledger, 260 at the
+  so resets also stop the task. **Done:** PR #38; first used for the reset of 2026-11-10 (PR #39): without STOP the
+  dry run refused (exit 1), with STOP it ran (30 items moved, N 260 before and after).
+- [x] **Decided 2026-11-10 (Nicolas): the verdict judges at the pilot-included N** (trial log and ledger, 260 at the
   baseline), revisiting the 2026-11-03 rule after the baseline, in the stricter direction, with no verdict depending on
   it (all nine fail at both counts). Why: the pilot designs were tried on the same data and shaped later choices
   (exp13), and a trial-log N restarted after every reset (exp02 was judged at N = 18, exp04 at 42). Reports keep the
@@ -218,6 +219,23 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   correlation-based effective N only if a promising design later fails narrowly on multiple testing); the spread V
   stays from the trial log only (the ledger holds no numbers). Both changes in one PR (a scoring change), then: reset
   (kill switch set, task stopped), one deploy, and a **full rerun of the nine**, which becomes the baseline.
+  **Done 2026-11-11:** PR #38 (code) and #39 (reset: 0 ledger rows, 9 registered-version rows, the baseline's first
+  helper hashes), deployed at `c0924b9`, judge hash `b7ec40bc1d31be1f`. All nine fail the verdict, at N = 260; every
+  total return is identical to the 2026-11-09/10 baseline (`docs/STAGE1_RESEARCH_PLAN.md` section 2). The trial log's
+  own count followed the baseline's queue order (18, 33, 42, 46, 58, 61, 67, 68, 80).
+  **First real equivalence check** (`scripts/check_equivalence.py`, baseline = the backup copy's full path, since the
+  reset moved the old runs): exp02 and exp04 EQUIVALENT, every scoring number and candidate file identical;
+  differences only in the multiple-testing part (N 18 -> 260 and 42 -> 260). The spread V was identical for exp02 and
+  differed only in the last digit for exp04 (0.00958141648339678 vs ...782, floating-point rounding), so the reset did
+  reproduce V. New baseline run ids for the equivalence check: exp02 `exp02_stop_reentry_20261111000527008138`, exp04
+  `exp04_trend_exit_20261111013503898732`.
+- [ ] Open (2026-11-11), for Nicolas to decide: **Windows Update restarted nicodesktop twice during the rerun**
+  (02:14 and 02:17, "Service pack" and "Upgrade", both planned by the system). exp06 was interrupted twice and resumed
+  the same run (attempt 3, the last one before `MAX_RESUME_COUNT_INT` = 2 gives up); its result equals the baseline,
+  so the resume worked. A longer run (exp01, about 11.5 h) or a third restart would have failed. Options: Windows
+  Update set to download and notify (install by hand when the queue is empty), or paused during long queues.
+- [ ] `scripts/check_equivalence.py` takes run ids under the live `runs` folder only; after a reset the baseline is in
+  `backup_records\reset_<time>\runs\`. A full path works (os.path.join keeps it); say so in its help text.
 - [ ] Open (2026-11-10, not changed): **the trial-Sharpe spread V also follows queue order, and a rerun of an
   unchanged design appends its validation quarters again**, so they count twice in that design's Sharpe ratio. A reset
   before the rerun above avoids it; from R6 (no resets) it needs a fix (count each design and quarter once). The
