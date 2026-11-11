@@ -16,6 +16,10 @@ from so.runner.view import (get_empty_bar_buffer_dict, fill_bar_buffer_through_d
 from so.runner.preflight import check_design_source
 from so.runner.engine import FractionalWeightEngine, get_decision_dict
 from so.runner.total_return import get_session_open_event_dict
+# IMPORT THE INTRADAY DECISION TIMES (R4c)
+from so.runner.intraday import (INTRADAY_LIST_KEY_STR, get_stream_intraday_time_tuple, get_intraday_time_tuple,
+                                check_intraday_engine, get_session_call_list, get_first_entry_idx_arr,
+                                get_intraday_target_weight_float, get_time_bar_idx, get_normalized_intraday_tuple)
 
 """
 Daily Streaming Loop (infrastructure step 4a, stream pause in 4b-1a)
@@ -37,6 +41,10 @@ before the first call.
 
 Minute mode (MODE_MINUTE_STR) is 4b-2b: rows, a row-local signal with a shuffle check, model scoring windows, and
 BarrierEngine fills at the next minute's open. Daily mode drives the fractional, barrier and trailing-stop engines.
+
+Intraday decision times (R4c, 2026-11-11; so.runner.intraday): a daily design with INTRADAY_DECISION_TIME_LIST is also
+called at those times, each fill at the next bar's open, before the 15:58 decision. Fractional engine only. A design
+without them takes exactly the code path it took before: no extra call, no extra record key.
 """
 
 # DAILY MODE IS 4A; MINUTE MODE IS 4B-2B
@@ -87,14 +95,41 @@ def get_stream_loop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_con
     """
     # THE MODULE NAMES THE MODE
     mode_source = design_module_in if design_module_in is not None else design_in
+    intraday_time_tuple = get_stream_intraday_time_tuple(design_in, design_module_in)
     if get_design_mode_str(mode_source) == MODE_MINUTE_STR:
+        if len(intraday_time_tuple) > 0:
+            raise ValueError("INTRADAY_DECISION_TIME_LIST is a daily-mode feature; minute mode decides every minute.")
         from so.runner.minute import MinuteLoop
         return MinuteLoop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine_in,
                           initial_weight_in, dead_band_in, initial_capital_in, entry_slippage_in,
                           market_exit_slippage_in, design_file_path_str_in, check_source_bool_in, design_module_in)
     return DailyLoop(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_context_in, engine_in, initial_weight_in,
                      dead_band_in, initial_capital_in, entry_slippage_in, market_exit_slippage_in,
-                     design_file_path_str_in, check_source_bool_in)
+                     design_file_path_str_in, check_source_bool_in, intraday_time_tuple_in=intraday_time_tuple)
+
+
+# FUNCTION: THE RAW RETURN OF design.decide, OR OF THE OBJECT ITSELF IF IT IS CALLABLE
+def get_design_raw_decision(design_in, view_in):
+    """
+    An object with decide(view) is called that way. A callable is the decide function. A dict that carries the
+    intraday record key is refused: only the loop writes it (R4c).
+
+    Args:
+        design_in (object | callable): Design
+        view_in (DecisionView): View at this moment
+
+    Returns:
+        float | dict | None: What the design returned
+    """
+    # PREFER AN EXPLICIT DECIDE METHOD
+    from so.runner.guard import call_design_func
+    if hasattr(design_in, "decide"):
+        raw_value = call_design_func(design_in.decide, view_in)
+    else:
+        raw_value = call_design_func(design_in, view_in)
+    if isinstance(raw_value, dict) and INTRADAY_LIST_KEY_STR in raw_value:
+        raise ValueError(f"a design may not return {INTRADAY_LIST_KEY_STR!r}; only the runner writes it.")
+    return raw_value
 
 
 # FUNCTION: CALL design.decide, OR THE OBJECT ITSELF IF IT IS CALLABLE
@@ -109,11 +144,8 @@ def get_design_decision_dict(design_in, view_in):
     Returns:
         dict: Output of get_decision_dict
     """
-    # PREFER AN EXPLICIT DECIDE METHOD
-    from so.runner.guard import call_design_func
-    if hasattr(design_in, "decide"):
-        return get_decision_dict(call_design_func(design_in.decide, view_in))
-    return get_decision_dict(call_design_func(design_in, view_in))
+    # NORMALIZE THE RAW RETURN
+    return get_decision_dict(get_design_raw_decision(design_in, view_in))
 
 
 # FUNCTION: THE EMPTY RESULT OF A WINDOW WITH NO SESSIONS
@@ -191,7 +223,7 @@ class DailyLoop:
                  initial_weight_in=1.0, dead_band_in=0.0, initial_capital_in=config.INITIAL_CAPITAL,
                  entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
                  market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE, design_file_path_str_in=None,
-                 check_source_bool_in=True):
+                 check_source_bool_in=True, intraday_time_tuple_in=None):
         """
         Args:
             design_in (object | callable): decide(view) -> weight or decision dict
@@ -204,11 +236,14 @@ class DailyLoop:
             initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Default-engine costs
             design_file_path_str_in (str | None): Design file to AST-check (None uses the object's module)
             check_source_bool_in (bool): False when the caller already ran the preflight
+            intraday_time_tuple_in (tuple | None): Intraday decision times (None = read from the design object)
         """
         # REFUSE A DESIGN FILE THAT CAN REACH AROUND THE VIEW
         if check_source_bool_in:
             check_design_source(design_in, design_file_path_str_in)
         self.design = design_in
+        self.intraday_time_tuple = (get_intraday_time_tuple(design_in) if intraday_time_tuple_in is None
+                                    else tuple(intraday_time_tuple_in))
         self.ohlcv_array_dict = ohlcv_array_dict_in
         self.initial_weight_float = float(initial_weight_in)
         self.window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1_in, date2_in)
@@ -242,6 +277,11 @@ class DailyLoop:
         self.engine = engine_in if engine_in is not None else FractionalWeightEngine(dead_band_in, initial_capital_in,
                                                                                     entry_slippage_in, market_exit_slippage_in)
         self.engine.set_session_bounds(self.end_idx_arr, len(self.close_arr))
+        # INTRADAY DESIGNS ONLY: THE ENGINE CHECK AND THE FIRST-ENTRY BARS
+        self.first_entry_idx_arr = None
+        if len(self.intraday_time_tuple) > 0:
+            check_intraday_engine(self.intraday_time_tuple, self.engine)
+            self.first_entry_idx_arr = get_first_entry_idx_arr(ohlcv_array_dict_in)
 
     # FUNCTION: COPY BARS AND ADVANCE FEEDS FOR SESSIONS ALREADY IN THE ENGINE
     def warmup_buffers(self, session_count_int_in):
@@ -314,6 +354,42 @@ class DailyLoop:
                                 float(self.initial_weight_float))
         self.window_opened_bool = True
 
+    # FUNCTION: THE INTRADAY CALLS OF ONE SESSION (R4c)
+    def run_intraday_calls(self, session_idx_in, decision_idx_in, end_idx_in, session_date_in):
+        """
+        At each mapped time: copy bars through that bar, advance the feeds to its end, call decide() with a view that
+        stops there, and fill a finite target at the next bar's open. Called before the 15:58 decision.
+
+        Args:
+            session_idx_in, decision_idx_in, end_idx_in (int): Session, its decision bar, its last bar
+            session_date_in: Session date
+
+        Returns:
+            tuple[tuple[str, float], ...]: (time, target weight) per call, NaN = keep
+        """
+        # THE CALLS OF THIS SESSION, IN TIME ORDER
+        session_idx = int(session_idx_in)
+        call_list = get_session_call_list(self.ohlcv_array_dict, session_idx, self.intraday_time_tuple,
+                                          int(decision_idx_in), int(self.first_entry_idx_arr[session_idx]))
+        entry_list = []
+        for time_str, bar_idx in call_list:
+            fill_bar_buffer_through_decision(self.bar_buffer_dict, self.ohlcv_array_dict, session_idx, bar_idx)
+            call_ts = get_minute_bar_available_ts(self.timestamp_index[bar_idx])
+            for feed in self.feed_dict.values():
+                feed.advance_to_ts(call_ts)
+            view = get_decision_view(self.bar_buffer_dict, session_idx, bar_idx, self.feed_dict,
+                                     self.engine.get_state_dict(), intraday_time_str_in=time_str)
+            raw_value = get_design_raw_decision(self.design, view)
+            for feed in self.feed_dict.values():
+                feed.mark_call_boundary()
+            target_weight = get_intraday_target_weight_float(raw_value, time_str)
+            entry_list.append((str(time_str), float(target_weight)))
+            if np.isfinite(target_weight):
+                self.engine.apply_decision(get_fill_event_dict(self.ohlcv_array_dict, bar_idx + 1, bar_idx, session_idx,
+                                                               session_date_in, int(end_idx_in)),
+                                           get_decision_dict(float(target_weight)), float(self.close_arr[bar_idx]))
+        return tuple(entry_list)
+
     # FUNCTION: ONE SESSION (DECIDE, FILL, OR THE END SALE)
     def step_session(self, session_pos_in):
         """
@@ -342,6 +418,9 @@ class DailyLoop:
         if morning_event_dict is not None:
             self.engine.process_bars(morning_event_dict)
         if not is_last_session:
+            intraday_entry_tuple = None
+            if len(self.intraday_time_tuple) > 0:
+                intraday_entry_tuple = self.run_intraday_calls(session_idx, decision_idx, end_idx, session_date)
             fill_bar_buffer_through_decision(self.bar_buffer_dict, self.ohlcv_array_dict, session_idx, decision_idx)
             decision_ts = get_minute_bar_available_ts(self.timestamp_index[decision_idx])
             for feed in self.feed_dict.values():
@@ -349,6 +428,8 @@ class DailyLoop:
             view = get_decision_view(self.bar_buffer_dict, session_idx, decision_idx, self.feed_dict,
                                      self.engine.get_state_dict())
             decision_dict = get_design_decision_dict(self.design, view)
+            if intraday_entry_tuple is not None:
+                decision_dict[INTRADAY_LIST_KEY_STR] = intraday_entry_tuple
             for feed in self.feed_dict.values():
                 feed.mark_call_boundary()
             self.target_weight_list.append(float(decision_dict["target_weight"]))
@@ -463,13 +544,21 @@ def run_daily_dict(design_in, ohlcv_array_dict_in, date1_in, date2_in, data_cont
 def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_dict_list_in, engine_in=None,
                               initial_weight_in=1.0, dead_band_in=0.0, initial_capital_in=config.INITIAL_CAPITAL,
                               entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
-                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
+                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
+                              lenient_intraday_bool_in=False, intraday_bar_map_in=None):
     """
     Applies one recorded decision per session at the 15:59 fill. The last session sells at the close. The position is
     carried across the whole window. No view is built and decide() is not called. Stop parameters follow the same
     timing as DailyLoop: a decision's trail_multiple and volatility take effect at its fill and stay in force through
     the next session's morning; the last session (no decision) keeps the previous ones. A replay of one candidate's
     recorded decisions therefore reproduces that candidate's stream.
+
+    Intraday records (R4c): a decision that carries INTRADAY_LIST_KEY_STR has its finite entries filled, in time order,
+    at the open of the bar after each entry's time bar (so.runner.intraday.get_time_bar_idx), before the 15:59 fill;
+    the engine must be fractional. Strict (the default): an entry that does not map, or an entry on the last session,
+    stops the replay. Lenient (random-timing draws, whose entries were moved to other sessions): such an entry is
+    skipped and counted in the result's intraday_skip_count. A list with no intraday record replays exactly as before
+    and its result has no intraday_skip_count key.
 
     Args:
         ohlcv_array_dict_in (dict): Full bar arrays
@@ -479,9 +568,12 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
         initial_weight_in (float): Weight bought at the first 10:00 open
         dead_band_in (float): Passed to the default engine
         initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Default-engine costs
+        lenient_intraday_bool_in (bool): Skip and count intraday entries that do not map (random-timing draws only)
+        intraday_bar_map_in (dict | None): session index -> {time: bar} (so.runner.intraday.get_window_bar_map_dict)
 
     Returns:
         dict: trade_pdf, daily_equity_pdf, metric_dict, target_weight_arr, decision_session_list, decision_dict_list
+            (plus intraday_skip_count when any decision carried an intraday record)
     """
     # THE SAME WINDOW AS THE DAILY LOOP
     window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1_in, date2_in)
@@ -503,6 +595,7 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
                         "session_date": ohlcv_array_dict_in["session_date_list"][first_session_idx]},
                        float(initial_weight_in))
     target_weight_list, decision_session_list, decision_dict_list = [], [], []
+    intraday_seen_bool, intraday_skip_int = False, 0
     for session_pos, session_idx in enumerate(window_session_idx_arr):
         session_idx = int(session_idx)
         decision_idx, fill_idx, end_idx = int(decision_idx_arr[session_idx]), int(fill_idx_arr[session_idx]), int(end_idx_arr[session_idx])
@@ -520,6 +613,32 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
         morning_event_dict = get_bar_range_event_dict(ohlcv_array_dict_in, start_idx, decision_idx, session_date)
         if morning_event_dict is not None:
             engine.process_bars(morning_event_dict)
+        # INTRADAY FILLS BEFORE THE 15:59 FILL (R4c)
+        if INTRADAY_LIST_KEY_STR in decision_dict:
+            intraday_seen_bool = True
+            entry_tuple = get_normalized_intraday_tuple(decision_dict[INTRADAY_LIST_KEY_STR])
+            finite_entry_list = [(time_str, weight) for time_str, weight in entry_tuple if np.isfinite(weight)]
+            if finite_entry_list and not isinstance(engine, FractionalWeightEngine):
+                raise ValueError("intraday records need the fractional engine.")
+            if is_last_session and finite_entry_list:
+                if not lenient_intraday_bool_in:
+                    raise ValueError("an intraday record on the last window session (it has no design call).")
+                intraday_skip_int += len(finite_entry_list)
+                finite_entry_list = []
+            for time_str, weight in finite_entry_list:
+                if intraday_bar_map_in is not None and time_str in intraday_bar_map_in.get(session_idx, {}):
+                    bar_idx = int(intraday_bar_map_in[session_idx][time_str])
+                else:
+                    bar_idx = get_time_bar_idx(ohlcv_array_dict_in, session_idx, time_str, decision_idx,
+                                               get_session_first_entry_idx(ohlcv_array_dict_in, session_idx))
+                if bar_idx < 0:
+                    if not lenient_intraday_bool_in:
+                        raise ValueError(f"the recorded intraday entry {time_str} of {session_date} maps to no bar.")
+                    intraday_skip_int += 1
+                    continue
+                engine.apply_decision(get_fill_event_dict(ohlcv_array_dict_in, bar_idx + 1, bar_idx, session_idx,
+                                                          session_date, end_idx),
+                                      get_decision_dict(float(weight)), float(close_arr[bar_idx]))
         if not is_last_session:
             target_weight_list.append(float(decision_dict["target_weight"]))
             engine.set_stop_params(decision_dict.get("trail_multiple"), decision_dict.get("volatility"))
@@ -540,4 +659,6 @@ def run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_
     result_dict["target_weight_arr"] = np.asarray(target_weight_list, dtype=float)
     result_dict["decision_session_list"] = list(decision_session_list)
     result_dict["decision_dict_list"] = list(decision_dict_list)
+    if intraday_seen_bool:
+        result_dict["intraday_skip_count"] = int(intraday_skip_int)
     return result_dict

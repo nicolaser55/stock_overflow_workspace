@@ -66,6 +66,42 @@ in the slow strict daily mode.
 - The design returns a decision for its engine (for the fractional engine: a target weight, 0 = cash, 1 = fully
   invested, NaN = keep). Retraining happens inside the design on its pre-registered schedule, through the label door.
 
+## Intraday decision times (R4c, decided 2026-11-11)
+
+For designs that stay invested and step aside for part of a day (stage-1 ideas I1, I2). Code: `so/runner/intraday.py`
+plus the daily loop, the replay, the baselines and the look-ahead check. Design note:
+`claude/ENGINE_DESIGN_2026-11-11_intraday.md` (project).
+
+- **Interface.** A daily-mode design may declare `INTRADAY_DECISION_TIME_LIST` on the module and on its `Design` class
+  (equal; a mismatch is refused), for example `["15:30"]`. Each entry is a bar start in New York time, sorted and
+  unique, from `10:00` through `15:57`, at most 32. At each time the runner calls the same `decide(view)` with a view
+  that ends at that bar (bars through it, sources advanced to its end, the engine state as of that moment);
+  `view.intraday_time_str` is the time, and `None` at the 15:58 call. The fill is the next bar's open (the rule of
+  15:58 and 15:59). Only a target weight (or NaN / None = keep) is allowed at an intraday call.
+- **Fractional engine only.** Trailing-stop, barrier and minute-mode designs with intraday times are refused.
+- **Mapping.** A time maps to the last bar of the session that starts at or before it, strictly before the 15:58
+  decision bar, whose fill bar is at or after the session's first-entry bar (10:00); live calls also need a bar after
+  the previous call's bar. No such bar, no call that session: a missing minute maps to the bar before it, an early
+  close (13:00) has no 15:30 call. The last session of a window has no design call at all (unchanged).
+- **Costs.** The same slippage and fees as every fill (decided 2026-11-11).
+- **Records and replay.** Each session's recorded decision of an intraday design carries `intraday_list`: one
+  (time, target weight) pair per call (NaN = keep). Only the loop writes it. Every replay (prior-only path, cost
+  sensitivity, holdout) fills the recorded entries at the same bars before the 15:59 fill; an entry that does not map
+  stops the run. A design without intraday times records exactly the old keys and takes the old code path.
+- **Baselines.** Buy-and-hold is unchanged. Random timing uses each session's pattern (the weight after each time and
+  after 15:59) in place of its weight: spells of non-base sessions keep their time of day and are placed at random with
+  the same gap rule; an entry moved to a session where it does not map is skipped and counted
+  (`random_timing_intraday_skip_count`). Constant exposure uses the bar-weighted mean weight (the weight held through
+  each minute bar). The report says so (`exposure_basis_str`, `constant_exposure_weight_basis_str`).
+- **Look-ahead check.** Session cuts as before (their comparison also covers the intraday records). In addition, for
+  each candidate, intraday cuts: the first call of each random cut session and up to 10 calls where it acted. At each,
+  `intraday_truncation` (every later bar flat at the cut bar's close, later source rows dropped) and
+  `intraday_perturbation` (every later bar rebuilt from shuffled returns, later source rows permuted and rescaled).
+  Decisions before the cut session, and the cut session's intraday decisions at or before the cut time, must match.
+- **Limits.** Fixed per-share slippage on intraday fills (fast markets can be worse); more calls make runs slower (about
+  2x for one time, about 13x for twelve) and add look-ahead jobs; random timing keeps each spell's time of day, so the
+  choice of time is tested only through the variants counted in N.
+
 ## Total returns (R4b, decided 2026-10-29; rules 2026-11-08 and 2026-11-09)
 
 Every return the referee compares is a total return: the strategy, buy-and-hold, the constant-exposure and
@@ -273,5 +309,6 @@ come from one code path.
 ## What a new experiment writes
 
 `PROTOCOL.md`, `config.py`, and one `design.py` with: the candidate list, the declared sources, the engine and its
-parameters, and the decision function (daily) or row-local signal function (minute), plus fit, for a model. No copied
+parameters, and the decision function (daily) or row-local signal function (minute), plus fit, for a model. A daily
+fractional design may add `INTRADAY_DECISION_TIME_LIST` (section "Intraday decision times"). No copied
 replay, selection, baseline or report code.

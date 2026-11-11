@@ -15,6 +15,10 @@ from so.runner.loop import get_stream_loop, get_design_mode_str, MODE_MINUTE_STR
 from so.runner.engine import get_decision_dict, DECISION_KEY_LIST, FLOAT_DECISION_KEY_LIST
 from so.runner.checkpoint import (read_decisions_list, get_file_exists_bool, read_pickle, set_runs_root_str)
 from so.runner.verdict import write_json_file, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR
+# IMPORT THE INTRADAY RECORD HELPERS (R4c)
+from so.runner.intraday import (INTRADAY_LIST_KEY_STR, get_intraday_time_tuple, get_intraday_equal_bool,
+                                get_normalized_intraday_tuple, get_time_bar_idx)
+from so.core.backtest_simulation import get_session_first_entry_idx
 
 """
 Automatic Look-Ahead Check (infrastructure step 4b-1c)
@@ -39,6 +43,18 @@ to change decisions, so those sessions are where a leak shows.
 Every decision up to and including the cut must equal the full run's decision. A first mismatch fails that candidate
 and fails the verdict. Jobs run in the same spawn pool as the candidate streams. These re-runs never write a trial-log
 row and never write a checkpoint.
+
+Intraday cuts (R4c, 2026-11-11), only for designs with INTRADAY_DECISION_TIME_LIST: a cut is (session, time). For each
+candidate: the first intraday call of each random cut session, plus up to RUNNER_LOOKAHEAD_CHANGE_CUT_MAX calls where
+the candidate acted (a finite target that differs from the weight it held), spread evenly. Two kinds:
+    intraday_truncation    bars and sources stop at the end of the cut bar: every later bar of the cut session, and
+                           the one extra session, is flat at the cut bar's close; source rows after that moment are
+                           dropped
+    intraday_perturbation  every bar after the cut bar is rebuilt from shuffled returns; source rows knowable after the
+                           cut moment are permuted and rescaled
+Every decision of the sessions before the cut session, and every intraday decision of the cut session at or before the
+cut time, must equal the full run's. The session cuts above are unchanged; for an intraday design their comparison
+also covers the intraday records.
 """
 
 # FILE WRITTEN IN THE RUN FOLDER
@@ -47,6 +63,10 @@ LOOKAHEAD_FILE_STR = "lookahead.json"
 KIND_TRUNCATION_STR = "truncation"
 KIND_PERTURBATION_STR = "perturbation"
 KIND_STR_LIST = [KIND_TRUNCATION_STR, KIND_PERTURBATION_STR]
+# THE TWO INTRADAY KINDS (R4c)
+KIND_INTRADAY_TRUNCATION_STR = "intraday_truncation"
+KIND_INTRADAY_PERTURBATION_STR = "intraday_perturbation"
+INTRADAY_KIND_STR_LIST = [KIND_INTRADAY_TRUNCATION_STR, KIND_INTRADAY_PERTURBATION_STR]
 
 
 # FUNCTION: CUT DATES, ONE IN EACH THIRD OF THE SPAN
@@ -202,7 +222,8 @@ def get_lookahead_truncated_context(data_context_in, ohlcv_array_dict_in, cut_da
 
 
 # FUNCTION: A CONTEXT WHOSE LATER FEATURE AND LABEL VALUES ARE PERTURBED
-def get_lookahead_perturbed_context(data_context_in, ohlcv_array_dict_in, cut_date_in, perturbed_ohlcv_dict_in):
+def get_lookahead_perturbed_context(data_context_in, ohlcv_array_dict_in, cut_date_in, perturbed_ohlcv_dict_in,
+                                    decision_ts_in=None):
     """
     Feature rows with available_ts after the cut decision, and label rows with label_known_ts after it, are passed
     through get_perturbed_feature_pdf. SPY comes from the already-perturbed arrays.
@@ -212,6 +233,8 @@ def get_lookahead_perturbed_context(data_context_in, ohlcv_array_dict_in, cut_da
         ohlcv_array_dict_in (dict): Full bars (for the cut clocks)
         cut_date_in (datetime.date): Cut session
         perturbed_ohlcv_dict_in (dict): Arrays with bars after the decision overwritten
+        decision_ts_in (datetime-like | None): The cut moment (None = the end of the cut session's decision bar;
+            an intraday cut passes the end of its cut bar)
 
     Returns:
         DataContext | None: Child context, or None when there was no parent
@@ -220,7 +243,7 @@ def get_lookahead_perturbed_context(data_context_in, ohlcv_array_dict_in, cut_da
     if data_context_in is None:
         return None
     clock_dict = get_cut_clock_dict(ohlcv_array_dict_in, cut_date_in)
-    decision_ts = clock_dict["decision_ts"]
+    decision_ts = clock_dict["decision_ts"] if decision_ts_in is None else get_ny_timestamp(decision_ts_in)
     seed_int = get_perturbation_seed_int(cut_date_in)
     child_dict = {}
     for source_name_str, frame_pdf in data_context_in.frame_dict.items():
@@ -273,6 +296,11 @@ def get_decision_equal_bool(full_decision_dict_in, check_decision_dict_in, toler
                 return False
             continue
         if full_value != check_value:
+            return False
+    # INTRADAY RECORDS (R4c): COMPARED ONLY WHEN EITHER SIDE CARRIES ONE, SO DAILY-ONLY DECISIONS COMPARE AS BEFORE
+    if INTRADAY_LIST_KEY_STR in full_dict or INTRADAY_LIST_KEY_STR in check_dict:
+        if not get_intraday_equal_bool(full_dict.get(INTRADAY_LIST_KEY_STR), check_dict.get(INTRADAY_LIST_KEY_STR),
+                                       tolerance_float_in=tolerance_float):
             return False
     return True
 
@@ -362,6 +390,145 @@ def get_first_decision_difference_dict(full_decision_list_in, full_session_list_
     return None
 
 
+# FUNCTION: THE BAR OF AN INTRADAY CUT
+def get_intraday_cut_bar_idx(ohlcv_array_dict_in, cut_date_in, cut_time_str_in):
+    """
+    The same mapping as the live call (so.runner.intraday.get_time_bar_idx).
+
+    Args:
+        ohlcv_array_dict_in (dict): Full bars
+        cut_date_in (datetime.date): Cut session
+        cut_time_str_in (str): Cut time
+
+    Returns:
+        int: Bar index (raises when the time does not map: the cut came from a recorded call)
+    """
+    # THE SESSION OF THE CUT
+    from so.features.daily_features import get_session_decision_idx_dict
+    cut_day = get_date(cut_date_in)
+    session_idx = max(idx for idx, session_date in enumerate(ohlcv_array_dict_in["session_date_list"])
+                      if get_date(session_date) <= cut_day)
+    decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][session_idx])
+    bar_idx = get_time_bar_idx(ohlcv_array_dict_in, session_idx, cut_time_str_in, decision_idx,
+                               get_session_first_entry_idx(ohlcv_array_dict_in, session_idx))
+    if bar_idx < 0:
+        raise ValueError(f"intraday cut {cut_date_in} {cut_time_str_in} maps to no bar.")
+    return int(bar_idx)
+
+
+# FUNCTION: BARS THAT STOP AT AN INTRADAY CUT BAR
+def get_intraday_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in, cut_bar_idx_in):
+    """
+    get_lookahead_truncated_ohlcv_dict (the cut session plus one extra session), then every bar after the cut bar flat
+    at the cut bar's close. Copies, not views.
+
+    Args:
+        ohlcv_array_dict_in (dict): Full bars
+        cut_date_in (datetime.date): Cut session
+        cut_bar_idx_in (int): Last real bar
+
+    Returns:
+        dict: Truncated arrays
+    """
+    # THE SESSION TRUNCATION FIRST, THEN THE FLAT TAIL FROM THE CUT BAR
+    truncated_dict = get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in)
+    cut_bar_idx = int(cut_bar_idx_in)
+    cut_close_float = float(ohlcv_array_dict_in["close_arr"][cut_bar_idx])
+    for key_str in ["open_arr", "high_arr", "low_arr", "close_arr"]:
+        price_arr = np.array(truncated_dict[key_str], dtype=float, copy=True)
+        price_arr[cut_bar_idx + 1:] = cut_close_float
+        truncated_dict[key_str] = price_arr
+    return truncated_dict
+
+
+# FUNCTION: THE FIRST DIFFERENCE THROUGH AN INTRADAY CUT
+def get_first_intraday_difference_dict(full_decision_list_in, full_session_list_in, check_decision_list_in,
+                                       check_session_list_in, cut_date_in, cut_time_str_in):
+    """
+    Sessions before the cut session: every field and the intraday record. The cut session: its intraday entries at or
+    before the cut time (its 15:58 decision saw changed bars and is not compared). None when everything matches.
+
+    Args:
+        full_decision_list_in, check_decision_list_in (list[dict]): Daily decisions
+        full_session_list_in, check_session_list_in (list): Session dates aligned with them
+        cut_date_in (datetime.date): Cut session
+        cut_time_str_in (str): Cut time
+
+    Returns:
+        dict | None: session_date, full_decision, check_decision (and cut_time)
+    """
+    # INDEX THE CHECK BY DATE
+    cut_day = get_date(cut_date_in)
+    check_dict = {get_date(session_date): get_decision_dict(decision_dict)
+                  for session_date, decision_dict in zip(check_session_list_in, check_decision_list_in)}
+    for session_date, decision_dict in zip(full_session_list_in, full_decision_list_in):
+        session_day = get_date(session_date)
+        if session_day > cut_day:
+            break
+        full_dict = get_decision_dict(decision_dict)
+        if session_day not in check_dict:
+            return {"session_date": session_day, "full_decision": dict(full_dict), "check_decision": None,
+                    "cut_time": str(cut_time_str_in)}
+        check_row_dict = check_dict[session_day]
+        if session_day < cut_day:
+            equal_bool = get_decision_equal_bool(full_dict, check_row_dict)
+        else:
+            equal_bool = get_intraday_equal_bool(full_dict.get(INTRADAY_LIST_KEY_STR),
+                                                 check_row_dict.get(INTRADAY_LIST_KEY_STR),
+                                                 through_time_str_in=str(cut_time_str_in))
+        if not equal_bool:
+            return {"session_date": session_day, "full_decision": dict(full_dict), "check_decision": dict(check_row_dict),
+                    "cut_time": str(cut_time_str_in)}
+    return None
+
+
+# FUNCTION: THE INTRADAY CUTS OF ONE CANDIDATE
+def get_intraday_cut_list(decision_list_in, session_list_in, random_cut_date_list_in, last_session_in,
+                          initial_weight_in, max_count_int_in):
+    """
+    The first recorded intraday call of each random cut session, plus up to max_count_int_in calls where the candidate
+    acted (a finite target that differs from the weight held before it, dead band ignored), spread evenly. The last
+    window session is never a cut.
+
+    Args:
+        decision_list_in (list[dict]): The candidate's recorded daily decisions
+        session_list_in (list): Their sessions
+        random_cut_date_list_in (list): The shared random cut sessions
+        last_session_in: Last window session
+        initial_weight_in (float): Weight bought at the window start
+        max_count_int_in (int): Cap on the acting calls
+
+    Returns:
+        list[tuple[datetime.date, str]]: (session, time), sorted, unique
+    """
+    # WALK THE RECORDS, CARRYING THE HELD WEIGHT
+    last_day = get_date(last_session_in)
+    random_day_set = {get_date(cut_date) for cut_date in random_cut_date_list_in}
+    random_cut_list, action_cut_list = [], []
+    held_float = float(initial_weight_in)
+    for session_date, decision_dict in zip(session_list_in, decision_list_in):
+        session_day = get_date(session_date)
+        entry_tuple = get_normalized_intraday_tuple((decision_dict or {}).get(INTRADAY_LIST_KEY_STR))
+        if session_day < last_day and session_day in random_day_set and entry_tuple:
+            random_cut_list.append((session_day, entry_tuple[0][0]))
+        for time_str, weight in entry_tuple:
+            if not np.isfinite(weight):
+                continue
+            if abs(float(weight) - held_float) > float(config.NUMERIC_TOLERANCE) and session_day < last_day:
+                action_cut_list.append((session_day, time_str))
+            held_float = float(weight)
+        daily_weight = float((decision_dict or {}).get("target_weight", np.nan))
+        if np.isfinite(daily_weight):
+            held_float = daily_weight
+    max_count_int = int(max_count_int_in)
+    if max_count_int <= 0:
+        action_cut_list = []
+    elif len(action_cut_list) > max_count_int:
+        pick_idx_list = sorted(set(int(round(value)) for value in np.linspace(0, len(action_cut_list) - 1, max_count_int)))
+        action_cut_list = [action_cut_list[idx] for idx in pick_idx_list]
+    return sorted(set(random_cut_list) | set(action_cut_list))
+
+
 # FUNCTION: ONE LOOK-AHEAD STREAM (NO TRIAL LOG, NO CHECKPOINT)
 def run_lookahead_stream_dict(design_module_in, candidate_in, ohlcv_array_dict_in, date1_in, date2_in,
                               data_context_in, design_file_path_str_in):
@@ -432,6 +599,36 @@ def run_lookahead_job_dict(job_dict_in):
     date1 = get_date(job_dict_in["date1"])
     date2 = get_date(job_dict_in["date2"])
     cut_ts = None
+    cut_time_str = job_dict_in.get("cut_time_str")
+    if kind_str in INTRADAY_KIND_STR_LIST:
+        # INTRADAY CUTS (R4c): THE CUT MOMENT IS THE END OF THE CUT BAR
+        cut_bar_idx = get_intraday_cut_bar_idx(ohlcv_array_dict, cut_date, cut_time_str)
+        cut_moment_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][cut_bar_idx])
+        if kind_str == KIND_INTRADAY_TRUNCATION_STR:
+            check_ohlcv_dict = get_intraday_truncated_ohlcv_dict(ohlcv_array_dict, cut_date, cut_bar_idx)
+            check_context = (None if data_context is None
+                             else data_context.get_truncated_context(cut_moment_ts, check_ohlcv_dict))
+            check_date2 = get_date(check_ohlcv_dict["session_date_list"][-1])
+        else:
+            check_ohlcv_dict = get_perturbed_ohlcv_dict(ohlcv_array_dict, cut_date, last_kept_bar_idx_in=cut_bar_idx)
+            check_context = get_lookahead_perturbed_context(data_context, ohlcv_array_dict, cut_date, check_ohlcv_dict,
+                                                            decision_ts_in=cut_moment_ts)
+            check_date2 = get_date(get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict, cut_date)["session_date_list"][-1])
+        result_dict = run_lookahead_stream_dict(design_module, candidate, check_ohlcv_dict, date1, check_date2,
+                                                check_context, job_dict_in["design_file_path_str"])
+        check_module_snapshot(module_snapshot_dict, f"during the intraday look-ahead stream of {candidate!r}")
+        full_decision_list = read_decisions_list(job_dict_in["run_id_str"], get_candidate_token_str(candidate))
+        if full_decision_list is None:
+            raise ValueError(f"candidate {candidate!r} has no recorded decisions for the look-ahead check.")
+        full_session_list = job_dict_in["full_session_list"]
+        if len(full_session_list) != len(full_decision_list):
+            raise ValueError("recorded decisions and sessions have different lengths.")
+        first_fail_dict = get_first_intraday_difference_dict(full_decision_list, full_session_list,
+                                                             result_dict["decision_dict_list"],
+                                                             result_dict["decision_session_list"], cut_date, cut_time_str)
+        return {"candidate": candidate, "cut_date": cut_date, "kind_str": kind_str, "cut_time_str": str(cut_time_str),
+                "pass_bool": first_fail_dict is None, "first_fail_dict": first_fail_dict,
+                "seed_int": get_perturbation_seed_int(cut_date)}
     if kind_str == KIND_TRUNCATION_STR:
         check_ohlcv_dict = get_lookahead_truncated_ohlcv_dict(ohlcv_array_dict, cut_date)
         check_context = get_lookahead_truncated_context(data_context, ohlcv_array_dict, cut_date, check_ohlcv_dict)
@@ -527,6 +724,7 @@ def get_lookahead_fail_payload_dict(first_fail_dict_in, cut_date_in, kind_str_in
     """
     # THE FIRST SESSION THAT DIFFERED, AND BOTH VALUES
     return {"cut_date": str(get_date(cut_date_in)), "kind_str": str(kind_str_in),
+            **({"cut_time": str(first_fail_dict_in["cut_time"])} if first_fail_dict_in.get("cut_time") is not None else {}),
             "session_date": str(get_date(first_fail_dict_in["session_date"])),
             "full_decision": get_lookahead_decision_payload_dict(first_fail_dict_in.get("full_decision")),
             "check_decision": get_lookahead_decision_payload_dict(first_fail_dict_in.get("check_decision"))}
@@ -571,6 +769,16 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
         change_list = get_decision_change_cut_list(recorded_list, window_session_date_list_in,
                                                    window_session_date_list_in[-1], minute_bool, change_max_int)
         candidate_cut_dict[candidate] = sorted(set(cut_date_list) | set(change_list))
+    # INTRADAY CUTS (R4c): ONLY FOR DESIGNS THAT DECLARE INTRADAY TIMES
+    intraday_bool = len(get_intraday_time_tuple(design_module_in)) > 0
+    candidate_intraday_cut_dict = {}
+    if intraday_bool:
+        initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", 1.0))
+        for candidate in candidate_list_in:
+            recorded_list = read_decisions_list(run_id_str_in, get_candidate_token_str(candidate)) or []
+            candidate_intraday_cut_dict[candidate] = get_intraday_cut_list(
+                recorded_list, window_session_date_list_in, cut_date_list, window_session_date_list_in[-1],
+                initial_weight, int(config.RUNNER_LOOKAHEAD_CHANGE_CUT_MAX))
     job_dict_list = []
     for candidate in candidate_list_in:
         for cut_date in candidate_cut_dict[candidate]:
@@ -583,8 +791,21 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
                     "full_session_list": list(session_str_list),
                     "runs_root_str": runs_root_str_in,
                 })
+        for cut_date, cut_time_str in candidate_intraday_cut_dict.get(candidate, []):
+            for kind_str in INTRADAY_KIND_STR_LIST:
+                job_dict_list.append({
+                    "candidate": candidate, "cut_date": str(cut_date), "cut_time_str": str(cut_time_str),
+                    "kind_str": kind_str, "run_id_str": run_id_str_in,
+                    "design_file_path_str": design_file_path_str_in, "ohlcv_path_str": ohlcv_path_str_in,
+                    "context_path_str": context_path_str_in, "date1": str(get_date(date1_in)),
+                    "date2": str(get_date(date2_in)), "full_session_list": list(session_str_list),
+                    "runs_root_str": runs_root_str_in,
+                })
     result_list = run_lookahead_job_list(job_dict_list, n_jobs_int_in)
-    result_key_dict = {(row["candidate"], str(get_date(row["cut_date"])), row["kind_str"]): row for row in result_list}
+    result_key_dict = {(row["candidate"], str(get_date(row["cut_date"])), row["kind_str"]): row for row in result_list
+                       if row["kind_str"] in KIND_STR_LIST}
+    intraday_key_dict = {(row["candidate"], str(get_date(row["cut_date"])), str(row["cut_time_str"]), row["kind_str"]): row
+                         for row in result_list if row["kind_str"] in INTRADAY_KIND_STR_LIST}
     candidate_dict = {}
     overall_pass_bool = True
     overall_fail_dict = None
@@ -608,9 +829,27 @@ def run_lookahead_check_dict(design_module_in, ohlcv_array_dict_in, run_id_str_i
                                    "pass_bool": bool(row_dict["pass_bool"]),
                                    "seed_int": int(row_dict["seed_int"]),
                                    "first_fail_dict": row_fail_dict})
+        for cut_date, cut_time_str in candidate_intraday_cut_dict.get(candidate, []):
+            for kind_str in INTRADAY_KIND_STR_LIST:
+                row_dict = intraday_key_dict[(candidate, str(cut_date), str(cut_time_str), kind_str)]
+                row_fail_dict = None
+                if not row_dict["pass_bool"]:
+                    row_fail_dict = get_lookahead_fail_payload_dict(row_dict["first_fail_dict"], cut_date, kind_str)
+                    candidate_pass_bool = False
+                    if candidate_fail_dict is None:
+                        candidate_fail_dict = row_fail_dict
+                    overall_pass_bool = False
+                    if overall_fail_dict is None:
+                        overall_fail_dict = {"candidate": candidate, **row_fail_dict}
+                check_list.append({"cut_date": str(cut_date), "cut_time": str(cut_time_str), "kind_str": kind_str,
+                                   "pass_bool": bool(row_dict["pass_bool"]), "seed_int": int(row_dict["seed_int"]),
+                                   "first_fail_dict": row_fail_dict})
         candidate_dict[str(candidate)] = {"pass_bool": bool(candidate_pass_bool), "check_list": check_list,
                                           "first_fail_dict": candidate_fail_dict,
                                           "cut_date_list": [str(cut_date) for cut_date in candidate_cut_dict[candidate]]}
+        if intraday_bool:
+            candidate_dict[str(candidate)]["intraday_cut_list"] = [
+                f"{cut_date} {cut_time_str}" for cut_date, cut_time_str in candidate_intraday_cut_dict.get(candidate, [])]
     elapsed_seconds = float(time.perf_counter() - start_time)
     status_str = LOOK_AHEAD_PASS_STR if overall_pass_bool else LOOK_AHEAD_FAIL_STR
     payload_dict = {"cut_date_list": [str(cut_date) for cut_date in cut_date_list],

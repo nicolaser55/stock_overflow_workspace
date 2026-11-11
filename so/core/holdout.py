@@ -986,7 +986,7 @@ def get_truncated_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     return truncated_dict
 
 # FUNCTION: PERTURB EVERY BAR AFTER A DECISION BAR
-def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
+def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in, last_kept_bar_idx_in=None):
     """
     A copy of the bars. Every bar strictly after the cut session's decision bar (from its fill bar through the end of
     the data) is rebuilt: the path restarts 3% above the last unperturbed close and then follows the real
@@ -995,19 +995,31 @@ def get_perturbed_ohlcv_dict(ohlcv_array_dict_in, cut_date_in):
     B3, 2026-10-25: the earlier x 1.25 shift kept every sign and ratio, so a sign-based leak passed). Timestamps,
     session bounds and bar indexes are unchanged, so the decision bar stays the decision bar.
 
+    last_kept_bar_idx_in (intraday cuts, 2026-11-11): when given, it replaces the cut session's decision bar as the
+    last unperturbed bar (an intraday call earlier in the same session). It must lie inside the cut session. None is
+    the behaviour above, unchanged. The seed is the cut date either way.
+
     Args:
         ohlcv_array_dict_in (dict): Bars
         cut_date_in (datetime.date): Session whose decision bar is the last unperturbed bar
+        last_kept_bar_idx_in (int | None): Last unperturbed bar (None = the cut session's decision bar)
 
     Returns:
         dict: Perturbed arrays
     """
     # IMPORT THE DECISION INDEX HERE
     from so.features.daily_features import get_session_decision_idx_dict
-    # FIND THE CUT SESSION AND THE FIRST BAR AFTER ITS DECISION
+    # FIND THE CUT SESSION AND THE FIRST BAR AFTER ITS DECISION (OR AFTER THE GIVEN INTRADAY BAR)
     session_date_list = [get_date(session_date) for session_date in ohlcv_array_dict_in["session_date_list"]]
     last_idx = max(idx for idx, session_date in enumerate(session_date_list) if session_date <= get_date(cut_date_in))
     start_idx = int(get_session_decision_idx_dict(ohlcv_array_dict_in)["decision_idx_arr"][last_idx]) + 1
+    if last_kept_bar_idx_in is not None:
+        kept_idx = int(last_kept_bar_idx_in)
+        session_start_idx = int(ohlcv_array_dict_in["session_start_idx_arr"][last_idx])
+        session_end_idx = int(ohlcv_array_dict_in["session_end_idx_arr"][last_idx])
+        if not session_start_idx <= kept_idx <= session_end_idx:
+            raise ValueError("the last kept bar of an intraday cut must lie inside the cut session.")
+        start_idx = kept_idx + 1
     # COPY THE STRUCTURE AND THE PRICES
     perturbed_dict = {key_str: np.array(ohlcv_array_dict_in[key_str], copy=True) for key_str in ["open_arr", "high_arr", "low_arr", "close_arr", "bar_session_idx_arr", "session_start_idx_arr", "session_end_idx_arr"]}
     perturbed_dict["timestamp_index"] = ohlcv_array_dict_in["timestamp_index"].copy()

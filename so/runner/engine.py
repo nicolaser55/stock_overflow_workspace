@@ -9,6 +9,8 @@ from so.core.trade_execution import (calculate_side_fee, get_affordable_share_co
 from so.core.performance_metrics import get_sharpe_ratio, get_max_drawdown
 from so.core.reentry_simulation import get_stop_reentry_metric_dict
 # IMPORT THE COMPILED SESSION LOOPS
+# IMPORT THE INTRADAY RECORD KEY AND ITS NORMALIZER (R4c)
+from so.runner.intraday import INTRADAY_LIST_KEY_STR, get_normalized_intraday_tuple
 from so.runner.engine_kernels import (get_trailing_stop_hit_tuple, get_barrier_exit_tuple, REASON_STOP_INT,
                                       REASON_TP_INT, REASON_TL_INT)
 
@@ -99,6 +101,10 @@ def get_decision_dict(decision_in):
     empty_dict["exit_block_sessions"] = int(decision_dict.get("exit_block_sessions") or 0)
     empty_dict["require_fresh_exit"] = bool(decision_dict.get("require_fresh_exit", False))
     empty_dict["reentry_reason"] = str(decision_dict.get("reentry_reason") or "model")
+    # INTRADAY RECORDS (R4c, 2026-11-11) ARE KEPT ONLY WHEN PRESENT, SO A DAILY-ONLY DECISION HAS EXACTLY THE OLD KEYS.
+    # ONLY THE LOOP WRITES THEM: so.runner.loop REFUSES A DESIGN RETURN THAT CARRIES THE KEY
+    if INTRADAY_LIST_KEY_STR in decision_dict:
+        empty_dict[INTRADAY_LIST_KEY_STR] = get_normalized_intraday_tuple(decision_dict[INTRADAY_LIST_KEY_STR])
     return empty_dict
 
 

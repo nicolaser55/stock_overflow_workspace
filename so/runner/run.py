@@ -25,6 +25,8 @@ from so.core.evaluation import get_mde_float
 from so.runner.engine import (FractionalWeightEngine, TrailingStopEngine, BarrierEngine, ENGINE_FRACTIONAL_STR,
                               ENGINE_TRAILING_STOP_STR, ENGINE_BARRIER_STR)
 from so.runner.loop import get_stream_loop, get_design_mode_str, MODE_MINUTE_STR
+# IMPORT THE INTRADAY DECISION TIMES (R4c)
+from so.runner.intraday import get_intraday_time_tuple, check_intraday_engine
 from so.runner.preflight import (check_design_file, get_design_follow_path_list, get_experiments_package_folder_str)
 from so.runner.periods import (check_quarantine_refused, get_development_run_period_pdf, get_period_date)
 from so.runner.selection import (get_buy_hold_period_return_dict, get_stream_period_score_dict,
@@ -621,6 +623,12 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
     candidate_list = list(design_module_in.CANDIDATE_LIST)
     if len(candidate_list) == 0:
         raise ValueError("CANDIDATE_LIST is empty.")
+    # INTRADAY TIMES (R4c): VALID, DAILY MODE, FRACTIONAL ENGINE, BEFORE ANY WORKER STARTS
+    intraday_time_tuple = get_intraday_time_tuple(design_module_in)
+    if len(intraday_time_tuple) > 0:
+        if get_design_mode_str(design_module_in) == MODE_MINUTE_STR:
+            raise ValueError("INTRADAY_DECISION_TIME_LIST is a daily-mode feature.")
+        check_intraday_engine(intraday_time_tuple, get_candidate_engine(design_module_in))
     design_file_path_str = get_module_file_path_str(design_module_in)
     design_folder_str = os.path.dirname(design_file_path_str)
     if check_clean_tree_bool_in:
@@ -746,9 +754,15 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         dict: baseline_dict, verdict_dict, report_dict, manifest_dict, lookahead_dict
     """
     # LOOK-AHEAD WALKS THE FULL STREAM; BASELINES AND THE VERDICT SEE THE REPORTED PATH
+    # INTRADAY DESIGNS (R4c) PASS THEIR TIMES AND WINDOW-START WEIGHT; A DAILY DESIGN PASSES AN EMPTY TUPLE
+    intraday_time_tuple = get_intraday_time_tuple(design_module_in)
+    path_initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT",
+                                        0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0))
     baseline_dict = get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
                                              seed_count_int_in=baseline_seed_count_int_in,
-                                             realized_exposure_bool_in=get_realized_exposure_bool(design_module_in))
+                                             realized_exposure_bool_in=get_realized_exposure_bool(design_module_in),
+                                             intraday_time_tuple_in=intraday_time_tuple,
+                                             initial_weight_in=path_initial_weight)
     # THE MULTIPLE-TESTING RANDOM-TIMING COUNT: EXTRA DRAWS ONLY WHEN THE PATH IS STILL NEAR PASSING (ROADMAP R3,
     # 2026-11-02); N IS COUNTED AS THE VERDICT COUNTS IT (THE PILOT-INCLUDED COUNT SINCE 2026-11-10). A REDUCED SEED
     # COUNT (TESTS) DRAWS NOTHING EXTRA (STRICTER).
@@ -756,7 +770,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
     baseline_dict["random_timing_tail_dict"] = get_random_timing_tail_dict(
         ohlcv_array_dict_in, date1_in, date2_in, baseline_dict, prior_only_dict_in, tail_count_dict["total_count"],
         realized_exposure_bool_in=get_realized_exposure_bool(design_module_in),
-        extend_bool_in=baseline_seed_count_int_in is None)
+        extend_bool_in=baseline_seed_count_int_in is None, intraday_time_tuple_in=intraday_time_tuple,
+        initial_weight_in=path_initial_weight)
     lookahead_dict = None
     look_ahead_status_str = look_ahead_status_str_in
     if run_lookahead_bool_in:
@@ -1000,6 +1015,10 @@ def get_reported_path_dict(prior_only_dict_in, start_date_in, end_date_in, initi
     reported_dict["daily_equity_pdf"] = holdout_pdf.reset_index(drop=True)
     reported_dict["target_weight_arr"] = reported_target_arr
     reported_dict["decision_session_list"] = reported_session_list
+    # THE RECORDED DECISIONS FOLLOW THE SAME SLICE (THE INTRADAY BASELINES READ THEM, R4c)
+    decision_dict_list = list(prior_only_dict_in.get("decision_dict_list") or [])
+    if len(decision_dict_list) == len(session_list):
+        reported_dict["decision_dict_list"] = [decision_dict_list[idx] for idx in keep_idx_list]
     reported_dict["metric_dict"] = metric_dict
     reported_dict["carried_weight"] = float(holdout_pdf["weight"].iloc[0]) if "weight" in holdout_pdf.columns else np.nan
     return reported_dict

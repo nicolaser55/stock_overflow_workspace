@@ -406,7 +406,7 @@ class DecisionView:
 
     # FUNCTION: STORE THE SLICES AND THE SOURCE BUFFER PREFIX COUNTS
     def __init__(self, decision_ts_in, decision_bar_idx_in, session_idx_in, session_date_in, bar_array_dict_in,
-                 source_state_dict_in, engine_state_dict_in=None):
+                 source_state_dict_in, engine_state_dict_in=None, intraday_time_str_in=None):
         """
         Args:
             decision_ts_in (datetime-like): End of the decision bar
@@ -416,9 +416,11 @@ class DecisionView:
             bar_array_dict_in (dict): Sliced bar arrays
             source_state_dict_in (dict): source -> buffers, columns, visible count, new-start, role
             engine_state_dict_in (dict | None): Engine snapshot as of this moment (a copy; read-only)
+            intraday_time_str_in (str | None): The declared time of an intraday call ("15:30"); None at the 15:58 call
         """
         # SLICES AND COUNTS; NO FRAME COPY UNTIL get / get_labels / get_new
         self.decision_ts = get_ny_timestamp(decision_ts_in)
+        self.intraday_time_str = None if intraday_time_str_in is None else str(intraday_time_str_in)
         self.decision_bar_idx = int(decision_bar_idx_in)
         self.session_idx = int(session_idx_in)
         self.session_date = session_date_in
@@ -595,7 +597,8 @@ def get_view_source_state_dict(feed_dict_in):
 
 
 # FUNCTION: BUILD THE VIEW AT ONE DECISION BAR FROM THE BUFFERS
-def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict_in, engine_state_dict_in=None):
+def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict_in, engine_state_dict_in=None,
+                      intraday_time_str_in=None):
     """
     Slices the bar buffer through the decision bar and points at the source-buffer prefixes.
 
@@ -605,6 +608,7 @@ def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict
         decision_idx_in (int): Decision bar index
         feed_dict_in (dict): Source feeds already advanced to this moment
         engine_state_dict_in (dict | None): Engine snapshot as of this moment
+        intraday_time_str_in (str | None): Declared time of an intraday call (None at the 15:58 call)
 
     Returns:
         DecisionView: View that stops at that moment
@@ -616,4 +620,4 @@ def get_decision_view(buffer_dict_in, session_idx_in, decision_idx_in, feed_dict
     bar_array_dict = get_sliced_bar_array_dict(buffer_dict_in, decision_idx, session_idx)
     source_state_dict = get_view_source_state_dict(feed_dict_in)
     return DecisionView(decision_ts, decision_idx, session_idx, buffer_dict_in["session_date_arr"][session_idx],
-                        bar_array_dict, source_state_dict, engine_state_dict_in)
+                        bar_array_dict, source_state_dict, engine_state_dict_in, intraday_time_str_in)

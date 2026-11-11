@@ -34,6 +34,8 @@ from temporary_data_root import assert_temporary_data_root
 assert_temporary_data_root()
 sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "scripts"))
 import run_queue
+# THE WINDOWS UPDATE GUARD READS THE MACHINE'S REGISTRY (2026-11-11); tests/test_tools.py TESTS IT; HERE IT IS SAFE
+run_queue.UPDATE_GUARD_FUNC = lambda: {"safe_bool": True, "reason_str": "test", "pause_end_str": None, "days_left": None}
 from so.runner import grade as grade_module
 from so.runner.grade import (get_run_grade_dict, get_queue_grade_dict, REASON_DICT, GRADE_LIST, GRADE_PASS_STR,
                              GRADE_NOT_BETTER_STR, GRADE_COSTS_STR, GRADE_INCONSISTENT_STR, GRADE_LUCK_STR,

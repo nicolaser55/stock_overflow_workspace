@@ -29,6 +29,11 @@ the multiple-testing view (and the grade, when only that changed) are reported s
 differs. Exit 0 when the runs are equivalent, 1 otherwise. It prints numbers: run it as nico or so_runner only.
 
     python scripts/check_equivalence.py --baseline <run id> --new <run id>
+
+A run id is looked up under the live runs folder. After a reset (scripts/reset_records.py) the baseline run is no
+longer there: give it as its full backup path instead, for example
+    --baseline D:\\stock_overflow\\backup_records\\reset_20261110_232619\\runs\\exp02_stop_reentry_20261111000527008138
+(os.path.join keeps an absolute path, so the same argument takes either form).
 """
 
 # REPORT KEYS THAT DIFFER BY CONSTRUCTION (IDENTITY, PLACE, TIME, WORK DONE)
@@ -168,8 +173,10 @@ def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
 if __name__ == "__main__":
     # TWO RUN IDS UNDER THE QUEUE'S RUN FOLDER
     parser = argparse.ArgumentParser(description="Check that a rerun under a new judge reproduces a baseline run exactly.")
-    parser.add_argument("--baseline", required=True, help="Run id of the baseline run")
-    parser.add_argument("--new", required=True, help="Run id of the rerun under the new judge")
+    parser.add_argument("--baseline", required=True,
+                        help="Run id of the baseline run under the live runs folder, or, after a reset, its full path "
+                             "(backup_records\\reset_<time>\\runs\\<run id>)")
+    parser.add_argument("--new", required=True, help="Run id of the rerun under the new judge (or its full path)")
     arg_dict = parser.parse_args()
     runs_str = get_queue_path_dict()["runs"]
     outcome_dict = get_equivalence_dict(os.path.join(runs_str, arg_dict.baseline), os.path.join(runs_str, arg_dict.new))
