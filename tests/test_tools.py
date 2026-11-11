@@ -1276,7 +1276,8 @@ def test_queue_windows_update_guard():
     paused_dict = {name_str: "2026-11-30T13:59:06Z" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}
     safe_dict = run_queue.get_update_guard_dict(FakeRegistryReader(paused_dict), now_utc)
     assert safe_dict["safe_bool"] is True and safe_dict["pause_end_str"] == "2026-11-30T13:59:06+00:00"
-    assert 18.9 < safe_dict["days_left"] < 19.0
+    # 18.9994 DAYS, ROUNDED TO TWO DECIMALS = 19.0 (THE FIRST RUN ON nicodesktop USED < 19.0 AND FAILED, 2026-11-12)
+    assert 18.9 < safe_dict["days_left"] <= 19.0
     late_now = datetime_module.datetime(2026, 11, 28, 0, 0, tzinfo=datetime_module.timezone.utc)
     late_dict = run_queue.get_update_guard_dict(FakeRegistryReader(paused_dict), late_now)
     assert late_dict["safe_bool"] is False and "ends 2026-11-30" in late_dict["reason_str"]
