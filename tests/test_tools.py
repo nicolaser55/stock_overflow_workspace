@@ -1395,7 +1395,11 @@ def test_freeze_v_reference():
     os.makedirs(os.path.dirname(flag_str))
     Path(flag_str).write_text("stop", encoding="utf-8")
     assert "SO_STOP_FLAG_PATH" in freeze(True, {"SO_STOP_FLAG_PATH": flag_str})["refused_str"]
-    assert "SO_QUARANTINE_PATH" in freeze(True, {"SO_QUARANTINE_PATH": "x"})["refused_str"]
+    os.environ["SO_QUARANTINE_PATH"] = "x"
+    try:
+        assert "quarantine root is set" in freeze(True)["refused_str"]
+    finally:
+        os.environ.pop("SO_QUARANTINE_PATH", None)
     Path(running_str, "job.json").write_text("{}", encoding="utf-8")
     assert "a job is running" in freeze(True)["refused_str"] and not os.path.exists(reference_str)
     os.remove(os.path.join(running_str, "job.json"))

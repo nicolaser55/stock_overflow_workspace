@@ -30,7 +30,7 @@ each design's latest run only.
 
 Refuses (exit 1, nothing written) unless the kill switch <SO_DATA_PATH>/control/STOP is confirmed to exist (the rule of
 scripts/reset_records.py; SO_STOP_FLAG_PATH set in the window refuses), no job is running (the queue's running/ folder
-is empty), SO_QUARANTINE_PATH is not set, and the trial log gives at least MT_MIN_DESIGN_COUNT designs.
+is empty), the quarantine root is not set (so.paths.check_quarantine_refused), and the trial log gives at least MT_MIN_DESIGN_COUNT designs.
 
 Writes <SO_DATA_PATH>/store04_experiments/judge/v_reference.json (write to a temporary file, then replace). A file that
 was there is kept beside it as v_reference_<its build time>.json. Every write appends a row to v_reference_log.csv in
@@ -56,10 +56,13 @@ def get_freeze_refusal_str(path_dict_in, environment_dict_in=None):
     Returns:
         str: The reason, or ""
     """
-    # THE QUARANTINE NEVER, THE KILL SWITCH CONFIRMED, NO JOB RUNNING
+    # THE QUARANTINE NEVER (READ FROM THIS PROCESS, THROUGH so.paths: THE ONLY PLACE THAT NAMES IT), THE KILL SWITCH
+    # CONFIRMED, NO JOB RUNNING
     environment_dict = os.environ if environment_dict_in is None else environment_dict_in
-    if str(environment_dict.get("SO_QUARANTINE_PATH", "")).strip():
-        return "SO_QUARANTINE_PATH is set in this window"
+    try:
+        paths.check_quarantine_refused()
+    except RuntimeError:
+        return "the quarantine root is set in this window (so.paths.check_quarantine_refused); open a window without it"
     stop_refusal_str = get_stop_flag_refusal_str(path_dict_in, environment_dict)
     if stop_refusal_str:
         return stop_refusal_str

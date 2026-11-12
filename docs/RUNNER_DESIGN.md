@@ -207,7 +207,7 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   account, a content hash), and refuses to run when the file is missing, edited, unreadable or below
   `MT_MIN_DESIGN_COUNT` designs; synthetic test views keep the live V. Only Nicolas builds it, with
   `scripts/freeze_v_reference.py` (dry run; `--confirm --note`), which refuses unless the kill switch is confirmed,
-  no job is running and `SO_QUARANTINE_PATH` is unset; it keeps the previous file as `v_reference_<built time>.json`
+  no job is running and the quarantine root is not set (`so.paths.check_quarantine_refused`); it keeps the previous file as `v_reference_<built time>.json`
   and appends every build to `judge/v_reference_log.csv`. In stage 1 it is built only at a reset, under STOP and
   just before `reset_records.py`, from the trial log about to be moved (each design's latest run); the reset leaves
   it in place, so the rerun that follows uses the same V throughout. From R6, rebuilds at milestones Nicolas sets. The report gives the source (`"reference"`), the reference's hash and built time, and the
