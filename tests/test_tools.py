@@ -29,6 +29,10 @@ from temporary_data_root import assert_temporary_data_root
 assert_temporary_data_root()
 sys.path.insert(0, os.path.join(WORKSPACE_PATH_STR, "scripts"))
 import run_queue
+# THE WINDOWS UPDATE GUARD READS THE MACHINE'S REGISTRY (2026-11-11); THESE TESTS REPLACE IT WITH A SAFE ONE, AND
+# test_queue_windows_update_guard TESTS THE REAL GUARD WITH FAKE READERS
+SAFE_UPDATE_GUARD_FUNC = lambda: {"safe_bool": True, "reason_str": "test", "pause_end_str": None, "days_left": None}
+run_queue.UPDATE_GUARD_FUNC = SAFE_UPDATE_GUARD_FUNC
 from check_protected_paths import (get_protected_bool, get_append_only_bool, get_violation_list,
                                            read_protected_dict)
 from check_environment import check_environment_list
@@ -1233,6 +1237,118 @@ def test_queue_kill_switch():
     passed("kill switch (no job starts or resumes while STOP exists, state says stopped, work resumes after removal, unreadable flag counts as set)")
 
 
+# CLASS: A FAKE REGISTRY FOR THE WINDOWS UPDATE GUARD
+class FakeRegistryReader:
+    """values: name -> value (a missing name raises FileNotFoundError); keys: existing restart keys; error: raised by
+    every read when set."""
+
+    def __init__(self, value_dict_in, key_set_in=None, error_in=None):
+        self.value_dict = dict(value_dict_in)
+        self.key_set = set(key_set_in or [])
+        self.error = error_in
+
+    def get_value(self, key_str_in, name_str_in):
+        if self.error is not None:
+            raise self.error
+        if name_str_in not in self.value_dict:
+            raise FileNotFoundError(name_str_in)
+        return self.value_dict[name_str_in]
+
+    def has_key(self, key_str_in):
+        if self.error is not None:
+            raise self.error
+        return key_str_in in self.key_set
+
+
+# FUNCTION: THE WINDOWS UPDATE GUARD (2026-11-11)
+def test_queue_windows_update_guard():
+    """
+    The guard is safe only with every pause value readable, at least 3 days left on the earliest one, and no pending
+    restart; anything unreadable is not safe; off Windows it is not applicable. add refuses while it is not safe; the
+    runner starts and resumes no job; the watch emails once per reason and state.json shows the guard.
+
+    Returns:
+        None
+    """
+    # THE GUARD ITSELF, WITH FAKE READERS (THE FORMAT OF nicodesktop ON 2026-11-11)
+    import datetime as datetime_module
+    now_utc = datetime_module.datetime(2026, 11, 11, 14, 0, tzinfo=datetime_module.timezone.utc)
+    paused_dict = {name_str: "2026-11-30T13:59:06Z" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}
+    safe_dict = run_queue.get_update_guard_dict(FakeRegistryReader(paused_dict), now_utc)
+    assert safe_dict["safe_bool"] is True and safe_dict["pause_end_str"] == "2026-11-30T13:59:06+00:00"
+    # 18.9994 DAYS, ROUNDED TO TWO DECIMALS = 19.0 (THE FIRST RUN ON nicodesktop USED < 19.0 AND FAILED, 2026-11-12)
+    assert 18.9 < safe_dict["days_left"] <= 19.0
+    late_now = datetime_module.datetime(2026, 11, 28, 0, 0, tzinfo=datetime_module.timezone.utc)
+    late_dict = run_queue.get_update_guard_dict(FakeRegistryReader(paused_dict), late_now)
+    assert late_dict["safe_bool"] is False and "ends 2026-11-30" in late_dict["reason_str"]
+    early_dict = dict(paused_dict, PauseQualityUpdatesEndTime="2026-11-12T00:00:00Z")
+    assert run_queue.get_update_guard_dict(FakeRegistryReader(early_dict), now_utc)["safe_bool"] is False
+    missing_dict = {key_str: value for key_str, value in paused_dict.items() if key_str != "PauseUpdatesExpiryTime"}
+    missing_guard = run_queue.get_update_guard_dict(FakeRegistryReader(missing_dict), now_utc)
+    assert missing_guard["safe_bool"] is False and "not paused" in missing_guard["reason_str"]
+    restart_reader = FakeRegistryReader(paused_dict, {run_queue.UPDATE_RESTART_KEY_LIST[0]})
+    restart_dict = run_queue.get_update_guard_dict(restart_reader, now_utc)
+    assert restart_dict["safe_bool"] is False and "restart is pending" in restart_dict["reason_str"]
+    denied_dict = run_queue.get_update_guard_dict(FakeRegistryReader(paused_dict, error_in=PermissionError(13, "denied")), now_utc)
+    assert denied_dict["safe_bool"] is False and "cannot read" in denied_dict["reason_str"]
+    garbled_dict = run_queue.get_update_guard_dict(FakeRegistryReader(dict(paused_dict, PauseUpdatesExpiryTime="soon")), now_utc)
+    assert garbled_dict["safe_bool"] is False and "cannot read" in garbled_dict["reason_str"]
+    no_zone_dict = run_queue.get_update_guard_dict(FakeRegistryReader(dict(paused_dict, PauseUpdatesExpiryTime="2026-11-30T13:59:06")), now_utc)
+    assert no_zone_dict["safe_bool"] is False
+    assert run_queue.get_update_guard_dict(platform_str_in="linux")["safe_bool"] is True
+    # A GUARD THAT CRASHES IS NOT SAFE
+    def crashing_guard_func():
+        raise RuntimeError("boom")
+    run_queue.UPDATE_GUARD_FUNC = crashing_guard_func
+    try:
+        assert run_queue.get_checked_update_guard_dict()["safe_bool"] is False
+    finally:
+        run_queue.UPDATE_GUARD_FUNC = SAFE_UPDATE_GUARD_FUNC
+    # THE QUEUE: add REFUSES, THE RUNNER WAITS, THE WATCH EMAILS ONCE, THE STATE SHOWS IT
+    zone_str = tempfile.mkdtemp(prefix="so_zone_", dir=os.environ["SO_DATA_PATH"])
+    path_dict = run_queue.get_queue_path_dict(zone_str)
+    run_queue.make_runner_folder_list(path_dict)
+    pending_dict = run_queue.add_job_dict(path_dict, DESIGN_STR, "waits", git_func_in=CLEAN_GIT_FUNC)
+    unsafe_dict = {"safe_bool": False, "reason_str": "the Windows Update pause ends 2026-11-30T13:59:06+00:00 (1.0 days; at least 3 needed)",
+                   "pause_end_str": None, "days_left": 1.0}
+    run_queue.UPDATE_GUARD_FUNC = lambda: dict(unsafe_dict)
+    try:
+        try:
+            run_queue.add_job_dict(path_dict, DESIGN_STR, "refused", git_func_in=CLEAN_GIT_FUNC)
+            raise AssertionError("add accepted a job while the guard was not safe")
+        except ValueError as error:
+            assert "not adding the job" in str(error) and "Pause updates" in str(error)
+        called_list, guard_mail_list = [], []
+        def run_func(job_dict_in, run_id_str_in, log_path_str_in):
+            called_list.append(job_dict_in["note"])
+            return get_fake_run_func(path_dict, False)(job_dict_in, run_id_str_in, log_path_str_in)
+        send_func = lambda *args_in: {"sent_bool": True, "detail": ""}
+        assert run_fake_queue_list(path_dict, run_func, send_func) == [] and called_list == []
+        assert os.path.isfile(os.path.join(path_dict["pending"], f"{pending_dict['job_id']}.json"))
+        state_dict = run_queue.read_json(path_dict["state"])
+        assert state_dict["update_guard"] == {"safe_bool": False, "reason_str": unsafe_dict["reason_str"]}
+        guard_send_func = lambda *args_in: guard_mail_list.append(args_in[2]) or {"sent_bool": True, "detail": ""}
+        # THE DAYS LEFT CHANGE DURING THE WATCH, THE REASON DOES NOT: ONE EMAIL
+        guard_call_list = []
+        def changing_guard_func():
+            guard_call_list.append(1)
+            days_str = "1.0" if len(guard_call_list) <= 3 else "0.9"
+            return dict(unsafe_dict, reason_str=unsafe_dict["reason_str"].replace("(1.0 days", f"({days_str} days"))
+        run_queue.UPDATE_GUARD_FUNC = changing_guard_func
+        assert run_queue.watch_queue(path_dict, 0, 4, run_func, send_func, judge_func_in=lambda: FAKE_JUDGE_STR,
+                                     git_func_in=fake_accepting_git_func, prepare_func_in=lambda job_in: FAKE_RUN_COMMIT_STR,
+                                     guard_send_func_in=guard_send_func) == 0
+        assert len(guard_call_list) > 3, "the guard reason never changed during the watch"
+        assert called_list == [] and len(guard_mail_list) == 1 and "Windows Update guard" in guard_mail_list[0]
+    finally:
+        run_queue.UPDATE_GUARD_FUNC = SAFE_UPDATE_GUARD_FUNC
+    # SAFE AGAIN: THE JOB RUNS
+    result_list = run_fake_queue_list(path_dict, run_func, send_func)
+    assert called_list == ["waits"] and [result["status"] for result in result_list] == ["done"]
+    assert run_queue.read_json(path_dict["state"])["update_guard"]["safe_bool"] is True
+    passed("Windows Update guard (pause end, pending restart, unreadable or garbled values not safe; add refuses, the runner waits, the watch emails once per reason)")
+
+
 # FUNCTION: THE WATCH WRITES ITS OWN LOG (ROADMAP R7, 2026-11-05)
 def test_watch_log():
     """
@@ -1356,6 +1472,7 @@ if __name__ == "__main__":
     test_queue_run_index_upgrade()
     test_run_email_content()
     test_queue_kill_switch()
+    test_queue_windows_update_guard()
     test_every_python_file_compiles()
     test_queue_timeout_kills_tree()
     test_queue_worktree_and_results_rows()

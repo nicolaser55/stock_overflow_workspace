@@ -229,13 +229,17 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   differed only in the last digit for exp04 (0.00958141648339678 vs ...782, floating-point rounding), so the reset did
   reproduce V. New baseline run ids for the equivalence check: exp02 `exp02_stop_reentry_20261111000527008138`, exp04
   `exp04_trend_exit_20261111013503898732`.
-- [ ] Open (2026-11-11), for Nicolas to decide: **Windows Update restarted nicodesktop twice during the rerun**
+- [x] **Decided 2026-11-11 (Nicolas):** Windows 11 Home pause, renewed by hand (Pick a date, at most 35 days), plus a
+  guard in `scripts/run_queue.py` (R4c PR) so no job starts or resumes with less than 3 days of pause left or a restart
+  pending; updates installed by hand with STOP set when the queue is empty; active hours as a minor layer; the resume
+  limit stays the last net. nicodesktop is on 26H2 (build 26300); the 02:17 restart was TrustedInstaller's version
+  upgrade. Original note: **Windows Update restarted nicodesktop twice during the rerun**
   (02:14 and 02:17, "Service pack" and "Upgrade", both planned by the system). exp06 was interrupted twice and resumed
   the same run (attempt 3, the last one before `MAX_RESUME_COUNT_INT` = 2 gives up); its result equals the baseline,
   so the resume worked. A longer run (exp01, about 11.5 h) or a third restart would have failed. Options: Windows
   Update set to download and notify (install by hand when the queue is empty), or paused during long queues.
-- [ ] `scripts/check_equivalence.py` takes run ids under the live `runs` folder only; after a reset the baseline is in
-  `backup_records\reset_<time>\runs\`. A full path works (os.path.join keeps it); say so in its help text.
+- [x] `scripts/check_equivalence.py` takes run ids under the live `runs` folder only; after a reset the baseline is in
+  `backup_records\reset_<time>\runs\`. A full path works (os.path.join keeps it); say so in its help text. **Done in the R4c PR (2026-11-11).**
 - [ ] Open (2026-11-10, not changed): **the trial-Sharpe spread V also follows queue order, and a rerun of an
   unchanged design appends its validation quarters again**, so they count twice in that design's Sharpe ratio. A reset
   before the rerun above avoids it; from R6 (no resets) it needs a fix (count each design and quarter once). The
@@ -250,6 +254,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] Decided 2026-11-05: **the judge hash stays broad** (every protected `.py` under `so/` and `scripts/`, plus the
   pilot ledger). Narrowing it to scoring code would need a judgement, file by file, of what can change a score; a
   mistake there would let a scoring change through unseen. The equivalence check makes the broad hash cheap instead.
+- [~] **R4c, intraday decision times (decided by Nicolas on 2026-11-11):** a daily fractional design may also decide
+  at declared times during the session (fill at the next bar's open), for the stage-1 intraday ideas (I1, I2), which
+  the runner could not express. Records, replay, pattern-based random timing, bar-weighted constant exposure and
+  intraday look-ahead cuts (`docs/RUNNER_DESIGN.md`, "Intraday decision times"). Designs without intraday times take
+  the old code path. Same PR: the Windows Update guard in `scripts/run_queue.py` (add refuses and the runner waits
+  while the pause ends within 3 days, a restart is pending, or either cannot be read) and the `check_equivalence.py`
+  help text. **Done when** the suite passes on nicodesktop, the PR is merged and deployed, and equivalence checks on
+  exp02, exp04 and exp05 are EQUIVALENT. Then the audit of both repositories, before the hand-designed experiments.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;

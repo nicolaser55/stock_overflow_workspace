@@ -98,6 +98,16 @@ exists the runner starts no job, resumes no interrupted job, and the job that is
 read (access denied) counts as set; a flag that does not exist, including a missing control folder, does not.
 scripts/reset_records.py reads the same path the other way (2026-11-10): it resets only when the flag is confirmed to
 exist.
+
+Windows Update guard (decided by Nicolas on 2026-11-11, after two update restarts during the baseline rerun): Windows 11
+Home gives no reliable way to stop update restarts except a pause (Settings > Windows Update > Pause updates, at most 35
+days ahead, renewable). add refuses a job, and the runner starts or resumes no job, while the guard is not safe: the
+pause ends within UPDATE_PAUSE_MIN_DAYS (3) days (the earliest of the pause end values under
+HKLM/SOFTWARE/Microsoft/WindowsUpdate/UX/Settings), no pause is set, a restart is pending (the RebootRequired or
+RebootPending key exists), or any of these cannot be read. The job that is running finishes. state.json shows
+"update_guard" (safe and the reason); the watch prints the reason and emails once per reason. The guard reads the
+registry only on Windows; elsewhere (CI, tests on Linux) it reports "not applicable" and is safe. Tests replace
+UPDATE_GUARD_FUNC.
 """
 
 # THE NUMBER OF RECENT RESULTS IN state.json AND OF LOG LINES KEPT FOR A FAILED JOB
@@ -168,6 +178,123 @@ class NoDeployedJudgeError(ValueError):
 # THE KILL-SWITCH FILE NAME INSIDE <SO_DATA_PATH>/control
 STOP_FLAG_FOLDER_STR = "control"
 STOP_FLAG_FILE_STR = "STOP"
+# THE WINDOWS UPDATE GUARD (2026-11-11): DAYS OF PAUSE LEFT A NEW OR RESUMED JOB NEEDS, AND WHAT IS READ
+UPDATE_PAUSE_MIN_DAYS = 3.0
+UPDATE_UX_KEY_STR = r"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
+UPDATE_PAUSE_VALUE_LIST = ["PauseUpdatesExpiryTime", "PauseFeatureUpdatesEndTime", "PauseQualityUpdatesEndTime"]
+UPDATE_RESTART_KEY_LIST = [r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
+                           r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"]
+
+
+# CLASS: READS HKEY_LOCAL_MACHINE (WINDOWS ONLY)
+class WindowsRegistryReader:
+    """get_value raises FileNotFoundError for a missing key or value; has_key is False for a missing key. Any other
+    error (access denied) propagates, and the guard treats it as not safe."""
+
+    # FUNCTION: ONE VALUE
+    def get_value(self, key_str_in, name_str_in):
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_str_in) as key:
+            return winreg.QueryValueEx(key, name_str_in)[0]
+
+    # FUNCTION: WHETHER A KEY EXISTS
+    def has_key(self, key_str_in):
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_str_in):
+                return True
+        except FileNotFoundError:
+            return False
+
+
+# FUNCTION: A UTC TIME FROM A WINDOWS UPDATE PAUSE VALUE ("2026-11-30T13:59:06Z")
+def get_update_utc_datetime(value_in):
+    """
+    Args:
+        value_in (str): ISO time with a trailing Z or an offset
+
+    Returns:
+        datetime.datetime: Aware UTC time (raises ValueError when it does not parse)
+    """
+    # FROMISOFORMAT TAKES +00:00, NOT Z (PYTHON 3.10)
+    text_str = str(value_in).strip()
+    if text_str.endswith("Z"):
+        text_str = text_str[:-1] + "+00:00"
+    parsed = datetime.datetime.fromisoformat(text_str)
+    if parsed.tzinfo is None:
+        raise ValueError(f"pause time {value_in!r} has no time zone")
+    return parsed.astimezone(datetime.timezone.utc)
+
+
+# FUNCTION: WHETHER WINDOWS UPDATE LEAVES ROOM FOR A JOB
+def get_update_guard_dict(reader_in=None, now_utc_in=None, platform_str_in=None, min_days_in=UPDATE_PAUSE_MIN_DAYS):
+    """
+    Fails closed: anything that cannot be read is not safe.
+
+    Args:
+        reader_in (object | None): get_value(key, name), has_key(key) (None = WindowsRegistryReader on Windows)
+        now_utc_in (datetime.datetime | None): Aware UTC clock (tests)
+        platform_str_in (str | None): sys.platform replacement (tests)
+        min_days_in (float): Days of pause a job needs
+
+    Returns:
+        dict: safe_bool, reason_str, pause_end_str (or None), days_left (or None)
+    """
+    # OFF WINDOWS THERE IS NO WINDOWS UPDATE (CI, LINUX TESTS)
+    platform_str = sys.platform if platform_str_in is None else str(platform_str_in)
+    if reader_in is None and platform_str != "win32":
+        return {"safe_bool": True, "reason_str": "not applicable (not Windows)", "pause_end_str": None, "days_left": None}
+    reader = reader_in if reader_in is not None else WindowsRegistryReader()
+    now_utc = now_utc_in or datetime.datetime.now(datetime.timezone.utc)
+    # A PENDING RESTART FIRST: IT CAN HAPPEN WHATEVER THE PAUSE SAYS
+    try:
+        for key_str in UPDATE_RESTART_KEY_LIST:
+            if reader.has_key(key_str):
+                return {"safe_bool": False, "reason_str": f"a Windows restart is pending ({key_str.split(chr(92))[-1]})",
+                        "pause_end_str": None, "days_left": None}
+    except Exception as error:
+        return {"safe_bool": False, "reason_str": f"cannot read the pending-restart flags ({type(error).__name__})",
+                "pause_end_str": None, "days_left": None}
+    # THE EARLIEST PAUSE END; A MISSING VALUE MEANS NO PAUSE
+    end_list = []
+    for name_str in UPDATE_PAUSE_VALUE_LIST:
+        try:
+            end_list.append(get_update_utc_datetime(reader.get_value(UPDATE_UX_KEY_STR, name_str)))
+        except FileNotFoundError:
+            return {"safe_bool": False, "reason_str": f"Windows Update is not paused ({name_str} not set)",
+                    "pause_end_str": None, "days_left": None}
+        except Exception as error:
+            return {"safe_bool": False, "reason_str": f"cannot read {name_str} ({type(error).__name__})",
+                    "pause_end_str": None, "days_left": None}
+    pause_end = min(end_list)
+    days_left = (pause_end - now_utc).total_seconds() / 86400.0
+    pause_end_str = pause_end.isoformat(timespec="seconds")
+    if days_left < float(min_days_in):
+        return {"safe_bool": False, "pause_end_str": pause_end_str, "days_left": round(days_left, 2),
+                "reason_str": f"the Windows Update pause ends {pause_end_str} ({days_left:.1f} days; at least {min_days_in:g} needed)"}
+    return {"safe_bool": True, "pause_end_str": pause_end_str, "days_left": round(days_left, 2),
+            "reason_str": f"Windows Update paused until {pause_end_str} ({days_left:.1f} days)"}
+
+
+# THE GUARD THE QUEUE CALLS (TESTS REPLACE IT; NOTHING ELSE DOES)
+UPDATE_GUARD_FUNC = get_update_guard_dict
+
+
+# FUNCTION: THE GUARD, WITH AN UNEXPECTED ERROR COUNTED AS NOT SAFE
+def get_checked_update_guard_dict():
+    """
+    Returns:
+        dict: safe_bool, reason_str, pause_end_str, days_left
+    """
+    # A GUARD THAT CRASHES IS NOT A SAFE GUARD
+    try:
+        guard_dict = dict(UPDATE_GUARD_FUNC())
+        guard_dict["safe_bool"] = bool(guard_dict.get("safe_bool", False))
+        guard_dict["reason_str"] = str(guard_dict.get("reason_str", ""))
+        return guard_dict
+    except Exception as error:
+        return {"safe_bool": False, "reason_str": f"the Windows Update guard failed ({type(error).__name__})",
+                "pause_end_str": None, "days_left": None}
 
 
 # FUNCTION: WHERE THE KILL-SWITCH FILE IS
@@ -633,6 +760,11 @@ def add_job_dict(path_dict_in, design_str_in, note_str_in="", n_jobs_in=None, no
     if not (WORKSPACE_PATH / design_str / "design.py").is_file():
         raise ValueError(f"{design_str} has no design.py")
     commit_str = get_add_commit_str(design_str, commit_str_in, git_func_in)
+    # THE WINDOWS UPDATE GUARD: A JOB ADDED NOW SHOULD NOT MEET AN UPDATE RESTART (2026-11-11)
+    guard_dict = get_checked_update_guard_dict()
+    if not guard_dict["safe_bool"]:
+        raise ValueError(f"not adding the job: {guard_dict['reason_str']}. Renew the pause (Settings > Windows Update > "
+                         f"Pause updates > Pick a date) or restart first, then add again.")
     now = now_in or datetime.datetime.now()
     # A SHORT RANDOM PART: WINDOWS CLOCKS TICK ABOUT EVERY 15 MS, SO TWO JOBS ADDED TOGETHER SHARE A TIMESTAMP
     job_id_str = f"{now.strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:6]}_{Path(design_str).name}"
@@ -838,6 +970,8 @@ def write_state_dict(path_dict_in, running_job_in, result_dict_in=None):
                       "pending_count": len(get_pending_job_list(path_dict_in)), "host": socket.gethostname(),
                       "queue_commit": get_queue_commit_str(), "deployed_commit": get_deployed_commit_str(),
                       "stopped": get_stop_flag_bool(path_dict_in),
+                      "update_guard": {key_str: value for key_str, value in get_checked_update_guard_dict().items()
+                                       if key_str in ("safe_bool", "reason_str")},
                       "recent": recent_list[:STATE_RECENT_COUNT_INT]}
         os.makedirs(os.path.dirname(path_dict_in["state"]), exist_ok=True)
         write_json_atomic(path_dict_in["state"], state_dict)
@@ -1851,8 +1985,10 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
 
     try:
         upgrade_run_index_file(path_dict_in)
-        # THE KILL SWITCH IS CHECKED BEFORE EVERY JOB; A RECOVERED JOB STAYS IN running/ UNTIL THE FLAG IS GONE
-        if not get_stop_flag_bool(path_dict_in):
+        # THE KILL SWITCH AND THE WINDOWS UPDATE GUARD ARE CHECKED BEFORE EVERY JOB; A RECOVERED JOB STAYS IN running/
+        # UNTIL BOTH ALLOW IT
+        guard_dict = get_checked_update_guard_dict()
+        if not get_stop_flag_bool(path_dict_in) and guard_dict["safe_bool"]:
             for job_dict in recover_running_job_list(path_dict_in):
                 run_one_func(job_dict)
         # NEW COMMITS FIRST, SO A PENDING JOB THAT NAMES A JUST-PUSHED COMMIT IS NOT REJECTED AS MISSING
@@ -1860,6 +1996,10 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
         while True:
             if get_stop_flag_bool(path_dict_in):
                 print(f"stop flag set ({path_dict_in['stop_flag']}); no further job is started", flush=True)
+                break
+            guard_dict = get_checked_update_guard_dict()
+            if not guard_dict["safe_bool"]:
+                print(f"Windows Update guard: {guard_dict['reason_str']}; no further job is started", flush=True)
                 break
             # THE JUDGE OF THE NEXT JOB: THE DEPLOYED COMMIT NOW (A DEPLOY BETWEEN JOBS APPLIES TO THE NEXT ONE)
             try:
@@ -1879,10 +2019,12 @@ def run_queue_list(path_dict_in, run_func_in=None, send_func_in=None, pid_alive_
 
 # FUNCTION: RUN JOBS AS THEY ARRIVE
 def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS, max_loop_count_in=None,
-                run_func_in=None, send_func_in=None, judge_func_in=None, git_func_in=None, prepare_func_in=None):
+                run_func_in=None, send_func_in=None, judge_func_in=None, git_func_in=None, prepare_func_in=None,
+                guard_send_func_in=None):
     """
     The runner account's scheduled task. Each loop runs every pending job (and any job a crash left in running/), or
-    writes a heartbeat to state.json.
+    writes a heartbeat to state.json. While the Windows Update guard is not safe and jobs wait, it prints the reason and
+    emails once per reason (guard_send_func_in replaces send_email_dict in tests).
 
     Args:
         path_dict_in (dict): Queue paths
@@ -1890,16 +2032,35 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
         max_loop_count_in (int | None): Stop after this many loops (tests; None = forever)
         run_func_in, send_func_in (callable | None): Replacements (tests)
         judge_func_in, git_func_in, prepare_func_in (callable | None): Replacements (tests)
+        guard_send_func_in (callable | None): (path_dict, name, subject, body) -> dict (tests)
 
     Returns:
         int: Jobs run
     """
     # A JOB THAT FAILS DOES NOT STOP THE WATCH
     job_count_int, loop_count_int = 0, 0
+    guard_reason_sent_str = None
     while max_loop_count_in is None or loop_count_int < int(max_loop_count_in):
         # ONE FAILED LOOP (A LOCKED FILE, A GIT ERROR) IS LOGGED AND THE WATCH GOES ON; A SECOND RUNNER STILL EXITS
         try:
-            if get_has_work_bool(path_dict_in) and not get_stop_flag_bool(path_dict_in):
+            has_work_bool = get_has_work_bool(path_dict_in)
+            guard_dict = get_checked_update_guard_dict()
+            if has_work_bool and not get_stop_flag_bool(path_dict_in) and not guard_dict["safe_bool"]:
+                # JOBS WAIT FOR THE WINDOWS UPDATE GUARD: SAY WHY ONCE PER REASON (THE DAYS LEFT ARE NOT PART OF IT)
+                reason_key_str = re.sub(r"\(\d+(\.\d+)? days.*\)$", "", guard_dict["reason_str"])
+                if reason_key_str != guard_reason_sent_str:
+                    print(f"Windows Update guard: {guard_dict['reason_str']}; jobs wait", flush=True)
+                    stamp_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    (guard_send_func_in or send_email_dict)(
+                        path_dict_in, f"update_guard_{stamp_str}", "Stock Overflow: jobs wait (Windows Update guard)",
+                        f"The runner on {socket.gethostname()} starts no job: {guard_dict['reason_str']}.\n"
+                        "Renew the pause (Settings > Windows Update > Pause updates > Pick a date), or install the updates "
+                        "and restart with STOP set, then pause again. The jobs start by themselves once the guard is safe.\n")
+                    guard_reason_sent_str = reason_key_str
+                make_runner_folder_list(path_dict_in)
+                write_state_dict(path_dict_in, None)
+            elif has_work_bool and not get_stop_flag_bool(path_dict_in):
+                guard_reason_sent_str = None
                 job_count_int += len(run_queue_list(path_dict_in, run_func_in, send_func_in, judge_func_in=judge_func_in,
                                                     git_func_in=git_func_in, prepare_func_in=prepare_func_in))
             else:

@@ -13,6 +13,11 @@ from so.core.baseline_report import get_random_family_stat_dict
 # IMPORT THE ENGINE-ONLY REPLAY OF RECORDED DECISIONS
 from so.runner.engine import FractionalWeightEngine, get_decision_dict
 from so.runner.loop import run_engine_decisions_dict
+# IMPORT THE INTRADAY PATTERNS (R4c)
+from so.runner.intraday import (get_validated_time_tuple, get_intraday_pattern_list, get_base_pattern,
+                                get_random_pattern_list, get_pattern_decision_list, get_window_bar_map_dict,
+                                get_bar_weighted_mean_weight_float)
+from so.core.reentry_simulation import get_window_session_idx_arr
 
 """
 Runner Baselines (infrastructure step 4b-1b)
@@ -36,6 +41,14 @@ the 100 registered ones when a path is near passing. get_random_timing_tail_dict
 RUNNER_RANDOM_TIMING_TAIL_PROCESS_COUNT spawned workers, up to the budget for N designs, and stops as soon as more draws
 are at or above the path than the full budget would allow. A typical failing path stops after the registered draws,
 with no extra draw. The count does not depend on the number of workers.
+
+Intraday designs (R4c, 2026-11-11; so.runner.intraday), fractional engine only: a session's exposure is its pattern,
+the weight after each intraday time (keep carries) and after 15:59. Random timing places the path's spells of non-base
+sessions exactly as above with the pattern in place of the weight, so a 15:30 exit moves to another day at the same
+time of day; the draw starts at the base pattern's daily weight, and an entry that does not map on its new session (an
+early close, the last session) is skipped and counted (random_timing_intraday_skip_count). Constant exposure uses the
+bar-weighted mean weight (the weight held through each minute bar), still rebalanced daily. Buy-and-hold is unchanged.
+A design without intraday times takes exactly the code above.
 """
 
 
@@ -419,12 +432,67 @@ def get_exposure_weight_arr(prior_only_dict_in, realized_bool_in):
     return exposure_arr
 
 
+# FUNCTION: THE INTRADAY EXPOSURE OF A PATH (NONE FOR A DAILY-ONLY DESIGN)
+def get_intraday_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in, intraday_time_tuple_in,
+                               initial_weight_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Span
+        prior_only_dict_in (dict): The path (decision_dict_list, one per window session)
+        intraday_time_tuple_in (tuple | None): The design's times
+        initial_weight_in (float): The path's window-start weight
+
+    Returns:
+        dict | None: time_tuple, pattern_list, base_pattern, start_weight, window_session_idx_arr, bar_map_dict
+    """
+    # NO TIMES: THE DAILY CODE PATH
+    time_tuple = get_validated_time_tuple(intraday_time_tuple_in)
+    if len(time_tuple) == 0:
+        return None
+    decision_list = list(prior_only_dict_in.get("decision_dict_list") or [])
+    window_session_idx_arr = get_window_session_idx_arr(ohlcv_array_dict_in, date1_in, date2_in)
+    if len(decision_list) != len(window_session_idx_arr):
+        raise ValueError("the intraday baselines need one recorded decision per window session.")
+    pattern_list = get_intraday_pattern_list(decision_list, time_tuple, float(initial_weight_in))
+    base_pattern = get_base_pattern(pattern_list)
+    return {"time_tuple": time_tuple, "pattern_list": pattern_list, "base_pattern": base_pattern,
+            "start_weight": float(base_pattern[-1]), "window_session_idx_arr": window_session_idx_arr,
+            "bar_map_dict": get_window_bar_map_dict(ohlcv_array_dict_in, window_session_idx_arr, time_tuple)}
+
+
+# FUNCTION: ONE INTRADAY RANDOM-TIMING DRAW
+def get_intraday_draw_result_dict(ohlcv_array_dict_in, date1_in, date2_in, exposure_dict_in, seed_in,
+                                  initial_capital_in=config.INITIAL_CAPITAL,
+                                  entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
+                                  market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bars
+        date1_in, date2_in: Span
+        exposure_dict_in (dict): Output of get_intraday_exposure_dict
+        seed_in (int): Seed
+        initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine costs
+
+    Returns:
+        dict: Engine result (with intraday_skip_count)
+    """
+    # PLACE THE SPELLS, THEN REPLAY LENIENTLY (A MOVED ENTRY MAY NOT MAP)
+    random_pattern_list = get_random_pattern_list(exposure_dict_in["pattern_list"], int(seed_in))
+    start_weight = float(exposure_dict_in["start_weight"])
+    decision_list = get_pattern_decision_list(random_pattern_list, exposure_dict_in["time_tuple"], start_weight)
+    engine = FractionalWeightEngine(0.0, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
+    return run_engine_decisions_dict(ohlcv_array_dict_in, date1_in, date2_in, decision_list, engine, start_weight, 0.0,
+                                     initial_capital_in, entry_slippage_in, market_exit_slippage_in,
+                                     lenient_intraday_bool_in=True, intraday_bar_map_in=exposure_dict_in["bar_map_dict"])
+
+
 # FUNCTION: BUY-AND-HOLD, CONSTANT EXPOSURE AND RANDOM TIMING ON ONE SPAN
 def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in, seed_count_int_in=None,
                              initial_capital_in=config.INITIAL_CAPITAL,
                              entry_slippage_in=config.ENTRY_SLIPPAGE_PER_SHARE,
                              market_exit_slippage_in=config.MARKET_EXIT_SLIPPAGE_PER_SHARE,
-                             realized_exposure_bool_in=False):
+                             realized_exposure_bool_in=False, intraday_time_tuple_in=None, initial_weight_in=1.0):
     """
     Baselines over the prior-only path's span, same engine and costs. Constant exposure uses the path's mean
     exposure and rebalances when it drifts more than RUNNER_CONSTANT_EXPOSURE_DEAD_BAND (0.05; audit S8). Random timing places the path's non-base spells at random (same time
@@ -439,6 +507,8 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
         seed_count_int_in (int | None): Random draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
         initial_capital_in, entry_slippage_in, market_exit_slippage_in (float): Engine costs
         realized_exposure_bool_in (bool): Exposure from the realized position (trailing stop, barrier)
+        intraday_time_tuple_in (tuple | None): The design's intraday times (R4c; None or empty = daily only)
+        initial_weight_in (float): The path's window-start weight (used only for intraday patterns)
 
     Returns:
         dict: Buy-and-hold, constant-exposure and random-timing returns and the random-family stats
@@ -461,6 +531,15 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
             raise ValueError("the fractional prior-only path has no mean_weight.")
         mean_weight = float(metric_dict["mean_weight"])
     path_return = float(metric_dict["total_return"]) if np.isfinite(metric_dict.get("total_return", np.nan)) else np.nan
+    # INTRADAY DESIGNS (R4c): PATTERNS, AND THE BAR-WEIGHTED MEAN WEIGHT
+    intraday_exposure_dict = None
+    if not realized_exposure_bool_in:
+        intraday_exposure_dict = get_intraday_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
+                                                            intraday_time_tuple_in, initial_weight_in)
+    if intraday_exposure_dict is not None:
+        mean_weight = get_bar_weighted_mean_weight_float(
+            ohlcv_array_dict_in, intraday_exposure_dict["window_session_idx_arr"], intraday_exposure_dict["pattern_list"],
+            intraday_exposure_dict["time_tuple"], float(initial_weight_in), intraday_exposure_dict["bar_map_dict"])
     # BUY-AND-HOLD: WEIGHT 1 EVERY SESSION, DAILY REBALANCE (MATCHES THE CONSTANT BASELINE AT WEIGHT 1)
     buy_hold_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, np.ones(session_count, dtype=float),
                                          1.0, 0.0, initial_capital_in, entry_slippage_in, market_exit_slippage_in)
@@ -472,14 +551,29 @@ def get_runner_baseline_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only
     # RANDOM TIMING: SAME TIME AT EACH WEIGHT, SPELLS PLACED AT RANDOM, FIXED SEEDS
     seed_list = get_random_timing_seed_list(seed_count_int_in)
     random_return_list = []
+    intraday_skip_int = 0
     for seed_int in seed_list:
+        if intraday_exposure_dict is not None:
+            random_dict = get_intraday_draw_result_dict(ohlcv_array_dict_in, date1_in, date2_in, intraday_exposure_dict,
+                                                        seed_int, initial_capital_in, entry_slippage_in,
+                                                        market_exit_slippage_in)
+            intraday_skip_int += int(random_dict.get("intraday_skip_count", 0))
+            random_return_list.append(float(random_dict["metric_dict"]["total_return"]))
+            continue
         random_arr = get_random_timing_weight_arr(target_arr, seed_int)
         initial_weight = float(random_arr[0]) if len(random_arr) and np.isfinite(random_arr[0]) else 0.0
         random_dict = run_weight_path_dict(ohlcv_array_dict_in, date1_in, date2_in, random_arr, initial_weight, 0.0,
                                            initial_capital_in, entry_slippage_in, market_exit_slippage_in)
         random_return_list.append(float(random_dict["metric_dict"]["total_return"]))
     family_dict = get_random_family_stat_dict("random_timing", random_return_list, path_return)
-    return {"buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"]),
+    intraday_field_dict = {}
+    if intraday_exposure_dict is not None:
+        intraday_field_dict = {"exposure_basis_str": "intraday_pattern",
+                               "constant_exposure_weight_basis_str": "bar_weighted",
+                               "intraday_time_list": list(intraday_exposure_dict["time_tuple"]),
+                               "random_timing_base_pattern": list(intraday_exposure_dict["base_pattern"]),
+                               "random_timing_intraday_skip_count": int(intraday_skip_int)}
+    return {**intraday_field_dict, "buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"]),
             "buy_hold_metric_dict": dict(buy_hold_dict["metric_dict"]),
             "buy_hold_daily_equity_pdf": buy_hold_dict["daily_equity_pdf"],
             "buy_hold_income_dict": {key_str: value for key_str, value in buy_hold_dict.get("income_dict", {}).items() if key_str != "income_pdf"},
@@ -506,7 +600,8 @@ def init_tail_draw_worker(ohlcv_array_dict_in, date1_in, date2_in, exposure_arr_
     Args:
         ohlcv_array_dict_in (dict): Bars
         date1_in, date2_in: Span
-        exposure_arr_in (np.ndarray): The path's exposure (as get_exposure_weight_arr returns it)
+        exposure_arr_in (np.ndarray | dict): The path's exposure (as get_exposure_weight_arr returns it), or an
+            intraday exposure (get_intraday_exposure_dict)
 
     Returns:
         None
@@ -535,6 +630,11 @@ def get_random_timing_draw_return_float(seed_in, ohlcv_array_dict_in=None, date1
     date1 = date1_in if date1_in is not None else _TAIL_WORKER_STATE_DICT["date1"]
     date2 = date2_in if date2_in is not None else _TAIL_WORKER_STATE_DICT["date2"]
     exposure_arr = exposure_arr_in if exposure_arr_in is not None else _TAIL_WORKER_STATE_DICT["exposure"]
+    # AN INTRADAY EXPOSURE (R4c) DRAWS PATTERNS
+    if isinstance(exposure_arr, dict):
+        intraday_dict = get_intraday_draw_result_dict(ohlcv, date1, date2, exposure_arr, int(seed_in), initial_capital_in,
+                                                      entry_slippage_in, market_exit_slippage_in)
+        return float(intraday_dict["metric_dict"]["total_return"])
     random_arr = get_random_timing_weight_arr(exposure_arr, int(seed_in))
     initial_weight = float(random_arr[0]) if len(random_arr) and np.isfinite(random_arr[0]) else 0.0
     random_dict = run_weight_path_dict(ohlcv, date1, date2, random_arr, initial_weight, 0.0, initial_capital_in,
@@ -545,7 +645,8 @@ def get_random_timing_draw_return_float(seed_in, ohlcv_array_dict_in=None, date1
 # FUNCTION: THE MULTIPLE-TESTING RANDOM-TIMING COUNT, WITH EXTRA DRAWS UP TO THE BUDGET FOR N DESIGNS
 def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baseline_dict_in, prior_only_dict_in,
                                 design_count_int_in, realized_exposure_bool_in=False, extend_bool_in=True,
-                                process_count_int_in=None, batch_int_in=None, max_draw_int_in=None, alpha_in=None):
+                                process_count_int_in=None, batch_int_in=None, max_draw_int_in=None, alpha_in=None,
+                                intraday_time_tuple_in=None, initial_weight_in=1.0):
     """
     k = draws at or above the path; the budget M + 1 = ceil(factor * N / alpha); after the registered draws, batches of
     further seeds run while fewer than M draws are done and k is still at most k_max(M). Stopping early cannot change
@@ -565,6 +666,8 @@ def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baselin
         extend_bool_in (bool): Draw beyond the registered draws
         process_count_int_in, batch_int_in, max_draw_int_in (int | None): None = the config values
         alpha_in (float | None): Family-wise alpha (None = RUNNER_MULTIPLE_TESTING_ALPHA)
+        intraday_time_tuple_in (tuple | None): The design's intraday times (R4c; the draws are pattern draws)
+        initial_weight_in (float): The path's window-start weight (intraday patterns only)
 
     Returns:
         dict: method_str, design_count, alpha, p_max, path_return_used, draw_target, draw_count,
@@ -593,6 +696,11 @@ def get_random_timing_tail_dict(ohlcv_array_dict_in, date1_in, date2_in, baselin
     at_or_above_int = int(tail_dict["at_or_above_count"])
     draw_count = len(registered_list)
     exposure_arr = get_exposure_weight_arr(prior_only_dict_in, realized_exposure_bool_in)
+    if not realized_exposure_bool_in:
+        intraday_exposure_dict = get_intraday_exposure_dict(ohlcv_array_dict_in, date1_in, date2_in, prior_only_dict_in,
+                                                            intraday_time_tuple_in, initial_weight_in)
+        if intraday_exposure_dict is not None:
+            exposure_arr = intraday_exposure_dict
     batch_int = max(1, int(config.RUNNER_RANDOM_TIMING_TAIL_BATCH if batch_int_in is None else batch_int_in))
     process_count = max(1, int(config.RUNNER_RANDOM_TIMING_TAIL_PROCESS_COUNT if process_count_int_in is None
                                else process_count_int_in))
