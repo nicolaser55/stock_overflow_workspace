@@ -262,6 +262,16 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   while the pause ends within 3 days, a restart is pending, or either cannot be read) and the `check_equivalence.py`
   help text. **Done when** the suite passes on nicodesktop, the PR is merged and deployed, and equivalence checks on
   exp02, exp04 and exp05 are EQUIVALENT. Then the audit of both repositories, before the hand-designed experiments.
+- [~] **R4d, a frozen V and small fixes (decided by Nicolas on 2026-11-12, before any research run):** the
+  equivalence checks on exp02/04/05 after R4c were NOT EQUIVALENT only through V (the live variance followed queue
+  order and counted reruns twice); rule (a) had not listed V's inputs, and was not amended. Fix: V from each design's
+  latest run, and a frozen reference file built by Nicolas (`scripts/freeze_v_reference.py`, protected) that the
+  verdict reads on the real view and refuses without (`docs/RUNNER_DESIGN.md`, "The frozen V"). Same PR: the idle loop
+  writes nothing under STOP; `check_equivalence.py` reports V inputs and the values that follow from them separately;
+  `tests/run_all_tests.py --suite NAME`; the template shows `INTRADAY_DECISION_TIME_LIST`; done/ran documented.
+  **Done when** the suite passes on nicodesktop, the PR is merged and deployed, the reference is frozen under STOP,
+  the records are reset and all nine experiments are rerun in baseline order (the final baseline), compared under a
+  rule Nicolas states before the rerun.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;

@@ -10,6 +10,10 @@ Run the Test Suites
 
     python tests/run_all_tests.py           every suite (before a merge or a pull request)
     python tests/run_all_tests.py --fast    every suite except the two slow ones (minute mode, experiments), after an edit
+    python tests/run_all_tests.py --suite test_tools.py [--suite test_grades.py]
+                                            the named suites only, each with its own temporary SO_DATA_PATH (running a
+                                            suite file directly uses the window's SO_DATA_PATH, which a suite refuses
+                                            when it is not a temporary folder)
 
 Each suite runs in its own interpreter with its own empty temporary SO_DATA_PATH. A failing suite does not stop the
 others; the end lists every failing suite. If SO_DATA_PATH was already set, the trial log under that folder must keep
@@ -52,6 +56,39 @@ SLOW_SUITE_SET = {"test_runner_minute.py", "test_experiments.py"}
 FAST_SUITE_LIST = [suite_str for suite_str in SUITE_LIST if suite_str not in SLOW_SUITE_SET]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
+
+# FUNCTION: THE SUITES TO RUN FROM THE COMMAND LINE
+def get_suite_list(argument_list_in):
+    """
+    Args:
+        argument_list_in (list): sys.argv[1:]
+
+    Returns:
+        list: Suite file names, in SUITE_LIST order (an unknown name or a missing value raises SystemExit)
+    """
+    # --suite NAME (REPEATABLE) WINS; THEN --fast; THEN EVERY SUITE
+    named_list = []
+    idx = 0
+    while idx < len(argument_list_in):
+        argument_str = argument_list_in[idx]
+        if argument_str == "--suite":
+            if idx + 1 >= len(argument_list_in):
+                raise SystemExit("--suite needs a suite file name, e.g. --suite test_tools.py")
+            named_list.append(argument_list_in[idx + 1])
+            idx += 2
+            continue
+        if argument_str.startswith("--suite="):
+            named_list.append(argument_str.split("=", 1)[1])
+        elif argument_str != "--fast":
+            raise SystemExit(f"unknown argument {argument_str!r} (use --fast or --suite NAME)")
+        idx += 1
+    if named_list:
+        named_list = [os.path.basename(name_str) + ("" if name_str.endswith(".py") else ".py") for name_str in named_list]
+        unknown_list = [name_str for name_str in named_list if name_str not in SUITE_LIST]
+        if unknown_list:
+            raise SystemExit(f"unknown suite(s): {', '.join(unknown_list)}")
+        return [suite_str for suite_str in SUITE_LIST if suite_str in set(named_list)]
+    return list(FAST_SUITE_LIST) if "--fast" in argument_list_in else list(SUITE_LIST)
 
 # FUNCTION: SIZE AND MODIFICATION TIME OF A DATA ROOT'S TRIAL LOG
 def get_trial_log_stamp_tuple(data_path_str_in):
@@ -104,9 +141,11 @@ if __name__ == "__main__":
     exit_code_int = 0
     failed_list = []
     try:
-        # THE FAST SET OR EVERY SUITE
-        suite_list = FAST_SUITE_LIST if "--fast" in sys.argv[1:] else SUITE_LIST
-        print(f"{'fast set' if suite_list is FAST_SUITE_LIST else 'all suites'}: {len(suite_list)} suites", flush=True)
+        # THE NAMED SUITES, THE FAST SET OR EVERY SUITE
+        suite_list = get_suite_list(sys.argv[1:])
+        label_str = ("all suites" if suite_list == SUITE_LIST else "fast set" if suite_list == FAST_SUITE_LIST
+                     else "named suites")
+        print(f"{label_str}: {len(suite_list)} suites", flush=True)
         for suite_str in suite_list:
             # DISPLAY INFORMATION
             print(f"\n===== {suite_str} =====", flush=True)

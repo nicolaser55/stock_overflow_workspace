@@ -41,9 +41,20 @@ has a "multiple testing" part that raises the bar with N, the number of distinct
                       on the trial log's candidate-period excess returns (validation quarters); with fewer than
                       MT_MIN_DESIGN_COUNT designs of at least MT_MIN_PERIOD_COUNT quarters, it falls back to 1 / T, the
                       variance of a Sharpe estimate under the null. Pass at RUNNER_DSR_MIN_PROBABILITY (0.95) or more.
-                      Open (2026-11-10, not changed): the spread also follows queue order (the runs logged so far), and
-                      a rerun of an unchanged design appends its quarters again, so they count twice in that design's
-                      Sharpe ratio; a reset before a full rerun avoids it, and from R6 (no resets) it needs a fix.
+    the frozen V      (R4d, decided by Nicolas on 2026-11-12, after the R4c equivalence check showed it): the live
+                      spread follows queue order (a run sees only the runs logged before it: exp02 saw 18 designs on
+                      2026-11-11 and 80 when rerun) and restarts after a reset. So the verdict of a run on the real
+                      development view uses a FROZEN reference V: a file under the data root
+                      (paths.LOCAL_V_REFERENCE_FILE_PATH_STR, store04_experiments/judge/v_reference.json) that only
+                      Nicolas builds, with scripts/freeze_v_reference.py, from the trial log: one entry per design key,
+                      each design's latest run only (a rerun does not count twice), designs of at least
+                      MT_MIN_PERIOD_COUNT quarters, at least MT_MIN_DESIGN_COUNT designs. The file carries its own
+                      content hash; a missing, unreadable or inconsistent file stops the run (read_v_reference_dict).
+                      The report records the reference's variance, design count, build time and file SHA-256, and the
+                      live spread (latest run per design) beside it as information. Stage 1 refreshes the reference
+                      only at a reset; the policy from R6 is decided before R6. N is unchanged by this.
+                      Without a reference (synthetic tests, which pass none) the live spread is used, latest run per
+                      design.
     random timing     the path's total return against random-timing draws, COUNTED, not fitted (roadmap R3,
                       2026-11-02). p = (k + 1) / (M + 1), k = draws at or above the path, M = draws; pass when p is at
                       most RUNNER_MULTIPLE_TESTING_ALPHA / N (Bonferroni). The runner (so.runner.baselines) extends the
@@ -214,39 +225,222 @@ def get_sharpe_float(value_arr_in):
     return float(value_arr.mean() / std_float) if std_float > 0 else float("nan")
 
 
-# FUNCTION: SPREAD OF SHARPE RATIOS ACROSS THE DESIGNS IN THE TRIAL LOG
-def get_trial_sharpe_variance_dict(trial_log_path_str_in=None):
+# FUNCTION: EACH DESIGN'S VALIDATION QUARTERS FROM ITS LATEST RUN ONLY
+def get_latest_run_excess_dict(record_pdf_in):
     """
-    Each design's quarterly excess returns (validation rows, metric excess_return), its Sharpe ratio, and the variance
-    of those ratios across designs with at least MT_MIN_PERIOD_COUNT quarters.
+    Validation rows (metric excess_return) grouped by design key and run id (setting_json's run_id); for each design the
+    run whose rows were logged last is kept (ties: the larger run id), so a rerun never counts a quarter twice.
 
     Args:
-        trial_log_path_str_in (str | None): Trial log (None = the shared log)
+        record_pdf_in (pd.DataFrame): Trial-log rows
 
     Returns:
-        dict: design_count, variance (NaN when fewer than MT_MIN_DESIGN_COUNT designs)
+        dict: design key -> {"experiment", "run_id", "excess_list"}
     """
-    # GROUP THE VALIDATION ROWS BY DESIGN
-    record_pdf = read_trial_record_pdf(trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
-    if len(record_pdf) == 0:
-        return {"design_count": 0, "variance": float("nan")}
-    excess_dict = {}
-    for experiment_str, stage_str, setting_str, metric_str in zip(record_pdf["experiment"], record_pdf["stage"],
-                                                                  record_pdf["setting_json"], record_pdf["metric_json"]):
+    # GROUP BY (DESIGN, RUN), REMEMBERING WHEN EACH RUN LAST LOGGED
+    group_dict = {}
+    if record_pdf_in is None or len(record_pdf_in) == 0:
+        return {}
+    logged_list = list(record_pdf_in["logged_ts"]) if "logged_ts" in record_pdf_in.columns else [""] * len(record_pdf_in)
+    for experiment_str, stage_str, setting_str, metric_str, logged_str in zip(
+            record_pdf_in["experiment"], record_pdf_in["stage"], record_pdf_in["setting_json"],
+            record_pdf_in["metric_json"], logged_list):
         if str(stage_str) != "validation":
             continue
         try:
             excess_float = float(json.loads(metric_str).get("excess_return"))
         except (ValueError, TypeError, AttributeError):
             continue
-        if math.isfinite(excess_float):
-            excess_dict.setdefault(get_design_key_str(experiment_str, setting_str), []).append(excess_float)
-    sharpe_list = [get_sharpe_float(value_list) for value_list in excess_dict.values()
-                   if len(value_list) >= int(config.MT_MIN_PERIOD_COUNT)]
-    sharpe_list = [value for value in sharpe_list if math.isfinite(value)]
-    if len(sharpe_list) < int(config.MT_MIN_DESIGN_COUNT):
-        return {"design_count": len(sharpe_list), "variance": float("nan")}
-    return {"design_count": len(sharpe_list), "variance": float(np.var(sharpe_list, ddof=1))}
+        if not math.isfinite(excess_float):
+            continue
+        try:
+            run_id_str = str(json.loads(setting_str).get("run_id") or "")
+        except (ValueError, TypeError, AttributeError):
+            run_id_str = ""
+        group_key = (get_design_key_str(experiment_str, setting_str), run_id_str)
+        group = group_dict.setdefault(group_key, {"experiment": str(experiment_str), "logged": "", "excess_list": []})
+        group["excess_list"].append(excess_float)
+        group["logged"] = max(group["logged"], str(logged_str))
+    latest_dict = {}
+    for (design_key_str, run_id_str), group in group_dict.items():
+        rank_tuple = (group["logged"], run_id_str)
+        if design_key_str not in latest_dict or rank_tuple > latest_dict[design_key_str]["rank"]:
+            latest_dict[design_key_str] = {"rank": rank_tuple, "experiment": group["experiment"], "run_id": run_id_str,
+                                           "excess_list": list(group["excess_list"])}
+    return {key_str: {"experiment": value["experiment"], "run_id": value["run_id"], "excess_list": value["excess_list"]}
+            for key_str, value in latest_dict.items()}
+
+
+# FUNCTION: SPREAD OF SHARPE RATIOS ACROSS THE DESIGNS IN THE TRIAL LOG (LATEST RUN PER DESIGN)
+def get_trial_sharpe_variance_dict(trial_log_path_str_in=None):
+    """
+    Each design's quarterly excess returns from its latest run (get_latest_run_excess_dict), its Sharpe ratio, and the
+    variance of those ratios across designs with at least MT_MIN_PERIOD_COUNT quarters. Until R4d (2026-11-12) every
+    run's rows counted, so a rerun counted its quarters twice.
+
+    Args:
+        trial_log_path_str_in (str | None): Trial log (None = the shared log)
+
+    Returns:
+        dict: design_count, variance (NaN when fewer than MT_MIN_DESIGN_COUNT designs), and the designs used
+            (experiment_list, run_id_list, quarter_count_list), sorted
+    """
+    # THE LATEST RUN OF EACH DESIGN
+    record_pdf = read_trial_record_pdf(trial_log_path_str_in or paths.LOCAL_TRIAL_LOG_FILE_PATH_STR)
+    latest_dict = get_latest_run_excess_dict(record_pdf)
+    used_list = []
+    for design_key_str in sorted(latest_dict):
+        value = latest_dict[design_key_str]
+        if len(value["excess_list"]) < int(config.MT_MIN_PERIOD_COUNT):
+            continue
+        sharpe_float = get_sharpe_float(value["excess_list"])
+        if math.isfinite(sharpe_float):
+            used_list.append((sharpe_float, value["experiment"], value["run_id"], len(value["excess_list"])))
+    detail_dict = {"design_count": len(used_list),
+                   "experiment_list": sorted({item[1] for item in used_list}),
+                   "run_id_list": sorted({item[2] for item in used_list}),
+                   "quarter_count_list": sorted(item[3] for item in used_list)}
+    if len(used_list) < int(config.MT_MIN_DESIGN_COUNT):
+        return {**detail_dict, "variance": float("nan")}
+    return {**detail_dict, "variance": float(np.var([item[0] for item in used_list], ddof=1))}
+
+
+"""
+The Frozen Reference V (R4d)
+"""
+
+# THE FILE FORMAT, AND THE SOURCE LABEL A REPORT CARRIES WHEN IT USED THE REFERENCE
+V_REFERENCE_SCHEMA_STR = "so_v_reference_v1"
+V_SOURCE_REFERENCE_STR = "reference"
+# THE FIELDS A REFERENCE FILE MUST HOLD (content_sha256 COVERS EVERY OTHER FIELD)
+V_REFERENCE_FIELD_LIST = ["schema", "variance", "design_count", "min_period_count", "min_design_count",
+                          "quarter_count_list", "experiment_list", "run_id_list", "trial_log_sha256",
+                          "trial_log_row_count", "built_ts", "built_by", "note", "content_sha256"]
+
+
+# CLASS: A REFERENCE THAT CANNOT BE USED (THE RUN STOPS)
+class VReferenceError(ValueError):
+    """A missing, unreadable or inconsistent V reference file."""
+
+
+# FUNCTION: THE REFERENCE FILE'S PATH
+def get_v_reference_path_str():
+    """
+    Returns:
+        str: paths.LOCAL_V_REFERENCE_FILE_PATH_STR
+    """
+    # THE DATA ROOT DECIDES IT (A TEST MAY ASSIGN THE ATTRIBUTE)
+    return paths.get_named_data_path_str("LOCAL_V_REFERENCE_FILE_PATH_STR")
+
+
+# FUNCTION: SHA-256 OF A FILE'S BYTES
+def get_file_sha256_str(file_path_str_in):
+    """
+    Args:
+        file_path_str_in (str): File
+
+    Returns:
+        str: Hex digest
+    """
+    # STREAM THE FILE
+    import hashlib
+    digest = hashlib.sha256()
+    with open(file_path_str_in, "rb") as file_handle:
+        for chunk_bytes in iter(lambda: file_handle.read(1 << 20), b""):
+            digest.update(chunk_bytes)
+    return digest.hexdigest()
+
+
+# FUNCTION: THE CONTENT HASH OF A REFERENCE (EVERY FIELD BUT content_sha256, CANONICAL JSON)
+def get_v_reference_content_sha256_str(reference_dict_in):
+    """
+    Args:
+        reference_dict_in (dict): Reference fields
+
+    Returns:
+        str: Hex digest
+    """
+    # SORTED KEYS, NO SPACES
+    import hashlib
+    body_dict = {key_str: value for key_str, value in reference_dict_in.items() if key_str != "content_sha256"}
+    return hashlib.sha256(json.dumps(body_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+# FUNCTION: A NEW REFERENCE FROM A TRIAL LOG (NOTHING IS WRITTEN HERE)
+def build_v_reference_dict(trial_log_path_str_in, built_by_str_in, note_str_in="", now_in=None):
+    """
+    Args:
+        trial_log_path_str_in (str): Trial log
+        built_by_str_in (str): Who builds it
+        note_str_in (str): Free text
+        now_in (datetime.datetime | None): Clock (tests)
+
+    Returns:
+        dict: The reference (raises VReferenceError when the trial log gives no usable spread)
+    """
+    # THE LIVE SPREAD, LATEST RUN PER DESIGN, MUST BE DEFINED
+    import datetime
+    if not trial_log_path_str_in or not os.path.isfile(trial_log_path_str_in):
+        raise VReferenceError(f"no trial log at {trial_log_path_str_in}")
+    variance_dict = get_trial_sharpe_variance_dict(trial_log_path_str_in)
+    variance_float = float(variance_dict["variance"])
+    if not math.isfinite(variance_float) or variance_float <= 0:
+        raise VReferenceError(f"the trial log gives no spread: {variance_dict['design_count']} designs of at least "
+                              f"{int(config.MT_MIN_PERIOD_COUNT)} quarters (at least {int(config.MT_MIN_DESIGN_COUNT)} needed)")
+    now = now_in or datetime.datetime.now()
+    reference_dict = {"schema": V_REFERENCE_SCHEMA_STR, "variance": variance_float,
+                      "design_count": int(variance_dict["design_count"]),
+                      "min_period_count": int(config.MT_MIN_PERIOD_COUNT),
+                      "min_design_count": int(config.MT_MIN_DESIGN_COUNT),
+                      "quarter_count_list": [int(value) for value in variance_dict["quarter_count_list"]],
+                      "experiment_list": list(variance_dict["experiment_list"]),
+                      "run_id_list": list(variance_dict["run_id_list"]),
+                      "trial_log_sha256": get_file_sha256_str(trial_log_path_str_in),
+                      "trial_log_row_count": int(len(read_trial_record_pdf(trial_log_path_str_in))),
+                      "built_ts": now.strftime("%Y-%m-%dT%H:%M:%S"), "built_by": str(built_by_str_in),
+                      "note": str(note_str_in or "")}
+    reference_dict["content_sha256"] = get_v_reference_content_sha256_str(reference_dict)
+    return reference_dict
+
+
+# FUNCTION: READ AND CHECK THE REFERENCE (FAILS CLOSED)
+def read_v_reference_dict(reference_path_str_in=None):
+    """
+    Args:
+        reference_path_str_in (str | None): File (None = get_v_reference_path_str())
+
+    Returns:
+        dict: The reference fields plus file_sha256 and path_str (raises VReferenceError on any problem)
+    """
+    # THE FILE MUST EXIST, PARSE, HOLD EVERY FIELD, AND MATCH ITS OWN CONTENT HASH
+    path_str = reference_path_str_in or get_v_reference_path_str()
+    if not os.path.isfile(path_str):
+        raise VReferenceError(f"no V reference at {path_str}: Nicolas builds it with scripts/freeze_v_reference.py "
+                              f"(STOP set), then the run can start")
+    try:
+        with open(path_str, "r", encoding="utf-8") as json_file:
+            reference_dict = json.load(json_file)
+    except (OSError, ValueError) as error:
+        raise VReferenceError(f"the V reference {path_str} cannot be read ({type(error).__name__})") from error
+    if not isinstance(reference_dict, dict):
+        raise VReferenceError(f"the V reference {path_str} is not a JSON object")
+    missing_list = [key_str for key_str in V_REFERENCE_FIELD_LIST if key_str not in reference_dict]
+    if missing_list:
+        raise VReferenceError(f"the V reference {path_str} lacks {missing_list}")
+    if reference_dict["schema"] != V_REFERENCE_SCHEMA_STR:
+        raise VReferenceError(f"the V reference {path_str} has schema {reference_dict['schema']!r}")
+    if get_v_reference_content_sha256_str(reference_dict) != reference_dict["content_sha256"]:
+        raise VReferenceError(f"the V reference {path_str} does not match its content hash (edited by hand?)")
+    try:
+        variance_float = float(reference_dict["variance"])
+        design_count_int = int(reference_dict["design_count"])
+    except (TypeError, ValueError) as error:
+        raise VReferenceError(f"the V reference {path_str} has a non-numeric variance or design count") from error
+    if not math.isfinite(variance_float) or variance_float <= 0:
+        raise VReferenceError(f"the V reference {path_str} has a variance that is not positive and finite")
+    if design_count_int < int(reference_dict["min_design_count"]) or design_count_int != len(reference_dict["quarter_count_list"]):
+        raise VReferenceError(f"the V reference {path_str} has an inconsistent design count")
+    return {**reference_dict, "file_sha256": get_file_sha256_str(path_str), "path_str": path_str}
 
 
 # FUNCTION: THE DEFLATED SHARPE RATIO
@@ -388,7 +582,7 @@ def get_random_timing_count_dict(path_return_in, random_return_list_in, design_c
 # FUNCTION: THE MULTIPLE-TESTING PART OF THE VERDICT
 def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, path_return_in,
                                       random_return_list_in, trial_log_path_str_in=None, legacy_path_list_in=None,
-                                      random_timing_tail_dict_in=None):
+                                      random_timing_tail_dict_in=None, v_reference_dict_in=None):
     """
     Both the deflated Sharpe ratio and the Bonferroni random-timing test must pass.
 
@@ -400,6 +594,7 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
         legacy_path_list_in (list[str] | None): Pilot ledger files (None = records/legacy/pilot_designs.csv)
         random_timing_tail_dict_in (dict | None): The runner's extended draw count
             (so.runner.baselines.get_random_timing_tail_dict); None = count random_return_list_in only (strict)
+        v_reference_dict_in (dict | None): Output of read_v_reference_dict (R4d); None = the live spread
 
     Returns:
         dict: pass_bool, design_count (the verdict's N), design_count_scope_str, current_design_count (trial log),
@@ -412,8 +607,18 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
     sharpe_float = get_sharpe_float(excess_arr)
     skew_float, kurtosis_float = get_moment_tuple(excess_arr)
     variance_dict = get_trial_sharpe_variance_dict(trial_log_path_str_in)
+    # THE FROZEN REFERENCE (R4d) REPLACES THE LIVE SPREAD WHEN GIVEN; THE LIVE ONE IS STILL REPORTED
+    used_variance_float = variance_dict["variance"]
+    used_design_count_int = int(variance_dict["design_count"])
+    if v_reference_dict_in is not None:
+        used_variance_float = float(v_reference_dict_in["variance"])
+        used_design_count_int = int(v_reference_dict_in["design_count"])
+        if not math.isfinite(used_variance_float) or used_variance_float <= 0:
+            raise VReferenceError("the V reference given to the verdict has no positive finite variance")
     dsr_dict = get_deflated_sharpe_dict(sharpe_float, len(excess_arr), skew_float, kurtosis_float,
-                                        variance_dict["variance"], design_count)
+                                        used_variance_float, design_count)
+    if v_reference_dict_in is not None and dsr_dict["variance_source_str"] == "trial_log":
+        dsr_dict["variance_source_str"] = V_SOURCE_REFERENCE_STR
     alpha_float = float(config.RUNNER_MULTIPLE_TESTING_ALPHA)
     # THE RUNNER'S COUNT MUST HAVE BEEN MADE FOR THIS N AND ALPHA; OTHERWISE THE STRICT COUNT OF THE GIVEN DRAWS
     tail_dict = dict(random_timing_tail_dict_in or {})
@@ -426,13 +631,19 @@ def get_multiple_testing_verdict_dict(strategy_return_pdf_in, buy_hold_return_pd
     random_threshold_float = alpha_float / design_count
     dsr_pass_bool = dsr_dict["probability"] >= float(config.RUNNER_DSR_MIN_PROBABILITY)
     random_pass_bool = bool(tail_dict["pass_bool"])
-    return {"pass_bool": bool(dsr_pass_bool and random_pass_bool), "design_count": design_count,
+    reference_field_dict = {}
+    if v_reference_dict_in is not None:
+        reference_field_dict = {"v_reference_sha256": str(v_reference_dict_in.get("file_sha256", "")),
+                                "v_reference_built_ts": str(v_reference_dict_in.get("built_ts", "")),
+                                "live_trial_sharpe_variance": float(variance_dict["variance"]),
+                                "live_trial_sharpe_design_count": int(variance_dict["design_count"])}
+    return {**reference_field_dict, "pass_bool": bool(dsr_pass_bool and random_pass_bool), "design_count": design_count,
             "design_count_scope_str": "pilot_included",
             "current_design_count": int(count_dict["current_count"]),
             "pilot_design_count": int(count_dict["pilot_count"]),
             "quarter_count": int(len(excess_arr)), "quarter_excess_sharpe": sharpe_float,
             "quarter_excess_skew": skew_float, "quarter_excess_kurtosis": kurtosis_float,
-            "trial_sharpe_design_count": int(variance_dict["design_count"]),
+            "trial_sharpe_design_count": used_design_count_int,
             "deflated_sharpe_probability": float(dsr_dict["probability"]),
             "deflated_sharpe_min": float(config.RUNNER_DSR_MIN_PROBABILITY),
             "expected_max_sharpe": dsr_dict["expected_max_sharpe"], "trial_sharpe_variance": dsr_dict["variance_used"],

@@ -109,8 +109,12 @@ if __name__ == "__main__":
     design_id_str = os.path.basename(os.path.abspath(arg_dict.design))
     limit_ts = get_minute_bar_available_ts(ohlcv_array_dict["timestamp_index"][-1])
     data_context = get_runner_context(ohlcv_array_dict, source_frame_dict, limit_ts, declared_name_list)
+    # THE FROZEN V (R4d), READ BEFORE THE EVALUATION STARTS: A MISSING OR BROKEN REFERENCE STOPS HERE, BEFORE ANY BUDGET
+    from so.core.multiple_testing import read_v_reference_dict
+    v_reference_dict = read_v_reference_dict()
     result_dict = run_holdout_dict(design_module, design_id_str, ohlcv_array_dict, arg_dict.token_file,
-                                   data_context_in=data_context, design_folder_str_in=arg_dict.design)
+                                   data_context_in=data_context, design_folder_str_in=arg_dict.design,
+                                   v_reference_dict_in=v_reference_dict)
     row_dict = result_dict["ledger_row_dict"]
     # PRINT THE SUMMARY
     print(f"Evaluated {row_dict['design_id']} on {row_dict['window_id']}: status {row_dict['status']}")

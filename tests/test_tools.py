@@ -1212,6 +1212,13 @@ def test_queue_kill_switch():
         assert run_queue.watch_queue(path_dict, 0, 2, run_func, send_func, judge_func_in=lambda: FAKE_JUDGE_STR,
                                      git_func_in=fake_accepting_git_func, prepare_func_in=lambda job_in: FAKE_RUN_COMMIT_STR) == 0
         assert called_list == [] and run_queue.read_json(path_dict["state"])["stopped"] is True
+        # THE IDLE LOOP UNDER STOP WRITES NOTHING (R4d, 2026-11-12): A RESET MOVES state.json AND FOLDERS; THEY STAY GONE
+        import shutil as shutil_module
+        os.remove(path_dict["state"])
+        shutil_module.rmtree(path_dict["outbox"], ignore_errors=True)
+        run_queue.watch_queue(path_dict, 0, 2, run_func, send_func, judge_func_in=lambda: FAKE_JUDGE_STR,
+                              git_func_in=fake_accepting_git_func, prepare_func_in=lambda job_in: FAKE_RUN_COMMIT_STR)
+        assert not os.path.exists(path_dict["state"]) and not os.path.exists(path_dict["outbox"]) and called_list == []
         # REMOVED: THE INTERRUPTED JOB RESUMES FIRST, THEN THE PENDING ONE
         os.remove(flag_str)
         result_list = run_fake_queue_list(path_dict, run_func, send_func)
@@ -1234,7 +1241,7 @@ def test_queue_kill_switch():
         os.environ.pop("SO_STOP_FLAG_PATH", None)
     # THE DEFAULT PLACE IS <SO_DATA_PATH>/control/STOP
     assert run_queue.get_stop_flag_path_str() == os.path.join(os.environ["SO_DATA_PATH"], "control", "STOP")
-    passed("kill switch (no job starts or resumes while STOP exists, state says stopped, work resumes after removal, unreadable flag counts as set)")
+    passed("kill switch (no job starts or resumes while STOP exists, state says stopped, the idle loop writes nothing, work resumes after removal, unreadable flag counts as set)")
 
 
 # CLASS: A FAKE REGISTRY FOR THE WINDOWS UPDATE GUARD
@@ -1349,6 +1356,64 @@ def test_queue_windows_update_guard():
     passed("Windows Update guard (pause end, pending restart, unreadable or garbled values not safe; add refuses, the runner waits, the watch emails once per reason)")
 
 
+# FUNCTION: FREEZING THE REFERENCE V (R4d, 2026-11-12)
+def test_freeze_v_reference():
+    """
+    scripts/freeze_v_reference.py refuses without a confirmed kill switch, with a job running, or with SO_QUARANTINE_PATH
+    set; a dry run writes nothing; a write keeps the previous file beside it and logs every build; the file reads back.
+
+    Returns:
+        None
+    """
+    # A TRIAL LOG OF SIX DESIGNS, A KILL SWITCH AND A RUNNING FOLDER OF ITS OWN
+    import datetime as datetime_module
+    import pandas as pd
+    import freeze_v_reference
+    from so.core.multiple_testing import read_v_reference_dict
+    root_str = tempfile.mkdtemp(prefix="v_freeze_", dir=os.environ["SO_DATA_PATH"])
+    row_list = []
+    for idx in range(6):
+        for fold_id in range(5):
+            row_list.append({"trial_id": f"r_{idx}_{fold_id}", "logged_ts": "2026-11-11T01:00:00", "experiment": "expV",
+                             "stage": "validation", "fold_id": fold_id,
+                             "setting_json": json.dumps({"run_id": "run_a", "candidate": f"c{idx}"}),
+                             "metric_json": json.dumps({"excess_return": 0.001 * idx + 0.002 * ((fold_id * 7 + idx) % 5)})})
+    log_str = os.path.join(root_str, "trial_log.csv")
+    pd.DataFrame(row_list).to_csv(log_str, index=False)
+    flag_str = os.path.join(root_str, "control", "STOP")
+    running_str = os.path.join(root_str, "running")
+    os.makedirs(running_str)
+    path_dict = {"stop_flag": flag_str, "running": running_str}
+    reference_str = os.path.join(root_str, "judge", "v_reference.json")
+    def freeze(confirm_bool_in, environment_dict_in=None, now_in=None):
+        return freeze_v_reference.freeze_v_reference_dict(path_dict, confirm_bool_in, "test", log_str, reference_str,
+                                                          environment_dict_in if environment_dict_in is not None else {},
+                                                          now_in or datetime_module.datetime(2026, 11, 12, 17, 0, 0), "tester")
+    refused_dict = freeze(True)
+    assert "does not exist" in refused_dict["refused_str"] and not os.path.exists(reference_str)
+    assert refused_dict["reference_dict"]["design_count"] == 6
+    os.makedirs(os.path.dirname(flag_str))
+    Path(flag_str).write_text("stop", encoding="utf-8")
+    assert "SO_STOP_FLAG_PATH" in freeze(True, {"SO_STOP_FLAG_PATH": flag_str})["refused_str"]
+    assert "SO_QUARANTINE_PATH" in freeze(True, {"SO_QUARANTINE_PATH": "x"})["refused_str"]
+    Path(running_str, "job.json").write_text("{}", encoding="utf-8")
+    assert "a job is running" in freeze(True)["refused_str"] and not os.path.exists(reference_str)
+    os.remove(os.path.join(running_str, "job.json"))
+    dry_dict = freeze(False)
+    assert dry_dict["refused_str"] == "" and not dry_dict["done_bool"] and not os.path.exists(reference_str)
+    first_dict = freeze(True)
+    assert first_dict["done_bool"] and first_dict["replaced_path_str"] == ""
+    assert read_v_reference_dict(reference_str)["content_sha256"] == first_dict["reference_dict"]["content_sha256"]
+    second_dict = freeze(True, now_in=datetime_module.datetime(2026, 11, 13, 9, 30, 0))
+    assert second_dict["done_bool"] and os.path.basename(second_dict["replaced_path_str"]) == "v_reference_20261112T170000.json"
+    assert read_v_reference_dict(reference_str)["built_ts"] == "2026-11-13T09:30:00"
+    assert read_v_reference_dict(second_dict["replaced_path_str"])["built_ts"] == "2026-11-12T17:00:00"
+    log_pdf = pd.read_csv(os.path.join(root_str, "judge", freeze_v_reference.V_REFERENCE_LOG_NAME_STR), dtype=str)
+    assert len(log_pdf) == 2 and list(log_pdf["replaced_file"].fillna("")) == ["", "v_reference_20261112T170000.json"]
+    passed("freeze V reference (refused without a confirmed STOP, with a job running or a quarantine variable; dry run "
+           "writes nothing; a write keeps the previous file and logs each build)")
+
+
 # FUNCTION: THE WATCH WRITES ITS OWN LOG (ROADMAP R7, 2026-11-05)
 def test_watch_log():
     """
@@ -1455,7 +1520,36 @@ def test_check_equivalence():
     same_n_dict = copy.deepcopy(same_dict)
     same_n_dict["multiple_testing_dict"]["deflated_sharpe_probability"] = 0.39
     assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("same_n", same_n_dict, [1.0, 0.0]))["equivalent_bool"]
-    passed("equivalence check (identities ignored, any scoring number, decision or candidate difference fails, N changes explained)")
+    # A V INPUT CHANGED (R4d; THE 2026-11-12 CASE: THE SAME N, MORE DESIGNS BEHIND V): ITS DEPENDENT FIELDS ARE EXPLAINED
+    # BY V AND NAME THE INPUT; THE TRIAL LOG'S OWN COUNT IS INFORMATION; A RANDOM-TIMING CHANGE STAYS UNEXPLAINED
+    v_base_dict = copy.deepcopy(report_dict)
+    v_base_dict["multiple_testing_dict"].update({"trial_sharpe_design_count": 18, "current_design_count": 18,
+                                                 "trial_sharpe_variance": 0.0117, "trial_sharpe_variance_source_str": "trial_log",
+                                                 "dsr_pass_bool": False, "random_timing_p": 0.0045})
+    v_baseline_str = make_run_str("v_base", v_base_dict, [1.0, 0.0])
+    v_new_dict = copy.deepcopy(v_base_dict)
+    v_new_dict.update({"run_id_str": "exp_a_3", "commit_str": "f" * 40})
+    v_new_dict["multiple_testing_dict"].update({"trial_sharpe_design_count": 80, "current_design_count": 80,
+                                                "trial_sharpe_variance": 0.0132, "deflated_sharpe_probability": 0.40})
+    v_outcome_dict = check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_new", v_new_dict, [1.0, 0.0]))
+    assert v_outcome_dict["equivalent_bool"], v_outcome_dict
+    assert v_outcome_dict["v_input_list"] == ["trial_sharpe_design_count: 18 -> 80"]
+    assert len(v_outcome_dict["v_difference_list"]) == 3 and len(v_outcome_dict["information_difference_list"]) == 1
+    graded_dict = copy.deepcopy(v_new_dict)
+    graded_dict["grade_dict"]["grade_str"] = "Could be luck"
+    assert not check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_grade", graded_dict, [1.0, 0.0]))["equivalent_bool"]
+    graded_dict["multiple_testing_dict"]["dsr_pass_bool"] = True
+    assert check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_pass", graded_dict, [1.0, 0.0]))["equivalent_bool"]
+    random_dict = copy.deepcopy(v_new_dict)
+    random_dict["multiple_testing_dict"]["random_timing_p"] = 0.0046
+    random_outcome_dict = check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_random", random_dict, [1.0, 0.0]))
+    assert not random_outcome_dict["equivalent_bool"]
+    assert random_outcome_dict["scoring_difference_list"] == ["multiple_testing_dict.random_timing_p: 0.0045 -> 0.0046"]
+    no_input_dict = copy.deepcopy(v_base_dict)
+    no_input_dict["multiple_testing_dict"]["trial_sharpe_variance"] = 0.0132
+    assert not check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_none", no_input_dict, [1.0, 0.0]))["equivalent_bool"]
+    passed("equivalence check (identities ignored, any scoring number, decision or candidate difference fails, N changes "
+           "explained; V changes explained only with a changed V input, named; the trial log's own count is information)")
 
 
 # RUN THE SUITE
@@ -1473,6 +1567,7 @@ if __name__ == "__main__":
     test_run_email_content()
     test_queue_kill_switch()
     test_queue_windows_update_guard()
+    test_freeze_v_reference()
     test_every_python_file_compiles()
     test_queue_timeout_kills_tree()
     test_queue_worktree_and_results_rows()

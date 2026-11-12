@@ -159,6 +159,9 @@ rule, revision policy). The availability clock is what keeps a rule from seeing 
 
 Data we already have: SPY 1-minute bars from 2005, VIX and VIX3M (1-minute and daily; VIX3M starts later), the daily
 feature set `TSDAY`. Ideas I1-I3, V1, X1, R1, R2, C2, C4, C5 need nothing new.
+Note 2026-11-12: since R4c (merged 2026-11-11) the runner can express I1 and I2: a daily fractional design declares
+`INTRADAY_DECISION_TIME_LIST` (e.g. `["15:30"]`) and decides at those times as well (`docs/RUNNER_DESIGN.md`,
+"Intraday decision times"). Before R4c neither could be run as written.
 
 ---
 
