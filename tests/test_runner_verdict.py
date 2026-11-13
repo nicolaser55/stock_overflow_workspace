@@ -843,6 +843,109 @@ def test_trailing_baselines_use_realized_position():
     passed(f"trailing-stop baselines use the realized position ({held_arr.mean():.0%} in position) and keep its time in the market")
 
 
+# FUNCTION: A SYNTHETIC TRIAL LOG FOR THE V TESTS
+def write_v_trial_log_str(file_name_str_in, design_value_dict_in):
+    """
+    Args:
+        file_name_str_in (str): File name under the temporary root
+        design_value_dict_in (dict): (candidate, run id, logged_ts) -> list of quarterly excess returns
+
+    Returns:
+        str: CSV path
+    """
+    # ONE VALIDATION ROW PER QUARTER
+    row_list = []
+    for (candidate_str, run_id_str, logged_str), value_list in design_value_dict_in.items():
+        for fold_id, value_float in enumerate(value_list):
+            row_list.append({"trial_id": f"{run_id_str}_{candidate_str}_{fold_id}", "logged_ts": logged_str,
+                             "experiment": "expV", "stage": "validation", "fold_id": fold_id,
+                             "setting_json": json.dumps({"run_id": run_id_str, "candidate": candidate_str, "commit": "x"}),
+                             "metric_json": json.dumps({"excess_return": float(value_float)})})
+    path_str = os.path.join(TEMP_ROOT_STR, file_name_str_in)
+    pd.DataFrame(row_list).to_csv(path_str, index=False)
+    return path_str
+
+
+# FUNCTION: THE FROZEN REFERENCE V (R4d, 2026-11-12)
+def test_v_reference():
+    """
+    The live spread keeps each design's latest run only (a rerun of the same quarters does not count twice; a newer
+    run replaces an older one). The reference is built from it, carries its own content hash, and a missing, edited or
+    too small reference is refused. The verdict with a reference uses its variance, labels it, and reports the live
+    spread beside it; without one it is the live spread as before.
+
+    Returns:
+        None
+    """
+    # SIX DESIGNS OF FIVE QUARTERS; c0 RERUN WITH THE SAME QUARTERS, c1 RERUN WITH OTHER ONES
+    from so.core.multiple_testing import (get_trial_sharpe_variance_dict, build_v_reference_dict, read_v_reference_dict,
+                                          VReferenceError, get_sharpe_float, V_SOURCE_REFERENCE_STR)
+    rng = np.random.default_rng(7)
+    base_dict = {f"c{idx}": list(rng.normal(0.005 * idx, 0.02, 5)) for idx in range(6)}
+    value_dict = {(candidate_str, "run_a", "2026-11-11T01:00:00"): value_list for candidate_str, value_list in base_dict.items()}
+    value_dict[("c0", "run_b", "2026-11-12T01:00:00")] = list(base_dict["c0"])
+    rerun_list = list(rng.normal(0.03, 0.02, 5))
+    value_dict[("c1", "run_c", "2026-11-12T02:00:00")] = rerun_list
+    log_str = write_v_trial_log_str("v_trial_log.csv", value_dict)
+    variance_dict = get_trial_sharpe_variance_dict(log_str)
+    expected_list = [get_sharpe_float(base_dict[f"c{idx}"]) for idx in range(6)]
+    expected_list[1] = get_sharpe_float(rerun_list)
+    assert variance_dict["design_count"] == 6 and variance_dict["quarter_count_list"] == [5] * 6
+    assert abs(variance_dict["variance"] - float(np.var(expected_list, ddof=1))) < 1e-12
+    assert variance_dict["run_id_list"] == ["run_a", "run_b", "run_c"]
+    # THE REFERENCE: BUILT, WRITTEN, READ BACK; EDITED, MISSING OR TOO SMALL IS REFUSED
+    import datetime as datetime_module
+    reference_dict = build_v_reference_dict(log_str, "tester", "test", datetime_module.datetime(2026, 11, 12, 17, 0, 0))
+    assert reference_dict["variance"] == variance_dict["variance"] and reference_dict["design_count"] == 6
+    assert reference_dict["built_ts"] == "2026-11-12T17:00:00" and len(reference_dict["content_sha256"]) == 64
+    reference_path_str = os.path.join(TEMP_ROOT_STR, "v_reference_test.json")
+    with open(reference_path_str, "w", encoding="utf-8") as json_file:
+        json.dump(reference_dict, json_file)
+    read_dict = read_v_reference_dict(reference_path_str)
+    assert read_dict["variance"] == reference_dict["variance"] and len(read_dict["file_sha256"]) == 64
+    def expect_reference_error(func_in, text_str_in):
+        try:
+            func_in()
+        except VReferenceError as error:
+            assert text_str_in in str(error), str(error)
+            return
+        raise AssertionError(f"not refused: {text_str_in}")
+    edited_path_str = os.path.join(TEMP_ROOT_STR, "v_reference_edited.json")
+    with open(edited_path_str, "w", encoding="utf-8") as json_file:
+        json.dump({**reference_dict, "variance": reference_dict["variance"] * 2}, json_file)
+    expect_reference_error(lambda: read_v_reference_dict(edited_path_str), "content hash")
+    expect_reference_error(lambda: read_v_reference_dict(os.path.join(TEMP_ROOT_STR, "no_such_reference.json")), "no V reference")
+    small_str = write_v_trial_log_str("v_small_log.csv", {(f"c{idx}", "run_a", "2026-11-11T01:00:00"): base_dict[f"c{idx}"] for idx in range(4)})
+    expect_reference_error(lambda: build_v_reference_dict(small_str, "tester"), "gives no spread")
+    short_str = write_v_trial_log_str("v_short_log.csv", {(f"c{idx}", "run_a", "2026-11-11T01:00:00"): base_dict[f"c{idx}"][:3] for idx in range(6)})
+    expect_reference_error(lambda: build_v_reference_dict(short_str, "tester"), "gives no spread")
+    # THE VERDICT: THE REFERENCE'S VARIANCE, LABELLED, THE LIVE SPREAD BESIDE IT; WITHOUT IT THE LIVE SPREAD AS BEFORE
+    strategy_pdf = get_month_return_pdf("2010-01-01", [0.012, 0.006] * 24)
+    buy_hold_pdf = get_month_return_pdf("2010-01-01", [0.0] * 48)
+    easy_baseline_dict = get_hand_baseline_dict(-0.5, -0.5, 100)
+    other_reference_dict = {**read_dict, "variance": 0.0123, "design_count": 80}
+    used_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR,
+                                        trial_log_path_str_in=log_str, legacy_path_list_in=[],
+                                        v_reference_dict_in=other_reference_dict)["multiple_testing_dict"]
+    assert used_dict["trial_sharpe_variance_source_str"] == V_SOURCE_REFERENCE_STR
+    assert used_dict["trial_sharpe_variance"] == 0.0123 and used_dict["trial_sharpe_design_count"] == 80
+    assert used_dict["live_trial_sharpe_variance"] == variance_dict["variance"] and used_dict["live_trial_sharpe_design_count"] == 6
+    assert used_dict["v_reference_sha256"] == read_dict["file_sha256"] and used_dict["design_count"] == 6
+    live_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR,
+                                        trial_log_path_str_in=log_str, legacy_path_list_in=[])["multiple_testing_dict"]
+    assert live_dict["trial_sharpe_variance_source_str"] == "trial_log" and "v_reference_sha256" not in live_dict
+    assert live_dict["trial_sharpe_variance"] == variance_dict["variance"]
+    assert used_dict["expected_max_sharpe"] != live_dict["expected_max_sharpe"]
+    try:
+        get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR, trial_log_path_str_in=log_str,
+                                legacy_path_list_in=[], v_reference_dict_in={**other_reference_dict, "variance": float("nan")})
+        raise AssertionError("a reference without a finite variance was used")
+    except VReferenceError:
+        pass
+    passed("frozen V: latest run per design (reruns not counted twice), reference built and read back, edited / missing / "
+           "too small refused, the verdict uses and labels it, the live spread reported beside it")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
@@ -852,6 +955,7 @@ if __name__ == "__main__":
         test_baseline_verdict_parts()
         test_email_worthy_needs_every_part()
         test_multiple_testing_parts()
+        test_v_reference()
         test_random_timing_tail_count()
         test_baselines_reproducible_and_constant_one_equals_buy_hold()
         test_random_timing_preserves_time_two_three_four_weights()

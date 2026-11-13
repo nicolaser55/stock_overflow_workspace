@@ -198,6 +198,22 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   trial log's own count. From 2026-11-03 to 2026-11-10 N was the trial log only and the pilot-included part was a
   reported view; the change revisits that rule after the baseline, in the stricter direction, with no verdict depending
   on it. A reset keeps N; a rerun of an unchanged design adds nothing; N still grows as new designs are logged.
+  **The frozen V (R4d, decided 2026-11-12):** V, the variance of the per-design Sharpe ratios of quarterly
+  validation excess returns, sets the expected maximum Sharpe of the deflated test. Read live, it depended on the
+  order the queue ran designs in, and reruns counted twice, so rerunning the same nine designs in another order
+  changed every verdict's V. Now (1) the live V keeps only each design's latest run; (2) on the real development view
+  the verdict uses a frozen reference, `<SO_DATA_PATH>/store04_experiments/judge/v_reference.json` (schema, variance,
+  design count, the experiments and runs it came from, the trial log's SHA-256 and row count, built time and
+  account, a content hash), and refuses to run when the file is missing, edited, unreadable or below
+  `MT_MIN_DESIGN_COUNT` designs; synthetic test views keep the live V. Only Nicolas builds it, with
+  `scripts/freeze_v_reference.py` (dry run; `--confirm --note`), which refuses unless the kill switch is confirmed,
+  no job is running and the quarantine root is not set (`so.paths.check_quarantine_refused`); it keeps the previous file as `v_reference_<built time>.json`
+  and appends every build to `judge/v_reference_log.csv`. In stage 1 it is built only at a reset, under STOP and
+  just before `reset_records.py`, from the trial log about to be moved (each design's latest run); the reset leaves
+  it in place, so the rerun that follows uses the same V throughout. From R6, rebuilds at milestones Nicolas sets. The report gives the source (`"reference"`), the reference's hash and built time, and the
+  live V and design count next to it. `holdout_evaluate.py` passes the same reference. A reset does not move
+  `judge/`. Limitation: the reference is a judgement frozen at one moment; designs added later do not change V until
+  the next rebuild, by design.
   **The random-timing
   p-value is counted, not fitted (R3, 2026-11-02):** p = (k + 1) / (M + 1), k = draws at or above the path; the runner
   extends the 100 registered draws (same seed sequence, same code, 4 worker processes, batches of 1,000) up to the
@@ -260,7 +276,13 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   multiple-testing result with the pilot designs included (R4), judge hash, commits, paths; "PASS, audit pending" when
   every part passed), one per failed, timed-out or abandoned job, none for a rejected job. **Kill switch (A3):** while
   `<SO_DATA_PATH>/control/STOP` exists (or the file named by `SO_STOP_FLAG_PATH`) the runner starts and resumes
-  nothing; a running job finishes; `state.json` shows `"stopped"`; an unreadable flag counts as set. `scripts/deploy_runner.ps1` (the deploy button) moves the runner clone (the
+  nothing; a running job finishes; an unreadable flag counts as set. While STOP is set the idle loop writes nothing
+  (R4d, 2026-11-12): no `state.json`, no recreated queue folders, so a reset under STOP stays clean; `state.json`
+  keeps the last value written before STOP (or is absent after a reset), and `run_queue.py status` adds
+  `stopped_now`, the live flag. A deploy right after a reset under STOP therefore finds no `state.json`; read the
+  queue folders instead. **Words:** `run_index.csv` and `queue/done/` say `"done"`, and the files agents read
+  (`visible/state.json`, `visible/status/`) say `"ran"` (`run_queue.TECHNICAL_STATUS_DICT`), for the same thing: the job ran to the end and produced a verdict (positive or negative); a job in
+  `queue/failed/` did not produce one. Both words stay (written records are not rewritten). `scripts/deploy_runner.ps1` (the deploy button) moves the runner clone (the
   queue script itself) to `origin/main`, sets `refs/deployed` to that commit with a reflog entry (time and account;
   `git reflog refs/deployed`), and restarts the task when no job is running. PowerShell reads a script before running
   it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). A job whose commit holds core changes

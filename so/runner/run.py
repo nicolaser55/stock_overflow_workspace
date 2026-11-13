@@ -37,7 +37,7 @@ from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str,
                                   write_score_row_list, read_score_row_list, write_done_marker, get_done_bool,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict, get_random_timing_tail_dict
-from so.core.multiple_testing import get_tried_design_count_dict
+from so.core.multiple_testing import get_tried_design_count_dict, read_v_reference_dict
 from so.runner.preregistration import check_preregistration_dict, get_design_helper_dict
 from so.runner.judge_identity import get_judge_hash_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
@@ -732,7 +732,7 @@ def run_candidate_streams_dict(design_module_in, ohlcv_array_dict_in, period_pdf
 def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_in, prior_only_dict_in, date1_in,
                              date2_in, baseline_seed_count_int_in=None, look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR,
                              run_lookahead_bool_in=True, extra_report_dict_in=None, extra_manifest_dict_in=None,
-                             write_files_bool_in=True):
+                             write_files_bool_in=True, v_reference_dict_in=None):
     """
     The shared tail of a development run and a holdout run. Look-ahead re-runs the full stream (stream_dict_in
     dates). Baselines and the verdict use prior_only_dict_in over date1_in..date2_in (the reported span).
@@ -749,6 +749,7 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
         extra_report_dict_in, extra_manifest_dict_in (dict | None): Fields folded into the report and the manifest
         write_files_bool_in (bool): Write report.json, report.md and the manifest. Holdout leaves this False
             until the ledger row and the stage-test trial are appended.
+        v_reference_dict_in (dict | None): The frozen V the verdict uses (R4d); None = the live spread
 
     Returns:
         dict: baseline_dict, verdict_dict, report_dict, manifest_dict, lookahead_dict
@@ -786,7 +787,8 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
     buy_hold_return_pdf = get_equity_daily_return_pdf(baseline_dict["buy_hold_daily_equity_pdf"])
     verdict_dict = get_runner_verdict_dict(strategy_return_pdf, buy_hold_return_pdf, baseline_dict,
                                            look_ahead_status_str_in=look_ahead_status_str,
-                                           trial_log_path_str_in=stream_dict_in.get("trial_log_path_str"))
+                                           trial_log_path_str_in=stream_dict_in.get("trial_log_path_str"),
+                                           v_reference_dict_in=v_reference_dict_in)
     if lookahead_dict is not None:
         verdict_dict["look_ahead_dict"]["cut_date_list"] = list(lookahead_dict["cut_date_list"])
         verdict_dict["look_ahead_dict"]["first_fail_dict"] = lookahead_dict.get("first_fail_dict")
@@ -921,7 +923,7 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
                          crash_after_period_id_in=None, code_hash_str_in=None, check_clean_tree_bool_in=True,
                          check_view_bool_in=True, baseline_seed_count_int_in=None,
                          look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, run_lookahead_bool_in=True,
-                         note_str_in=""):
+                         note_str_in="", v_reference_dict_in=None):
     """
     Development view. Refuses the quarantine root. Forms periods from PERIOD_RULE unless period_pdf_in is passed
     (tests). Streams each candidate, logs each candidate-period as it is scored, then builds the prior-only path
@@ -942,6 +944,8 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         code_hash_str_in (str | None): Injected code hash (None = hash of the code this run uses)
         check_clean_tree_bool_in (bool): Refuse uncommitted changes in the code this run uses
         check_view_bool_in (bool): Call check_development_view (tests that inject periods may pass False)
+        v_reference_dict_in (dict | None): The frozen V (R4d). None: read from the data root when check_view_bool_in
+            (a missing reference stops the run), else the live spread (synthetic tests)
         baseline_seed_count_int_in (int | None): Random-timing draws (None = RUNNER_RANDOM_TIMING_SEED_COUNT)
         look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
         run_lookahead_bool_in (bool): Run the automatic look-ahead check (default True)
@@ -955,6 +959,11 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
     check_quarantine_refused()
     if check_view_bool_in:
         check_development_view()
+    # THE FROZEN V (R4d): A RUN ON THE REAL DEVELOPMENT VIEW NEEDS IT, READ ONCE BEFORE ANY STREAM (FAILS CLOSED);
+    # SYNTHETIC TESTS (check_view_bool_in False) USE THE LIVE SPREAD UNLESS THEY PASS ONE
+    v_reference_dict = v_reference_dict_in
+    if v_reference_dict is None and check_view_bool_in:
+        v_reference_dict = read_v_reference_dict()
     period_pdf = period_pdf_in
     if period_pdf is None:
         period_pdf, _fold_pdf = get_development_run_period_pdf(design_module_in, ohlcv_array_dict_in["session_date_list"])
@@ -969,7 +978,8 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         stream_dict["date2"], baseline_seed_count_int_in=baseline_seed_count_int_in,
         look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in,
         extra_report_dict_in={"cost_sensitivity_list": cost_sensitivity_list,
-                              "preregistration_dict": stream_dict.get("preregistration_dict")})
+                              "preregistration_dict": stream_dict.get("preregistration_dict")},
+        v_reference_dict_in=v_reference_dict)
     # THE MANIFEST EXISTS: THE PICKLES AND CHECKPOINTS ARE NO LONGER NEEDED (AUDIT S11)
     finish_dict["pruned_bytes"] = prune_finished_run_folder(stream_dict["run_folder_str"])
     return {**stream_dict, **finish_dict}
@@ -1095,7 +1105,7 @@ def run_holdout_dict(design_module_in, design_id_str_in, ohlcv_array_dict_in, to
                      ledger_path_str_in=None, trial_log_path_str_in=None, period_pdf_in=None, run_id_str_in=None,
                      n_jobs_int_in=None, commit_str_in=None, code_hash_str_in=None, check_clean_tree_bool_in=False,
                      baseline_seed_count_int_in=None, look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR,
-                     run_lookahead_bool_in=True):
+                     run_lookahead_bool_in=True, v_reference_dict_in=None):
     """
     Nicolas only. Same stream, selection, baseline, verdict and look-ahead as run_development_dict, with the
     quarantine root and the evaluation token. Periods are get_holdout_period_pdf unless period_pdf_in is passed
@@ -1123,6 +1133,7 @@ def run_holdout_dict(design_module_in, design_id_str_in, ohlcv_array_dict_in, to
         baseline_seed_count_int_in (int | None): Random-timing draws
         look_ahead_status_str_in (str): Used only when run_lookahead_bool_in is False
         run_lookahead_bool_in (bool): Run the automatic look-ahead check
+        v_reference_dict_in (dict | None): The frozen V (R4d; scripts/holdout_evaluate.py passes it); None = live spread
 
     Returns:
         dict: The stream result, the reported path, the verdict, the ledger row and the unread dict
@@ -1197,7 +1208,7 @@ def run_holdout_dict(design_module_in, design_id_str_in, ohlcv_array_dict_in, to
                                   "window_id": window_dict["window_id"], "unread_dict": unread_display_dict,
                                   "report_session_date_list": [str(session_date) for session_date in reported_path_dict["decision_session_list"]]},
             extra_manifest_dict_in={"window_id": window_dict["window_id"], "quarantine_stamp": quarantine_stamp_dict},
-            write_files_bool_in=False)
+            write_files_bool_in=False, v_reference_dict_in=v_reference_dict_in)
     finally:
         set_runs_root_str(None)
     look_ahead_status_str = finish_dict["verdict_dict"]["look_ahead_dict"]["status_str"]

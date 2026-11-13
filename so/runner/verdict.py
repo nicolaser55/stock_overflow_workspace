@@ -266,7 +266,7 @@ def get_look_ahead_verdict_dict(status_str_in=LOOK_AHEAD_PENDING_STR):
 # FUNCTION: THE SHARED VERDICT ON THE PRIOR-ONLY PATH
 def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, baseline_dict_in,
                             look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, trial_log_path_str_in=None,
-                            legacy_path_list_in=None):
+                            legacy_path_list_in=None, v_reference_dict_in=None):
     """
     One decision rule. email-worthy only if return, consistency, baselines and look-ahead all pass.
 
@@ -276,6 +276,8 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
         look_ahead_status_str_in (str): pending, pass, or fail
         trial_log_path_str_in (str | None): Trial log that counts the designs tried (None = the shared log)
         legacy_path_list_in (list[str] | None): Pre-reset records (None = records/legacy)
+        v_reference_dict_in (dict | None): The frozen V (so.core.multiple_testing.read_v_reference_dict; R4d);
+            None = the live spread (synthetic tests)
 
     Returns:
         dict: parts, failed_list, email_worthy_bool, label_str, success_dict
@@ -289,7 +291,7 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
     multiple_testing_dict = get_multiple_testing_verdict_dict(
         strategy_return_pdf_in, buy_hold_return_pdf_in, return_dict["strategy_total_return"],
         list(baseline_dict_in.get("random_timing_return_list") or []), trial_log_path_str_in, legacy_path_list_in,
-        random_timing_tail_dict_in=baseline_dict_in.get("random_timing_tail_dict"))
+        random_timing_tail_dict_in=baseline_dict_in.get("random_timing_tail_dict"), v_reference_dict_in=v_reference_dict_in)
     failed_list = []
     if not return_dict["pass_bool"]:
         failed_list.append("return")

@@ -43,6 +43,16 @@ IGNORED_KEY_PATTERN = re.compile(r"(^|_)(run_id|commit|hash|judge|path|folder|ts
 N_DEPENDENT_KEY_LIST = ["multiple_testing_dict", "grade_dict", "failed_list", "label_str", "email_worthy_bool"]
 # CANDIDATE FILES COMPARED
 CANDIDATE_FILE_LIST = ["decisions.pkl", "scores.pkl"]
+# THE INPUTS OF V (R4d, 2026-11-12): WHEN ONE DIFFERS, THE VALUES BUILT ON V ARE "EXPLAINED BY V" (EACH LINE NAMES THE INPUT)
+V_INPUT_FIELD_LIST = ["trial_sharpe_variance_source_str", "v_reference_sha256", "trial_sharpe_design_count"]
+# multiple_testing_dict FIELDS THAT FOLLOW V (AND NOT N): THE SPREAD, THE BAR IT SETS, THE DEFLATED SHARPE AND ITS PASS
+V_DEPENDENT_FIELD_LIST = ["trial_sharpe_variance", "trial_sharpe_variance_source_str", "trial_sharpe_design_count",
+                          "v_reference_sha256", "expected_max_sharpe", "deflated_sharpe_probability", "dsr_pass_bool",
+                          "pass_bool", "live_trial_sharpe_variance", "live_trial_sharpe_design_count"]
+# TOP-LEVEL VALUES THAT FOLLOW THE MULTIPLE-TESTING PASS (EXPLAINED BY V ONLY WHEN dsr_pass_bool ITSELF CHANGED)
+V_PASS_DEPENDENT_KEY_LIST = ["grade_dict", "failed_list", "label_str", "email_worthy_bool"]
+# REPORTED FOR INFORMATION ONLY (THE VERDICT DOES NOT USE IT): THE TRIAL LOG'S OWN DESIGN COUNT
+INFORMATION_FIELD_LIST = ["current_design_count"]
 
 
 # FUNCTION: THE DIFFERENCES BETWEEN TWO JSON VALUES
@@ -148,7 +158,9 @@ def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
 
     Returns:
         dict: equivalent_bool, scoring_difference_list, n_difference_list (explained by N), n_pair (baseline N, new N),
-            candidate_difference_list, same_experiment_bool
+            v_difference_list (explained by V), v_input_list (the V inputs that differ, "field: a -> b"),
+            information_difference_list (reported only, not used by the verdict), candidate_difference_list,
+            same_experiment_bool
     """
     # THE REPORTS; THE N-DEPENDENT PART APART
     baseline_report_dict = read_json(os.path.join(baseline_folder_str_in, "report.json"))
@@ -159,13 +171,35 @@ def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
     n_changed_bool = baseline_n != new_n
     n_difference_list = [line_str for line_str in difference_list
                          if n_changed_bool and re.split(r"[.\[:]", line_str, maxsplit=1)[0] in N_DEPENDENT_KEY_LIST]
-    scoring_difference_list = [line_str for line_str in difference_list if line_str not in n_difference_list]
+    # V (R4d): WHEN AN INPUT OF V DIFFERS, ITS DEPENDENT FIELDS ARE EXPLAINED BY V; THE TOP-LEVEL PASS-DEPENDENT VALUES
+    # ONLY WHEN THE DEFLATED-SHARPE PASS ITSELF CHANGED
+    baseline_mt_dict = baseline_report_dict.get("multiple_testing_dict") or {}
+    new_mt_dict = new_report_dict.get("multiple_testing_dict") or {}
+    v_input_list = [f"{field_str}: {baseline_mt_dict.get(field_str)!r} -> {new_mt_dict.get(field_str)!r}"
+                    for field_str in V_INPUT_FIELD_LIST if baseline_mt_dict.get(field_str) != new_mt_dict.get(field_str)]
+    dsr_changed_bool = baseline_mt_dict.get("dsr_pass_bool") != new_mt_dict.get("dsr_pass_bool")
+    remaining_list = [line_str for line_str in difference_list if line_str not in n_difference_list]
+    v_difference_list, information_difference_list = [], []
+    for line_str in remaining_list:
+        part_list = re.split(r"[.\[:]", line_str, maxsplit=2)
+        top_str = part_list[0]
+        field_str = part_list[1] if top_str == "multiple_testing_dict" and len(part_list) > 1 else ""
+        if field_str in INFORMATION_FIELD_LIST:
+            information_difference_list.append(line_str)
+        elif v_input_list and field_str in V_DEPENDENT_FIELD_LIST:
+            v_difference_list.append(line_str)
+        elif v_input_list and dsr_changed_bool and top_str in V_PASS_DEPENDENT_KEY_LIST:
+            v_difference_list.append(line_str)
+    scoring_difference_list = [line_str for line_str in remaining_list
+                               if line_str not in v_difference_list and line_str not in information_difference_list]
     candidate_difference_list = get_candidate_difference_list(baseline_folder_str_in, new_folder_str_in)
     same_experiment_bool = (baseline_report_dict.get("experiment_name_str") == new_report_dict.get("experiment_name_str")
                             and baseline_report_dict.get("protocol_version_str") == new_report_dict.get("protocol_version_str"))
     return {"equivalent_bool": bool(same_experiment_bool and not scoring_difference_list and not candidate_difference_list),
             "scoring_difference_list": scoring_difference_list, "n_difference_list": n_difference_list,
-            "n_pair": (baseline_n, new_n), "candidate_difference_list": candidate_difference_list,
+            "n_pair": (baseline_n, new_n), "v_difference_list": v_difference_list, "v_input_list": v_input_list,
+            "information_difference_list": information_difference_list,
+            "candidate_difference_list": candidate_difference_list,
             "same_experiment_bool": same_experiment_bool}
 
 
@@ -186,6 +220,12 @@ if __name__ == "__main__":
         print(f"DIFFERENT  {line_str}")
     for line_str in outcome_dict["n_difference_list"]:
         print(f"explained by N {outcome_dict['n_pair'][0]} -> {outcome_dict['n_pair'][1]}:  {line_str}")
+    for line_str in outcome_dict["v_input_list"]:
+        print(f"V input differs:  {line_str}")
+    for line_str in outcome_dict["v_difference_list"]:
+        print(f"explained by V:  {line_str}")
+    for line_str in outcome_dict["information_difference_list"]:
+        print(f"information only (not used by the verdict):  {line_str}")
     print("EQUIVALENT: every scoring number and every candidate file is identical" if outcome_dict["equivalent_bool"]
           else "NOT EQUIVALENT: a full rerun is needed (design 4.4)")
     sys.exit(0 if outcome_dict["equivalent_bool"] else 1)

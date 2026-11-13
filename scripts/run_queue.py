@@ -2063,9 +2063,11 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
                 guard_reason_sent_str = None
                 job_count_int += len(run_queue_list(path_dict_in, run_func_in, send_func_in, judge_func_in=judge_func_in,
                                                     git_func_in=git_func_in, prepare_func_in=prepare_func_in))
-            else:
+            elif not get_stop_flag_bool(path_dict_in):
                 make_runner_folder_list(path_dict_in)
                 write_state_dict(path_dict_in, None)
+            # STOP SET (R4d, 2026-11-12): THE IDLE LOOP WRITES NOTHING (NO FOLDERS, NO state.json), SO A RESET OR A FREEZE
+            # NEEDS NO TASK STOP; `run_queue.py status` READS THE FLAG ITSELF
         except Exception as error:
             print(f"warning: watch loop failed ({type(error).__name__}: {error}); retrying after the pause", flush=True)
         loop_count_int += 1
@@ -2167,7 +2169,8 @@ if __name__ == "__main__":
     sub_parser.add_parser("run", help="Run every pending job, then exit (runner account)")
     watch_parser = sub_parser.add_parser("watch", help="Run jobs as they arrive (runner account)")
     watch_parser.add_argument("--interval", type=float, default=DEFAULT_WATCH_INTERVAL_SECONDS, help="Seconds between looks")
-    sub_parser.add_parser("status", help="Print state.json")
+    sub_parser.add_parser("status", help="Print state.json, plus stopped_now (the kill switch read now). A finished "
+                                         "run is 'done' in run_index.csv and 'ran' in state.json's recent list")
     sub_parser.add_parser("test-email", help="Send one test email with this account's SMTP settings (runner account)")
     arg_dict = parser.parse_args()
     path_dict = get_queue_path_dict()
@@ -2190,7 +2193,10 @@ if __name__ == "__main__":
         print(json.dumps(send_email_dict(path_dict, f"test_email_{stamp_str}", "Stock Overflow: test email",
                                          f"The queue on {socket.gethostname()} can send email. Sent {stamp_str}.\n"), indent=2))
     else:
+        # THE KILL SWITCH IS READ NOW: WITH STOP SET THE IDLE RUNNER NO LONGER REWRITES state.json (R4d)
         if os.path.isfile(path_dict["state"]):
-            print(json.dumps(read_json(path_dict["state"]), indent=2))
+            status_dict = read_json(path_dict["state"])
         else:
-            print(json.dumps({"running": None, "pending_count": len(get_pending_job_list(path_dict)), "recent": []}, indent=2))
+            status_dict = {"running": None, "pending_count": len(get_pending_job_list(path_dict)), "recent": []}
+        status_dict["stopped_now"] = get_stop_flag_bool(path_dict)
+        print(json.dumps(status_dict, indent=2))

@@ -50,6 +50,8 @@ _DATA_PATH_SUFFIX_DICT = {
     "LOCAL_TSDAY_DATA_FILE_PATH_STR": "store02_workzone/step06_TSDAY_data/",
     # THE SHARED TRIAL LOG
     "LOCAL_TRIAL_LOG_FILE_PATH_STR": "store04_experiments/trial_log.csv",
+    # THE FROZEN SPREAD OF TRIAL SHARPE RATIOS (V) THE VERDICT USES (R4d, 2026-11-12; BUILT BY scripts/freeze_v_reference.py)
+    "LOCAL_V_REFERENCE_FILE_PATH_STR": "store04_experiments/judge/v_reference.json",
 }
 
 # DEFINE THE WORKSPACE ROOT (records/ IS VERSIONED IN GIT; IT IS NOT IN THE DATA FOLDER)

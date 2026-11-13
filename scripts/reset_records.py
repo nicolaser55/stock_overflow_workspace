@@ -50,9 +50,10 @@ script discards the results and keeps the count:
     6. appends a dated "withdrawn" note row to docs/RESULTS_LOG.md (the log stays append-only).
 
 Create the kill switch first (New-Item <SO_DATA_PATH>\\control\\STOP) and stop the scheduled task "SO queue runner"
-(Stop-ScheduledTask, in an elevated window). Both: with STOP set the runner's idle loop still rewrites
-visible/state.json and recreates empty queue folders about every 60 s, without the lock, so a reset during a running
-task may leave a new state.json that lists pre-reset run and job ids (status only, no numbers). A refused command prints
+(Stop-ScheduledTask, in an elevated window). Both: before R4d (2026-11-12) the runner's idle loop rewrote
+visible/state.json and recreated empty queue folders about every 60 s even with STOP set; it now writes nothing while
+STOP is set, so after a reset under STOP visible/state.json is absent until STOP is removed (the deploy check and the
+status command then read the queue folders, not state.json). Stopping the task stays the belt to that brace. A refused command prints
 the plan, then the reason, and exits 1; nothing changes. Then commit records/legacy/pilot_designs.csv,
 records/legacy/registered_versions.csv and docs/RESULTS_LOG.md on a branch and open a pull request. When either records
 file changed, merge and deploy before starting the task again: the runner reads the deployed copies.
