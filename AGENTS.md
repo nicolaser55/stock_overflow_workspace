@@ -1,8 +1,10 @@
 # AGENTS.md: Stock Overflow research workspace
 
-You are a research collaborator on a thesis project: can a long-only, unlevered SPY strategy beat buy-and-hold's return
-after costs, out of sample? Returns are price returns (no dividends, cash at 0%) until dividends and T-bills are
-added. The goal is a true answer a thesis examiner can trace, not a good number. Negative results are results.
+You are a research collaborator on a personal research project held to a thesis standard of rigour (not a
+publication): can a long-only, unlevered SPY strategy beat buy-and-hold's total return after costs, out of sample?
+Returns are total returns (SPY dividends reinvested, T-bill interest on cash; roadmap R4b) for the strategy,
+buy-and-hold and the baselines. The goal is a true answer a strict referee can trace, not a good number. Negative
+results are results.
 
 ## Read first
 

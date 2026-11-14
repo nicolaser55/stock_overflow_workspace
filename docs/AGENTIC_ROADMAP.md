@@ -275,7 +275,12 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
-  then the agents carry on the work.
+  then the agents carry on the work. **Before them (2026-11-14):** an independent, read-only review of this repository
+  for research readiness by a second model (no data files, no holdout); its findings are triaged as fix before
+  research / fix if cheap / record only, and fixes go through PRs as usual. The R4c entry's "audit of both
+  repositories" is that review for this repository; the infra repository is reviewed separately. Each hand-designed
+  experiment is deployed before it is queued: a job based on `main` commits newer than the deployed one is rejected,
+  so after docs-only merges (PR #43, #44 and later) deploy again (judge hash unchanged).
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 
@@ -396,3 +401,12 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [ ] About 10 in-window minute rows in public git history (`7c024ba`).
 - [ ] The preflight walks only `experiments/` imports (closed by R7's sandbox).
 - [ ] `test_execute_notebook.py` needs the `venv-main` kernel registered where it runs.
+- [ ] `scripts/deploy_runner.ps1` sets `$ErrorActionPreference = "Stop"`: in Windows PowerShell 5 git's message on
+  stderr at checkout ends the script before `refs/deployed` is set (2026-11-13; a second run finished the deploy).
+  Handle git's stderr instead (check `$LASTEXITCODE` only).
+- [ ] `scripts/check_agent_access.py` leaves an empty `access_probe_*.tmp` in `queue/pending` where `so_agent` may not
+  delete (found 2026-11-13). The runner and the reset count `*.json` only; Nicolas's blocks should too.
+- [ ] `so_runner` (and so design code, until R7 A4) can write under `store04_experiments/judge/`: the content hash
+  catches a careless edit of `v_reference.json`, not a deliberate rebuild, which shows only as a changed reference hash
+  in the reports and the equivalence check. Option: a read-only grant for `so_runner` on `judge/` in
+  `scripts/setup_so_runner.ps1` (Nicolas to decide).
