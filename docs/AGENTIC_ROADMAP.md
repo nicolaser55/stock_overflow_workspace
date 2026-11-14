@@ -262,7 +262,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   while the pause ends within 3 days, a restart is pending, or either cannot be read) and the `check_equivalence.py`
   help text. **Done when** the suite passes on nicodesktop, the PR is merged and deployed, and equivalence checks on
   exp02, exp04 and exp05 are EQUIVALENT. Then the audit of both repositories, before the hand-designed experiments.
-- [~] **R4d, a frozen V and small fixes (decided by Nicolas on 2026-11-12, before any research run):** the
+- [x] **R4d, a frozen V and small fixes (done 2026-11-14: merged as PR #42, deployed as 12142ab, reference frozen, records reset, nine rerun; both pre-stated checks pass) (decided by Nicolas on 2026-11-12, before any research run):** the
   equivalence checks on exp02/04/05 after R4c were NOT EQUIVALENT only through V (the live variance followed queue
   order and counted reruns twice); rule (a) had not listed V's inputs, and was not amended. Fix: V from each design's
   latest run, and a frozen reference file built by Nicolas (`scripts/freeze_v_reference.py`, protected) that the
