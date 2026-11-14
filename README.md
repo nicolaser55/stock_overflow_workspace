@@ -1,8 +1,8 @@
 # Stock Overflow: research workspace
 
 Can a long-only, unlevered strategy on **SPY** (1-minute IBKR bars, 2005 onward) beat **buy-and-hold's return**
-after realistic costs, out of sample? Returns are price returns for now: dividends are not credited and cash earns 0%,
-for the strategy and for buy-and-hold alike (dividends and T-bill interest are planned; audit S2, 2026-10-25). Every experiment is a design on one shared point-in-time runner: the runner shows
+after realistic costs, out of sample? Returns are total returns: SPY dividends reinvested and T-bill interest on cash,
+for the strategy, buy-and-hold and the baselines alike (roadmap R4b, since 2026-11-10). Every experiment is a design on one shared point-in-time runner: the runner shows
 a design only what was knowable at each decision, scores its candidates, selects with prior data only, compares with
 baselines, checks for look-ahead, and writes a report. Failed experiments are results.
 

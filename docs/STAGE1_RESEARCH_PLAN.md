@@ -35,9 +35,29 @@ in the multiple-testing N; a pass is frozen and paper-traded on data after its f
 
 ---
 
-## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-11)
+## 2. Baseline: the nine experiments under judge v1 (total returns; final 2026-11-14, R4d)
 
-Judge hash `b7ec40bc1d31be1f`, judge commit `c0924b9` (deployed), the verdict's N = 260 (pilot included, decided
+**Final baseline (2026-11-14, roadmap R4d).** Judge commit `12142ab` (PR #42, deployed 2026-11-13), N = 260 (pilot
+included), and V, the variance of the per-design Sharpe ratios in the deflated Sharpe test, read from the frozen
+reference `store04_experiments/judge/v_reference.json`: V = 0.013139771685914705 over 80 designs (the nine
+experiments, each design's latest run, 41-42 validation quarters each; file SHA-256 `4c16e7cf...`). Built under STOP
+just before the records reset of 2026-11-13 (backup `reset_20261113_131212`); all nine rerun in the order below
+(exp02 ... exp13, then exp01), results-log rows of 2026-11-13/14 with their run ids, PR #44. **Every total return and
+failed part in the table below is unchanged.** All nine still fail.
+
+The comparison rule, stated by Nicolas on 2026-11-13 before the rerun and not amended:
+1. *Equivalence:* each rerun against its previous baseline run with `scripts/check_equivalence.py`. Equivalent only if
+   every candidate's decisions and scoring numbers are identical, every other difference is "explained by N" or
+   "explained by V" (information-only fields allowed), and the V inputs that differ are only the source (live ->
+   reference), the reference hash and the V design count. Anything else is a finding.
+2. *Reproduction:* the reference rebuilt in memory from the new trial log has the same design count (80) and the
+   same variance to within 1e-12.
+
+Result: 9 of 9 equivalent; the V design count moved to 80 for the six runs that came early in the 2026-11-11 queue
+(33 to 68 before), which is the order effect R4d removed. The reference reproduced with a difference of 0.0. The
+deflated Sharpe probability moved with V and stays far from a pass (largest exp13, 0.081, before 0.071).
+
+*Earlier (2026-11-11), kept for the record:* Judge hash `b7ec40bc1d31be1f`, judge commit `c0924b9` (deployed), the verdict's N = 260 (pilot included, decided
 2026-11-10), development records reset on 2026-11-10 with the kill switch set (PR #39). Total returns on both sides:
 SPY dividends reinvested and T-bill interest on cash, for the strategy, buy-and-hold and the baselines (R4b).
 Results-log rows of 2026-11-11. This rerun supersedes the 2026-11-09/10 one (judge `3b51ca4a3578852a`, N in queue
