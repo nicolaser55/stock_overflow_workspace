@@ -15,9 +15,10 @@ from so import paths
 from so.core.multiple_testing import (BOOKKEEPING_KEY_SET, NON_DESIGN_STAGE_SET, PILOT_LEDGER_REL_STR,
                                       get_design_key_set, get_design_key_str, get_tried_design_count_dict,
                                       read_trial_record_pdf)
-from so.runner.preregistration import (REGISTERED_VERSION_COLUMN_LIST, get_logged_helper_dict, get_logged_version_dict,
+from so.runner.preregistration import (REGISTERED_VERSION_COLUMN_LIST, REGISTERED_VERSIONS_REL_STR,
+                                       get_logged_helper_dict, get_logged_version_dict,
                                        get_registered_version_tuple, get_registered_versions_path_str,
-                                       get_trial_log_version_row_list)
+                                       get_trial_log_version_row_list, write_reset_marker_dict)
 from run_queue import get_queue_path_dict
 from append_results_log import RESULTS_LOG_PATH, PHASE_DEVELOPMENT_STR, get_agent_phase_str
 
@@ -47,7 +48,11 @@ script discards the results and keeps the count:
        <backup folder>/reset_<timestamp>/ (moved, not deleted; the backup folder must be outside the data root, where
        no agent can read). The folders visible/grades and visible/status stay, with the read grants
        scripts/setup_so_agent.ps1 gave them (a folder the runner recreates would only inherit);
-    6. appends a dated "withdrawn" note row to docs/RESULTS_LOG.md (the log stays append-only).
+    6. appends a dated "withdrawn" note row to docs/RESULTS_LOG.md (the log stays append-only);
+    7. (2026-11-14, review F3) right after steps 2-4, writes store04_experiments/judge/reset_marker.json with the
+       LF-normalized SHA-256 of both records files as written. Every development run checks its judge's copies against
+       it and stops on a mismatch, so no run can start before the records PR is merged and deployed. --register-from
+       --confirm rewrites the marker too.
 
 Create the kill switch first (New-Item <SO_DATA_PATH>\\control\\STOP) and stop the scheduled task "SO queue runner"
 (Stop-ScheduledTask, in an elevated window). Both: before R4d (2026-11-12) the runner's idle loop rewrote
@@ -235,6 +240,9 @@ def register_versions_dict(trial_log_path_str_in, confirm_bool_in=False, registe
     result_dict["gap_list"] = get_registered_gap_list(trial_log_path_str_in, registered_path_str)
     if result_dict["gap_list"]:
         raise RuntimeError(f"registered_versions.csv does not cover the trial log for {result_dict['gap_list']}")
+    # THE FILE CHANGED: THE MARKER FOLLOWS (THE REAL FILES ONLY; A TEST'S OWN FILE LEAVES THE DATA ROOT ALONE)
+    if registered_path_str_in is None:
+        write_reset_marker_dict("register_from")
     result_dict["done_bool"] = True
     return result_dict
 
@@ -382,6 +390,10 @@ def reset_records_dict(path_dict_in, backup_folder_str_in, confirm_bool_in=False
     gap_list = get_registered_gap_list(trial_log_path_str, registered_path_str)
     if gap_list:
         raise RuntimeError(f"registered_versions.csv would forget logged versions of {gap_list}; nothing was moved")
+    # THE MARKER: NO RUN STARTS UNTIL THE DEPLOYED JUDGE HOLDS THESE TWO FILES (2026-11-14, REVIEW F3)
+    result_dict["marker_dict"] = write_reset_marker_dict(
+        f"reset_{now:%Y%m%d_%H%M%S}", os.path.join(os.path.dirname(path_dict_in["old_state"]), "judge", "reset_marker.json"),
+        {PILOT_LEDGER_REL_STR: ledger_path_str, REGISTERED_VERSIONS_REL_STR: registered_path_str}, now)
     # MOVE (NOT DELETE) EVERYTHING THAT HOLDS RESULTS
     os.makedirs(target_str, exist_ok=False)
     for source_path_str, name_str in result_dict["move_list"]:
@@ -435,6 +447,7 @@ if __name__ == "__main__":
     if outcome_dict["done_bool"]:
         print(f"done; N with the pilot included after the reset: {outcome_dict['pilot_included_after']}. Commit "
               f"records/legacy/pilot_designs.csv, records/legacy/registered_versions.csv and docs/RESULTS_LOG.md on a "
-              f"branch and open a pull request.")
+              f"branch and open a pull request. The reset marker is written: no development run starts until that "
+              f"pull request is merged and deployed (keep STOP set until then).")
     else:
         print("dry run: nothing changed (add --confirm to reset)")

@@ -165,3 +165,25 @@ def get_session_open_event_dict(ohlcv_array_dict_in, session_idx_in, session_dat
     return {"session_idx": session_idx, "session_date": session_date_in,
             "dividend_per_share": float(dividend_arr[session_idx]) if dividend_arr is not None else 0.0,
             "cash_growth": float(growth_arr[session_idx]) if growth_arr is not None else 0.0}
+
+
+# FUNCTION: A COPY OF A BUNDLE WHOSE CASH EARNS LESS (THE CASH-RATE SENSITIVITY ROW; 2026-11-14, REPORTED ONLY)
+def get_cash_spread_bundle_dict(ohlcv_array_dict_in, spread_float_in):
+    """
+    Each night's cash growth minus the spread over the same calendar days, floored at 0:
+    max(0, growth_s - spread x days_s / 365). Dividends and prices are unchanged. The verdict never reads this bundle.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bundle with a total-return schedule
+        spread_float_in (float): Annual spread, as a decimal (0.005 = 0.5 percentage points)
+
+    Returns:
+        dict: The bundle with the lowered cash_growth_arr (the price arrays are shared, not copied)
+    """
+    # THE CALENDAR DAYS OF EACH NIGHT, AS IN get_total_return_schedule_dict
+    growth_arr = np.asarray(ohlcv_array_dict_in["cash_growth_arr"], dtype=float).copy()
+    session_day_arr = pd.to_datetime(pd.Series(list(ohlcv_array_dict_in["session_date_list"]))).to_numpy(dtype="datetime64[D]")
+    if len(session_day_arr) > 1:
+        day_count_arr = (session_day_arr[1:] - session_day_arr[:-1]).astype(int)
+        growth_arr[1:] = np.maximum(growth_arr[1:] - float(spread_float_in) * day_count_arr / 365.0, 0.0)
+    return {**ohlcv_array_dict_in, "cash_growth_arr": growth_arr}

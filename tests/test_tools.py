@@ -211,7 +211,7 @@ def test_queue_runs_files_and_emails():
     result_list = run_fake_queue_list(path_dict, run_func, send_func)
     assert order_list == ["first", "second"]
     assert [result["status"] for result in result_list] == ["done", "done"]
-    assert sent_list == ["Stock Overflow: PASS, audit pending - exp13_e1m1_robustness", "Stock Overflow: exp13_e1m1_robustness - x"], sent_list
+    assert sent_list == ["Stock Overflow: PASS, audit pending - exp13_e1m1_robustness", "Stock Overflow: FAIL - exp13_e1m1_robustness"], sent_list
     assert result_list[0]["results_row"].startswith("| row of exp13_e1m1_robustness_")
     assert result_list[1]["email"]["sent_bool"]
     assert not os.listdir(path_dict["pending"]) and len(os.listdir(path_dict["done"])) == 2
@@ -1147,9 +1147,10 @@ def test_run_email_content():
         "multiple_testing_dict": {"design_count": 12}, "judge_hash_str": "abcdef0123456789abcdef"}), encoding="utf-8")
     result_dict = {"run_id": "run_p", "design": DESIGN_STR, "note": "why", "commit": FAKE_COMMIT_STR, "judge_commit": FAKE_JUDGE_STR,
                    "run_commit": FAKE_RUN_COMMIT_STR, "log": "L.log", "results_row": "| row |"}
-    negative_dict = {"verdict": {"label": "not email-worthy", "email_worthy": False, "failed_list": ["return", "baselines"], "look_ahead": "pass"}}
+    negative_dict = {"verdict": {"label": "fail", "email_worthy": False, "failed_list": ["return", "baselines"], "look_ahead": "pass"}}
     subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, result_dict, negative_dict)
-    assert subject_str == "Stock Overflow: exp13_e1m1_robustness - not email-worthy"
+    assert subject_str == "Stock Overflow: FAIL - exp13_e1m1_robustness"
+    assert "Verdict fail" in body_str
     for fragment_str in ["Run run_p", "Failed parts return, baselines", "Look-ahead check pass", "Total return +12.34% vs buy-and-hold +5.00%",
                          "Designs tried (the multiple-testing N) 12", "Judge hash abcdef0123456789", f"run {FAKE_RUN_COMMIT_STR}",
                          "report.md", "Log L.log", "| row |"]:
@@ -1161,7 +1162,7 @@ def test_run_email_content():
         encoding="utf-8")
     scope_body_str = run_queue.get_finished_run_email_tuple(path_dict, {**result_dict, "run_id": "run_s"}, negative_dict)[1]
     assert "Designs tried (the multiple-testing N) 260 (pilot included; 18 in the trial log)" in scope_body_str, scope_body_str
-    positive_dict = {"verdict": {"label": "match or beat", "email_worthy": True, "failed_list": [], "look_ahead": "pass"}}
+    positive_dict = {"verdict": {"label": "pass", "email_worthy": True, "failed_list": [], "look_ahead": "pass"}}
     subject_str, body_str = run_queue.get_finished_run_email_tuple(path_dict, result_dict, positive_dict)
     assert subject_str == "Stock Overflow: PASS, audit pending - exp13_e1m1_robustness"
     assert "Failed parts none" in body_str and "not rejected" in body_str
@@ -1552,8 +1553,26 @@ def test_check_equivalence():
     no_input_dict = copy.deepcopy(v_base_dict)
     no_input_dict["multiple_testing_dict"]["trial_sharpe_variance"] = 0.0132
     assert not check_equivalence.get_equivalence_dict(v_baseline_str, make_run_str("v_none", no_input_dict, [1.0, 0.0]))["equivalent_bool"]
+    # A DECLARED CHANGE (2026-11-14): ONLY ITS NAMED LINES ARE EXPLAINED; ANY OTHER DIFFERENCE STILL COUNTS
+    declared_dict = copy.deepcopy(report_dict)
+    declared_dict.pop("email_worthy_bool")
+    declared_dict.update({"verdict_pass_bool": False, "label_str": "fail", "cash_rate_sensitivity_dict": {"spread": 0.005}})
+    declared_dict["return_dict"]["comparable_with_secondary_bool"] = False
+    declared_str = make_run_str("declared", declared_dict, [1.0, 0.0])
+    assert not check_equivalence.get_equivalence_dict(baseline_str, declared_str)["equivalent_bool"]
+    declared_outcome_dict = check_equivalence.get_equivalence_dict(baseline_str, declared_str, "pre-research-2026-11-14")
+    assert declared_outcome_dict["equivalent_bool"], declared_outcome_dict
+    assert len(declared_outcome_dict["declared_difference_list"]) == 5, declared_outcome_dict["declared_difference_list"]
+    wrong_label_dict = {**copy.deepcopy(declared_dict), "label_str": "pass"}
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("declared_wrong", wrong_label_dict, [1.0, 0.0]),
+                                                      "pre-research-2026-11-14")["equivalent_bool"]
+    number_declared_dict = copy.deepcopy(declared_dict)
+    number_declared_dict["return_dict"]["strategy_total_return"] = 0.4322
+    assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("declared_number", number_declared_dict, [1.0, 0.0]),
+                                                      "pre-research-2026-11-14")["equivalent_bool"]
     passed("equivalence check (identities ignored, any scoring number, decision or candidate difference fails, N changes "
-           "explained; V changes explained only with a changed V input, named; the trial log's own count is information)")
+           "explained; V changes explained only with a changed V input, named; the trial log's own count is information; a "
+           "declared change explains only its own lines)")
 
 
 # RUN THE SUITE

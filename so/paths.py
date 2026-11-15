@@ -52,6 +52,9 @@ _DATA_PATH_SUFFIX_DICT = {
     "LOCAL_TRIAL_LOG_FILE_PATH_STR": "store04_experiments/trial_log.csv",
     # THE FROZEN SPREAD OF TRIAL SHARPE RATIOS (V) THE VERDICT USES (R4d, 2026-11-12; BUILT BY scripts/freeze_v_reference.py)
     "LOCAL_V_REFERENCE_FILE_PATH_STR": "store04_experiments/judge/v_reference.json",
+    # THE LAST RESET'S RECORD OF THE LEDGER FILES IT WROTE (2026-11-14; WRITTEN BY scripts/reset_records.py, CHECKED BY EVERY
+    # DEVELOPMENT RUN: so.runner.preregistration.check_reset_marker_dict)
+    "LOCAL_RESET_MARKER_FILE_PATH_STR": "store04_experiments/judge/reset_marker.json",
 }
 
 # DEFINE THE WORKSPACE ROOT (records/ IS VERSIONED IN GIT; IT IS NOT IN THE DATA FOLDER)

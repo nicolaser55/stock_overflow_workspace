@@ -164,7 +164,7 @@ if __name__ == "__main__":
     print(f"report_json {report_json_str}")
     print(f"run_id {result_dict['run_id_str']}")
     print(f"verdict {verdict_dict['label_str']}")
-    print(f"email_worthy {bool(verdict_dict['email_worthy_bool'])}")
+    print(f"verdict_pass {bool(verdict_dict['verdict_pass_bool'])}")
     print(f"failed {list(verdict_dict['failed_list'])}")
     print(f"results_row {get_results_row_str(result_dict['report_dict'], result_dict['run_id_str'], arg_dict.note)}")
     print(f"saved {report_md_str}")

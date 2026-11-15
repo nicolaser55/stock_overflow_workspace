@@ -37,6 +37,13 @@ in the multiple-testing N; a pass is frozen and paper-traded on data after its f
 
 ## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-11)
 
+**Superseded as the reference by the R4d final baseline (2026-11-13/14):** judge `12142ab` (PR #42), frozen V
+reference `judge/v_reference.json` (V 0.013139771685914705 over 80 designs), N = 260 with the pilot, records reset
+2026-11-13. Under the rule stated before that rerun, all nine are equivalent to the rows below (differences only through
+V), so every total return and failed part in the table below still holds; the results-log rows of 2026-11-13/14 are the
+current ones. From 2026-11-14 the verdict label is `pass` / `fail` and the return part passes only strictly above
+buy-and-hold (roadmap R4e); none of the nine changes (none is in the 90-100% band).
+
 Judge hash `b7ec40bc1d31be1f`, judge commit `c0924b9` (deployed), the verdict's N = 260 (pilot included, decided
 2026-11-10), development records reset on 2026-11-10 with the kill switch set (PR #39). Total returns on both sides:
 SPY dividends reinvested and T-bill interest on cash, for the strategy, buy-and-hold and the baselines (R4b).
@@ -124,6 +131,13 @@ about 77% average exposure, above 58 of 100 random-timing draws (needed 95), def
 Assignment by each experiment's primary mechanism (proposed by Claude 2026-10-29; Nicolas may move any). Variants
 spent before the budget existed are not refunded or charged; they are already in N.
 
+**A variant is a protocol version (decided by Nicolas on 2026-11-14).** Each idea has at most 5 versions, across all the
+experiments filed under it (an experiment itself has at most three per family; a derived experiment such as exp13
+spends a version of its source idea). Grid width is limited separately: about 3-15 candidates per version, every
+candidate a design in N. Every new protocol carries `Family: <letter>, idea <id>, variant <k> of 5`, linted by the
+runner; this table is updated in the pull request that brings the experiment's tests (before its first run). The nine
+experiments below are protocol 1.0 and keep their assignment; they are not relabelled.
+
 | Family | Ideas used | Slots left | Experiments | Eligible new ideas (section 6) |
 |---|---|---|---|---|
 | **T** Trend / time-series momentum | 3 | **0 (closed)** | exp04 (200-day exit), exp06 (trend or near-high exit + buy-stop re-entry), exp07 (warning lights) | none; T1-T4 parked |
@@ -136,7 +150,8 @@ spent before the budget existed are not refunded or charged; they are already in
 | **M** Macro and valuation | 0 | 3 | — | M1, M2 (T3 could move here as a macro idea) |
 
 Points to settle when resuming:
-- exp12 + exp13 used 7 variants under one idea (6 candidates + 1); this predates the 5-variant budget.
+- exp12 + exp13 used 2 variants under one idea (two protocol versions in all: exp12 1.0 and the derived exp13 1.0;
+  7 candidates). Counted as candidates, as first written on 2026-10-29, it was 7; superseded by the 2026-11-14 rule.
 - If Nicolas prefers T3 ("trend gate with unemployment confirmation") it can be filed under M (its new element is the
   macro signal), using an M slot.
 - Pre-reset experiments exp09-exp11 were planned but never run; they use no budget.

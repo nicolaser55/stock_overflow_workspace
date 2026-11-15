@@ -47,8 +47,8 @@ from so.runner import (run_development_dict, check_clean_tree, CLEAN_TREE_MESSAG
                        get_guarded_code_folder_list, get_runner_baseline_dict, get_random_timing_weight_arr,
                        get_random_timing_seed_list, run_weight_path_dict, get_runner_verdict_dict,
                        get_return_verdict_dict, get_consistency_verdict_dict, get_baseline_verdict_dict,
-                       LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR, EMAIL_WORTHY_STR,
-                       NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR, LOOKAHEAD_FILE_STR)
+                       LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR, VERDICT_PASS_STR,
+                       VERDICT_FAIL_STR, MANIFEST_FILE_STR, LOOKAHEAD_FILE_STR)
 from so.runner.checkpoint import get_run_folder_str
 from so.runner.baselines import (get_unique_weight_list, get_weight_run_list, get_weight_time_dict,
                                  get_base_weight_float, get_non_base_spell_list, get_base_gap_list,
@@ -150,8 +150,8 @@ def get_test_trial_log_path_str(file_name_str_in):
 # FUNCTION: EACH RETURN PART PASSES AND FAILS, INCLUDING THE 90-100% BAND
 def test_return_verdict_parts():
     """
-    >= buy-and-hold passes. The comparable band passes only with a smaller drawdown or a higher Sharpe. Below 90%
-    fails.
+    Strictly above buy-and-hold passes (2026-11-14: "beats buy-and-hold"); equal does not. The comparable band never
+    passes; its flag comparable_with_secondary_bool reports a smaller drawdown or a higher Sharpe. Below 90% fails.
 
     Returns:
         None
@@ -162,10 +162,10 @@ def test_return_verdict_parts():
     same_pdf = buy_hold_pdf.copy()
     same_success_dict = get_success_criteria_dict(same_pdf, buy_hold_pdf)
     same_dict = get_return_verdict_dict(same_success_dict)
-    assert same_dict["pass_bool"] and same_dict["reason_str"] == "total_return_at_least_buy_hold"
+    assert not same_dict["pass_bool"] and same_dict["reason_str"] == "comparable_without_secondary"
     better_pdf = buy_hold_pdf.assign(daily_return=0.002)
     better_dict = get_return_verdict_dict(get_success_criteria_dict(better_pdf, buy_hold_pdf))
-    assert better_dict["pass_bool"] and better_dict["reason_str"] == "total_return_at_least_buy_hold"
+    assert better_dict["pass_bool"] and better_dict["reason_str"] == "total_return_above_buy_hold"
     # BELOW 90%: HALF THE DAILY RETURN
     below_pdf = buy_hold_pdf.assign(daily_return=0.0004)
     below_success_dict = get_success_criteria_dict(below_pdf, buy_hold_pdf)
@@ -178,6 +178,7 @@ def test_return_verdict_parts():
     band_dict = get_return_verdict_dict(band_success_dict)
     assert band_success_dict["comparable_return"] and band_success_dict["strategy_total_return"] < band_success_dict["buy_hold_total_return"]
     assert not band_dict["pass_bool"] and band_dict["reason_str"] == "comparable_without_secondary"
+    assert not band_dict["comparable_with_secondary_bool"]
     # 90-100% BAND WITH A SMALLER DRAWDOWN (ALWAYS-UP VS AN OSCILLATING BUY-AND-HOLD)
     osc_pdf = pd.DataFrame({"date": pd.bdate_range("2010-01-04", periods=20).date,
                             "daily_return": np.array([0.04, -0.02] * 10, dtype=float)})
@@ -185,15 +186,16 @@ def test_return_verdict_parts():
     scaled_success_dict = get_success_criteria_dict(flat_pdf, osc_pdf)
     scaled_dict = get_return_verdict_dict(scaled_success_dict)
     assert scaled_success_dict["comparable_return"] and scaled_success_dict["strategy_total_return"] < scaled_success_dict["buy_hold_total_return"]
-    assert scaled_success_dict["secondary_drawdown"] and scaled_dict["pass_bool"]
-    assert scaled_dict["reason_str"] == "comparable_with_secondary"
+    assert scaled_success_dict["secondary_drawdown"] and not scaled_dict["pass_bool"]
+    assert scaled_dict["reason_str"] == "comparable_with_secondary" and scaled_dict["comparable_with_secondary_bool"]
     # 90-100% BAND WITH A HIGHER SHARPE (LOWER VOLATILITY, STILL SOME MOVEMENT)
     low_vol_pdf = osc_pdf.assign(daily_return=np.array([0.012, 0.006] * 10, dtype=float))
     sharpe_success_dict = get_success_criteria_dict(low_vol_pdf, osc_pdf)
     sharpe_dict = get_return_verdict_dict(sharpe_success_dict)
     assert sharpe_success_dict["comparable_return"] and sharpe_success_dict["strategy_total_return"] < sharpe_success_dict["buy_hold_total_return"]
-    assert sharpe_success_dict["secondary_sharpe"] and sharpe_dict["pass_bool"]
-    passed("each return verdict part passes and fails including the 90-100% band")
+    assert sharpe_success_dict["secondary_sharpe"] and not sharpe_dict["pass_bool"]
+    assert sharpe_dict["comparable_with_secondary_bool"]
+    passed("return part: strictly above buy-and-hold passes; equal and the 90-100% band fail; the band flag is reported")
 
 
 # FUNCTION: CONSISTENCY PASSES AT 60% AND FAILS BELOW
@@ -262,11 +264,11 @@ def test_baseline_verdict_parts():
     passed("baseline verdict passes and fails on constant exposure and the 95% random rule")
 
 
-# FUNCTION: EMAIL-WORTHY ONLY WHEN EVERY PART PASSES
-def test_email_worthy_needs_every_part():
+# FUNCTION: A PASS ONLY WHEN EVERY PART PASSES
+def test_pass_needs_every_part():
     """
-    A path that beats buy-and-hold, 60% of windows, the constant baseline and 95% of random draws is email-worthy
-    only when look-ahead is pass. pending or a failed part is not email-worthy.
+    A path that beats buy-and-hold, 60% of windows, the constant baseline and 95% of random draws is a pass
+    only when look-ahead is pass. pending or a failed part is a fail.
 
     Returns:
         None
@@ -285,16 +287,16 @@ def test_email_worthy_needs_every_part():
     pass_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PASS_STR)
     assert pass_dict["return_dict"]["pass_bool"] and pass_dict["consistency_dict"]["pass_bool"]
     assert pass_dict["baseline_dict"]["pass_bool"] and pass_dict["look_ahead_dict"]["pass_bool"]
-    assert pass_dict["email_worthy_bool"] and pass_dict["label_str"] == EMAIL_WORTHY_STR
+    assert pass_dict["verdict_pass_bool"] and pass_dict["label_str"] == VERDICT_PASS_STR == "pass"
     assert pass_dict["failed_list"] == []
     pending_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_PENDING_STR)
-    assert not pending_dict["email_worthy_bool"] and pending_dict["label_str"] == NOT_EMAIL_WORTHY_STR
+    assert not pending_dict["verdict_pass_bool"] and pending_dict["label_str"] == VERDICT_FAIL_STR == "fail"
     assert pending_dict["failed_list"] == ["look-ahead"]
     look_fail_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, easy_baseline_dict, LOOK_AHEAD_FAIL_STR)
     assert look_fail_dict["failed_list"] == ["look-ahead"]
     hard_baseline_dict = get_hand_baseline_dict(10.0, 10.0, 100)
     base_fail_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, hard_baseline_dict, LOOK_AHEAD_PASS_STR)
-    assert "baselines" in base_fail_dict["failed_list"] and not base_fail_dict["email_worthy_bool"]
+    assert "baselines" in base_fail_dict["failed_list"] and not base_fail_dict["verdict_pass_bool"]
     # THE SAME PATH AFTER 2,000 DESIGNS WERE TRIED: THE RANDOM-TIMING DRAWS ARE NO LONGER FAR ENOUGH BELOW IT
     many_path_str = os.path.join(TEMP_ROOT_STR, "verdict_many_designs.csv")
     pd.DataFrame({"experiment": ["expZZ"] * 2000, "stage": ["validation"] * 2000,
@@ -305,16 +307,16 @@ def test_email_worthy_needs_every_part():
     many_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, close_baseline_dict, LOOK_AHEAD_PASS_STR, many_path_str)
     assert one_dict["multiple_testing_dict"]["design_count"] == 1 and "multiple-testing" not in one_dict["failed_list"]
     assert many_dict["multiple_testing_dict"]["design_count"] == 2000
-    assert "multiple-testing" in many_dict["failed_list"] and not many_dict["email_worthy_bool"]
+    assert "multiple-testing" in many_dict["failed_list"] and not many_dict["verdict_pass_bool"]
     # PILOT INCLUDED (2026-11-10): 2,000 DESIGNS IN THE LEDGER RAISE THE VERDICT'S N AS IF THEY WERE IN THE TRIAL LOG
     pilot_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, close_baseline_dict, LOOK_AHEAD_PASS_STR, None, [many_path_str])
     pilot_multiple_dict = pilot_dict["multiple_testing_dict"]
     assert pilot_multiple_dict["design_count"] == 2000 and pilot_multiple_dict["current_design_count"] == 0
     assert pilot_multiple_dict["pilot_design_count"] == 2000 and pilot_multiple_dict["design_count_scope_str"] == "pilot_included"
-    assert "multiple-testing" in pilot_dict["failed_list"] and not pilot_dict["email_worthy_bool"]
+    assert "multiple-testing" in pilot_dict["failed_list"] and not pilot_dict["verdict_pass_bool"]
     assert "pilot_included_dict" not in pilot_multiple_dict                 # ONE N, NO SIDE VERDICT
     assert pilot_multiple_dict["random_timing_p_max"] == many_dict["multiple_testing_dict"]["random_timing_p_max"]
-    passed("email-worthy only when every verdict part passes, including the multiple-testing part")
+    passed("pass only when every verdict part passes, including the multiple-testing part")
 
 
 # FUNCTION: THE MULTIPLE-TESTING PIECES (AUDIT B5)
@@ -724,7 +726,7 @@ def test_crashed_run_leaves_no_manifest():
     assert manifest_dict["status"] == "finished" and manifest_dict["run_id"] == "verdict_finish"
     assert manifest_dict["commit"] == "testcommit" and manifest_dict["code_hash"] == "testhash"
     assert len(manifest_dict["judge_hash"]) == 64 and manifest_dict["judge_file_count"] > 20, manifest_dict["judge_hash"]
-    assert manifest_dict["verdict"]["label"] == NOT_EMAIL_WORTHY_STR
+    assert manifest_dict["verdict"]["label"] == VERDICT_FAIL_STR
     assert manifest_dict["verdict"]["look_ahead"] == LOOK_AHEAD_PASS_STR
     assert "look-ahead" not in manifest_dict["verdict"]["failed_list"]
     assert REPORT_JSON_FILE_STR in manifest_dict["output_files"]
@@ -946,6 +948,44 @@ def test_v_reference():
            "too small refused, the verdict uses and labels it, the live spread reported beside it")
 
 
+# FUNCTION: CALENDAR YEARS AND THE REPORT TEXT (REPORTED ONLY; 2026-11-14)
+def test_calendar_years_and_report_text():
+    """
+    Calendar years are counted non-overlapping, a year within the tie band is a tie, partial first and last years are
+    flagged, and no verdict part depends on them. The report header says PASS or FAIL and shows the 90% flag, the
+    calendar years and the cash-rate row.
+
+    Returns:
+        None
+    """
+    # TWO AND A HALF YEARS: 2010 AHEAD, 2011 TIED, 2012 (HALF) BEHIND
+    from so.runner.verdict import get_calendar_year_dict, get_report_payload_dict, get_report_markdown_str
+    date_list = list(pd.bdate_range("2010-01-04", "2012-06-29").date)
+    buy_hold_pdf = pd.DataFrame({"date": date_list, "daily_return": np.full(len(date_list), 0.0002)})
+    strategy_arr = np.array([0.0006 if day.year == 2010 else 0.0002 if day.year == 2011 else -0.0002 for day in date_list])
+    strategy_pdf = pd.DataFrame({"date": date_list, "daily_return": strategy_arr})
+    year_dict = get_calendar_year_dict(strategy_pdf, buy_hold_pdf)
+    assert year_dict["year_count"] == 3 and year_dict["tie_count"] == 1 and year_dict["decisive_count"] == 2
+    assert year_dict["ahead_count"] == 1, year_dict
+    assert not year_dict["first_year_partial_bool"] and year_dict["last_year_partial_bool"]
+    assert [row["year"] for row in year_dict["year_list"]] == [2010, 2011, 2012]
+    # THE REPORT TEXT OF A FAILING VERDICT
+    from so.runner.verdict import get_runner_verdict_dict
+    empty_log_str = os.path.join(TEMP_ROOT_STR, "verdict_year_trial_log.csv")
+    verdict_dict = get_runner_verdict_dict(strategy_pdf, buy_hold_pdf, get_hand_baseline_dict(-0.5, -0.5, 100),
+                                           LOOK_AHEAD_PASS_STR, trial_log_path_str_in=empty_log_str, legacy_path_list_in=[])
+    assert verdict_dict["consistency_dict"]["calendar_year_dict"]["year_count"] == 3
+    assert verdict_dict["label_str"] == VERDICT_FAIL_STR and not verdict_dict["verdict_pass_bool"]
+    report_dict = get_report_payload_dict(verdict_dict, {"cash_rate_sensitivity_dict": {
+        "spread": 0.005, "strategy_total_return": 0.1, "buy_hold_total_return": 0.2, "strategy_above_buy_hold_bool": False}})
+    markdown_str = get_report_markdown_str(report_dict)
+    assert "## Verdict: FAIL (" in markdown_str and "email" not in markdown_str
+    assert "Calendar years (non-overlapping; reported only)" in markdown_str
+    assert "with a higher Sharpe ratio or a smaller drawdown:" in markdown_str
+    assert "### Cash-rate sensitivity" in markdown_str
+    passed("calendar years (non-overlapping, ties, partial years) and the PASS / FAIL report text")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE A TEMPORARY FOLDER THIS FILE CREATED
@@ -953,7 +993,8 @@ if __name__ == "__main__":
         test_return_verdict_parts()
         test_consistency_verdict_parts()
         test_baseline_verdict_parts()
-        test_email_worthy_needs_every_part()
+        test_pass_needs_every_part()
+        test_calendar_years_and_report_text()
         test_multiple_testing_parts()
         test_v_reference()
         test_random_timing_tail_count()

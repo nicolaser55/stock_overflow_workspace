@@ -54,6 +54,10 @@ REASON_DICT = {
     "return_comparable_without_secondary": (GRADE_NOT_BETTER_STR,
                                             "the return is in the comparable band below buy-and-hold without a better "
                                             "Sharpe ratio or drawdown, even with zero slippage"),
+    "return_comparable_with_secondary": (GRADE_NOT_BETTER_STR,
+                                         "the return is in the comparable band below buy-and-hold with a better Sharpe "
+                                         "ratio or drawdown, which is reported but does not pass, even with zero "
+                                         "slippage"),
     "return_below_buy_hold_no_cost_check": (GRADE_NOT_BETTER_STR,
                                             "the return check fails and this run has no zero-slippage replay"),
     # COSTS
@@ -146,6 +150,8 @@ def get_run_grade_dict(verdict_dict_in, cost_sensitivity_list_in=None):
             return get_grade_from_reason_dict("return_passes_only_without_slippage")
         if str(zero_row_dict.get("return_reason_str", "")) == "comparable_without_secondary":
             return get_grade_from_reason_dict("return_comparable_without_secondary")
+        if str(zero_row_dict.get("return_reason_str", "")) == "comparable_with_secondary":
+            return get_grade_from_reason_dict("return_comparable_with_secondary")
         return get_grade_from_reason_dict("return_below_comparable")
     # 5: CONSISTENCY
     consistency_dict = verdict_dict_in.get("consistency_dict") or {}

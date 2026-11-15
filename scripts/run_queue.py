@@ -82,8 +82,8 @@ The judge hash (so.runner.judge_identity) is taken from the fresh worktree of th
 starts and again after it ends; a run whose report.json shows another judge hash, or whose worktree's judge changed, is
 filed as failed ("judge changed during the run"): design code ran in between (roadmap R3, audit S9). The
 child process gets the runner's environment without secrets (get_child_environment_dict). While a job runs, a thread
-refreshes the heartbeat in state.json every SO_QUEUE_HEARTBEAT_SECONDS (default 60). An email-worthy verdict and a
-failed job send an email (SMTP from SO_SMTP_HOST, SO_SMTP_PORT, SO_SMTP_USER, SO_SMTP_PASSWORD, SO_EMAIL_TO; without
+refreshes the heartbeat in state.json every SO_QUEUE_HEARTBEAT_SECONDS (default 60). Every finished run (verdict pass
+or fail) and every failed job sends an email (SMTP from SO_SMTP_HOST, SO_SMTP_PORT, SO_SMTP_USER, SO_SMTP_PASSWORD, SO_EMAIL_TO; without
 them the message goes to the outbox). The queue never runs a holdout evaluation.
 
 Email (design 2026-10-27, section 9): one email per finished full run, positive or negative (subject: the design and the
@@ -1646,8 +1646,9 @@ def get_finished_run_email_tuple(path_dict_in, result_dict_in, manifest_dict_in)
     design_name_str = Path(result_dict_in["design"]).name
     label_str = re.sub(r"[\x00-\x1f\x7f]+", " ", str(verdict_dict.get("label", ""))).strip()[:80]
     passed_bool = bool(verdict_dict.get("email_worthy"))
+    # "email_worthy" IN THE MANIFEST IS THE LEGACY NAME OF "THE VERDICT PASSED"; THE LABEL IS "pass" OR "fail" (2026-11-14)
     subject_str = (f"Stock Overflow: PASS, audit pending - {design_name_str}" if passed_bool
-                   else f"Stock Overflow: {design_name_str} - {label_str or 'finished'}")
+                   else f"Stock Overflow: FAIL - {design_name_str}")
     failed_list = verdict_dict.get("failed_list") or []
     line_list = [f"Run {result_dict_in['run_id']}", f"Design {result_dict_in['design']}",
                  f"Note {result_dict_in.get('note', '')}", f"Verdict {label_str}",

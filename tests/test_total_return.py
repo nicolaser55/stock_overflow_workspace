@@ -44,7 +44,8 @@ from so.runner import TrailingStopEngine, BarrierEngine
 from so.runner.engine import FractionalWeightEngine
 from so.runner.baselines import run_weight_path_dict, get_runner_baseline_dict
 from so.runner.total_return import (get_investment_yield_arr, get_total_return_schedule_dict, get_bundle_with_schedule_dict,
-                                    get_total_return_bundle_dict, get_zero_schedule_dict, TOTAL_RETURN_BASIS_STR)
+                                    get_total_return_bundle_dict, get_zero_schedule_dict, TOTAL_RETURN_BASIS_STR,
+                                    get_cash_spread_bundle_dict)
 from so.runner.verdict import get_report_markdown_str
 from synthetic_data import get_synthetic_ohlcv_pdf
 
@@ -269,6 +270,22 @@ def test_report_basis_line():
     passed("report: the return section states total or price returns, and the credited dividends and interest")
 
 
+# TEST: THE CASH-RATE SENSITIVITY BUNDLE (2026-11-14, REPORTED ONLY): EACH NIGHT LOSES spread x days / 365, FLOORED AT 0
+def test_cash_spread_bundle():
+    bundle_dict = get_scheduled_bundle_dict(growth_in=0.0001)
+    lower_dict = get_cash_spread_bundle_dict(bundle_dict, 0.005)
+    day_arr = pd.to_datetime(pd.Series(list(bundle_dict["session_date_list"]))).to_numpy(dtype="datetime64[D]")
+    day_count_arr = (day_arr[1:] - day_arr[:-1]).astype(int)
+    expected_arr = np.maximum(0.0001 - 0.005 * day_count_arr / 365.0, 0.0)
+    assert np.allclose(lower_dict["cash_growth_arr"][1:], expected_arr) and lower_dict["cash_growth_arr"][0] == bundle_dict["cash_growth_arr"][0]
+    assert np.array_equal(bundle_dict["cash_growth_arr"][1:], np.full(len(day_count_arr), 0.0001))   # THE ORIGINAL IS UNTOUCHED
+    assert lower_dict["close_arr"] is bundle_dict["close_arr"] and lower_dict["dividend_per_share_arr"] is bundle_dict["dividend_per_share_arr"]
+    assert config.CASH_RATE_SENSITIVITY_SPREAD == 0.005
+    floored_dict = get_cash_spread_bundle_dict(bundle_dict, 1.0)
+    assert (floored_dict["cash_growth_arr"][1:] == 0.0).all()
+    passed("cash-rate sensitivity: each night loses the spread over its calendar days, floored at 0; prices and dividends unchanged")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_schedule_rules()
@@ -280,4 +297,5 @@ if __name__ == "__main__":
     test_design_loop_matches_replay()
     test_bundle_helpers_and_loaders()
     test_report_basis_line()
+    test_cash_spread_bundle()
     print("\nAll total-return tests passed ✅")

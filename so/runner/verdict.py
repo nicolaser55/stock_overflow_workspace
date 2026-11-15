@@ -15,13 +15,17 @@ Runner Verdict, Report And Manifest (infrastructure step 4b-1b)
 
 One shared function, applied to the prior-only path:
 
-    return       total return >= buy-and-hold passes; between 90% and 100% of buy-and-hold passes only with a
-                 smaller max drawdown or a higher Sharpe; below 90% fails. Numbers come from
+    return       total return strictly above buy-and-hold passes; anything else fails (decided by Nicolas on
+                 2026-11-14: the success rule is "beats buy-and-hold"). Whether the path reaches the comparable band
+                 (at least 90% of buy-and-hold) with a higher Sharpe ratio or a smaller max drawdown is reported as
+                 comparable_with_secondary_bool, for information only: it never passes the part. Numbers come from
                  so.core.evaluation.get_success_criteria_dict (comparable floor, Sharpe, drawdown).
     consistency  ahead of buy-and-hold on at least 60% of the decisive rolling 12-month windows, stepped monthly. A
                  window within +/- RUNNER_CONSISTENCY_TIE_TOLERANCE of buy-and-hold is a tie and is not counted;
                  fewer than RUNNER_CONSISTENCY_MIN_DECISIVE_WINDOWS decisive windows fails (audit S1, 2026-10-25: a
                  design invested like buy-and-hold in most windows lost every tied window under the old rule).
+                 The calendar years ahead (non-overlapping; first and last years may be partial) are reported
+                 beside it as calendar_year_dict, for information only (2026-11-14).
     baselines    total return strictly above the constant-exposure baseline and above at least 95% of the random
                  draws.
     look-ahead   "pass" or "fail" from the automatic truncation and perturbation check (4b-1c). "pending" is not a
@@ -30,8 +34,9 @@ One shared function, applied to the prior-only path:
                  scaled by N, the number of designs tried on the development data (so.core.multiple_testing; audit
                  B5, 2026-10-25).
 
-The verdict is "email-worthy" only if every part passes. look-ahead "pending" is not a pass. Otherwise
-"not email-worthy", listing what failed.
+The verdict is "pass" only if every part passes (a pass means "not rejected", audit pending; never "proven").
+look-ahead "pending" is not a pass. Otherwise "fail", listing what failed. Until 2026-11-14 the labels were
+"email-worthy" and "not email-worthy"; earlier rows of docs/RESULTS_LOG.md keep those words.
 
 report.json holds every number behind the verdict. report.md is a short readable summary. manifest.json is written
 last, so a manifest only exists for a finished run.
@@ -47,9 +52,9 @@ LOOK_AHEAD_PENDING_STR = "pending"
 LOOK_AHEAD_PASS_STR = "pass"
 LOOK_AHEAD_FAIL_STR = "fail"
 LOOK_AHEAD_STATUS_SET = {LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR, LOOK_AHEAD_FAIL_STR}
-# VERDICT LABELS
-EMAIL_WORTHY_STR = "email-worthy"
-NOT_EMAIL_WORTHY_STR = "not email-worthy"
+# VERDICT LABELS (2026-11-14; BEFORE: "email-worthy" / "not email-worthy")
+VERDICT_PASS_STR = "pass"
+VERDICT_FAIL_STR = "fail"
 
 
 # FUNCTION: JSON-SAFE SCALARS AND NESTED STRUCTURES
@@ -136,8 +141,9 @@ def write_json_file(file_path_str_in, payload_in):
 # FUNCTION: THE RETURN PART OF THE VERDICT
 def get_return_verdict_dict(success_dict_in):
     """
-    >= buy-and-hold passes. The 90-100% band (comparable_return, strictly below buy-and-hold) passes only with a
-    smaller max drawdown or a higher Sharpe. Below 90% fails.
+    Strictly above buy-and-hold passes (primary_success; decided 2026-11-14). Everything else fails, with the reason
+    comparable_with_secondary, comparable_without_secondary or below_comparable. comparable_with_secondary_bool
+    (comparable band with a higher Sharpe or a smaller drawdown) is reported whether or not the part passes.
 
     Args:
         success_dict_in (dict): Output of get_success_criteria_dict
@@ -150,10 +156,10 @@ def get_return_verdict_dict(success_dict_in):
     buy_hold_return = float(success_dict_in["buy_hold_total_return"])
     comparable_bool = bool(success_dict_in["comparable_return"])
     secondary_bool = bool(success_dict_in["secondary_success"])
-    if strategy_return >= buy_hold_return:
-        pass_bool, reason_str = True, "total_return_at_least_buy_hold"
+    if bool(success_dict_in["primary_success"]):
+        pass_bool, reason_str = True, "total_return_above_buy_hold"
     elif comparable_bool and secondary_bool:
-        pass_bool, reason_str = True, "comparable_with_secondary"
+        pass_bool, reason_str = False, "comparable_with_secondary"
     elif comparable_bool:
         pass_bool, reason_str = False, "comparable_without_secondary"
     else:
@@ -167,7 +173,47 @@ def get_return_verdict_dict(success_dict_in):
             "buy_hold_max_drawdown": float(success_dict_in["buy_hold_max_drawdown"]),
             "secondary_sharpe": bool(success_dict_in["secondary_sharpe"]),
             "secondary_drawdown": bool(success_dict_in["secondary_drawdown"]),
-            "secondary_success": secondary_bool}
+            "secondary_success": secondary_bool,
+            "comparable_with_secondary_bool": bool(comparable_bool and secondary_bool)}
+
+
+# FUNCTION: CALENDAR YEARS AHEAD OF BUY-AND-HOLD (REPORTED ONLY; 2026-11-14)
+def get_calendar_year_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, tie_tolerance_in=None):
+    """
+    Each calendar year's chained return of the path and of buy-and-hold (non-overlapping; the first and last years of
+    the span may be partial). A year within the consistency tie band is a tie. Information only: no verdict part
+    reads it.
+
+    Args:
+        strategy_return_pdf_in, buy_hold_return_pdf_in (pd.DataFrame): date, daily_return
+        tie_tolerance_in (float | None): Tie band on the absolute excess return (None = RUNNER_CONSISTENCY_TIE_TOLERANCE)
+
+    Returns:
+        dict: year_count, tie_count, decisive_count, ahead_count, first_year_partial_bool, last_year_partial_bool, year_list
+    """
+    # CHAIN EACH SIDE WITHIN THE YEAR
+    tie_float = float(config.RUNNER_CONSISTENCY_TIE_TOLERANCE if tie_tolerance_in is None else tie_tolerance_in)
+    merged_pdf = strategy_return_pdf_in.merge(buy_hold_return_pdf_in, on="date", suffixes=("_strategy", "_buy_hold"))
+    if len(merged_pdf) == 0:
+        return {"year_count": 0, "tie_count": 0, "decisive_count": 0, "ahead_count": 0, "first_year_partial_bool": False,
+                "last_year_partial_bool": False, "year_list": []}
+    date_series = pd.to_datetime(merged_pdf["date"])
+    merged_pdf = merged_pdf.assign(year=date_series.dt.year)
+    year_list = []
+    for year_int, group_pdf in merged_pdf.groupby("year", sort=True):
+        strategy_float = float(np.prod(1.0 + group_pdf["daily_return_strategy"].to_numpy(dtype=float)) - 1.0)
+        buy_hold_float = float(np.prod(1.0 + group_pdf["daily_return_buy_hold"].to_numpy(dtype=float)) - 1.0)
+        excess_float = strategy_float - buy_hold_float
+        year_list.append({"year": int(year_int), "session_count": int(len(group_pdf)), "strategy_return": strategy_float,
+                          "buy_hold_return": buy_hold_float, "excess_return": excess_float,
+                          "tie_bool": bool(abs(excess_float) <= tie_float),
+                          "ahead_bool": bool(excess_float > tie_float)})
+    first_date, last_date = date_series.min(), date_series.max()
+    tie_count = int(sum(row["tie_bool"] for row in year_list))
+    return {"year_count": len(year_list), "tie_count": tie_count, "decisive_count": len(year_list) - tie_count,
+            "ahead_count": int(sum(row["ahead_bool"] for row in year_list)),
+            "first_year_partial_bool": bool(first_date.month > 1 or first_date.day > 7),
+            "last_year_partial_bool": bool(last_date.month < 12 or last_date.day < 24), "year_list": year_list}
 
 
 # FUNCTION: THE CONSISTENCY PART OF THE VERDICT
@@ -208,7 +254,8 @@ def get_consistency_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in,
             "decisive_count": int(decisive_count), "ahead_count": ahead_count, "ahead_share": ahead_share,
             "min_share": min_share, "tie_tolerance": tie_float, "min_decisive_count": min_decisive_int,
             "enough_decisive_bool": bool(enough_bool), "window_months": window_int, "step_months": step_int,
-            "window_pdf": window_pdf}
+            "window_pdf": window_pdf,
+            "calendar_year_dict": get_calendar_year_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, tie_float)}
 
 
 # FUNCTION: THE BASELINE PART OF THE VERDICT
@@ -268,7 +315,7 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
                             look_ahead_status_str_in=LOOK_AHEAD_PENDING_STR, trial_log_path_str_in=None,
                             legacy_path_list_in=None, v_reference_dict_in=None):
     """
-    One decision rule. email-worthy only if return, consistency, baselines and look-ahead all pass.
+    One decision rule. "pass" only if return, consistency, baselines, look-ahead and multiple testing all pass.
 
     Args:
         strategy_return_pdf_in, buy_hold_return_pdf_in (pd.DataFrame): date, daily_return
@@ -280,7 +327,7 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
             None = the live spread (synthetic tests)
 
     Returns:
-        dict: parts, failed_list, email_worthy_bool, label_str, success_dict
+        dict: parts, failed_list, verdict_pass_bool, label_str, success_dict
     """
     # RETURN NUMBERS FROM THE EXISTING SUCCESS CRITERIA
     success_dict = get_success_criteria_dict(strategy_return_pdf_in, buy_hold_return_pdf_in)
@@ -303,11 +350,11 @@ def get_runner_verdict_dict(strategy_return_pdf_in, buy_hold_return_pdf_in, base
         failed_list.append("look-ahead")
     if not multiple_testing_dict["pass_bool"]:
         failed_list.append("multiple-testing")
-    email_worthy_bool = len(failed_list) == 0
+    verdict_pass_bool = len(failed_list) == 0
     return {"return_dict": return_dict, "consistency_dict": consistency_dict, "baseline_dict": baseline_verdict_dict,
             "look_ahead_dict": look_ahead_dict, "multiple_testing_dict": multiple_testing_dict, "failed_list": failed_list,
-            "email_worthy_bool": bool(email_worthy_bool),
-            "label_str": EMAIL_WORTHY_STR if email_worthy_bool else NOT_EMAIL_WORTHY_STR,
+            "verdict_pass_bool": bool(verdict_pass_bool),
+            "label_str": VERDICT_PASS_STR if verdict_pass_bool else VERDICT_FAIL_STR,
             "success_dict": success_dict}
 
 
@@ -337,7 +384,7 @@ def get_report_payload_dict(verdict_dict_in, extra_dict_in=None):
     """
     # THE PARTS STAY NESTED SO 4B-1C CAN ADD LOOK-AHEAD NUMBERS IN PLACE
     payload_dict = {"label_str": verdict_dict_in["label_str"],
-                    "email_worthy_bool": bool(verdict_dict_in["email_worthy_bool"]),
+                    "verdict_pass_bool": bool(verdict_dict_in["verdict_pass_bool"]),
                     "failed_list": list(verdict_dict_in["failed_list"]),
                     "return_dict": dict(verdict_dict_in["return_dict"]),
                     "consistency_dict": dict(verdict_dict_in["consistency_dict"]),
@@ -370,12 +417,14 @@ def get_report_markdown_str(report_dict_in):
     if experiment_str:
         line_list.append(f"Experiment: {experiment_str}")
         line_list.append("")
-    line_list.append(f"## Verdict: {report_dict_in['label_str']}")
-    line_list.append("")
     if report_dict_in["failed_list"]:
+        line_list.append(f"## Verdict: FAIL ({', '.join(report_dict_in['failed_list'])})")
+        line_list.append("")
         line_list.append("Failed: " + ", ".join(report_dict_in["failed_list"]) + ".")
     else:
-        line_list.append("Every part passed.")
+        line_list.append("## Verdict: PASS, audit pending")
+        line_list.append("")
+        line_list.append("Every part passed. A pass means \"not rejected\", not \"proven\"; the audit and the holdout follow.")
     grade_dict = report_dict_in.get("grade_dict") or {}
     if grade_dict:
         line_list.extend(["", f"Grade (what the planner sees): {grade_dict.get('grade_str')}; "
@@ -397,8 +446,14 @@ def get_report_markdown_str(report_dict_in):
     line_list.append(
         f"Prior-only total return {get_report_float_str(return_dict['strategy_total_return'])} vs buy-and-hold "
         f"{get_report_float_str(return_dict['buy_hold_total_return'])}: "
-        f"{'pass' if return_dict['pass_bool'] else 'fail'} ({return_dict['reason_str']})."
+        f"{'pass' if return_dict['pass_bool'] else 'fail'} ({return_dict['reason_str']}; the part passes only "
+        f"strictly above buy-and-hold)."
     )
+    if "comparable_with_secondary_bool" in return_dict:
+        line_list.append(
+            f"Comparable return (at least 90% of buy-and-hold) with a higher Sharpe ratio or a "
+            f"smaller drawdown: {'yes' if return_dict['comparable_with_secondary_bool'] else 'no'} (reported only; no "
+            f"significance test stands behind it).")
     line_list.append(
         f"Sharpe {get_report_float_str(return_dict['strategy_sharpe_ratio'])} vs "
         f"{get_report_float_str(return_dict['buy_hold_sharpe_ratio'])}. "
@@ -415,6 +470,14 @@ def get_report_markdown_str(report_dict_in):
         f"{consistency_dict.get('min_decisive_count', 0)} decisive windows required): "
         f"{'pass' if consistency_dict['pass_bool'] else 'fail'}."
     )
+    year_dict = consistency_dict.get("calendar_year_dict") or {}
+    if year_dict.get("year_count"):
+        partial_list = [label for label, flag in (("first", year_dict.get("first_year_partial_bool")),
+                                                  ("last", year_dict.get("last_year_partial_bool"))) if flag]
+        line_list.append(
+            f"Calendar years (non-overlapping; reported only): ahead in {year_dict['ahead_count']} of "
+            f"{year_dict['decisive_count']} decisive years ({year_dict['tie_count']} of {year_dict['year_count']} tied)"
+            + (f"; the {' and '.join(partial_list)} year partial." if partial_list else "."))
     line_list.extend(["", "### Baselines", ""])
     line_list.append(
         f"Exposure read from the {str(baseline_dict.get('exposure_source_str', 'decision_target')).replace('_', ' ')}. "
@@ -451,6 +514,13 @@ def get_report_markdown_str(report_dict_in):
             line_list.append(f"Slippage ${float(row_dict['slippage_per_share']):.2f} per share: prior-only "
                              f"{get_report_float_str(row_dict['strategy_total_return'])} vs buy-and-hold "
                              f"{get_report_float_str(row_dict['buy_hold_total_return'])}.")
+    cash_dict = report_dict_in.get("cash_rate_sensitivity_dict") or {}
+    if cash_dict:
+        line_list.extend(["", "### Cash-rate sensitivity (reported, not part of the verdict)", ""])
+        line_list.append(f"Cash at the T-bill yield minus {float(cash_dict['spread']):.3f} (floored at 0), standard "
+                         f"slippage: prior-only {get_report_float_str(cash_dict['strategy_total_return'])} vs buy-and-hold "
+                         f"{get_report_float_str(cash_dict['buy_hold_total_return'])} "
+                         f"({'above' if cash_dict.get('strategy_above_buy_hold_bool') else 'not above'} buy-and-hold).")
     multiple_dict = report_dict_in.get("multiple_testing_dict") or {}
     if multiple_dict:
         line_list.extend(["", "### Multiple testing", ""])

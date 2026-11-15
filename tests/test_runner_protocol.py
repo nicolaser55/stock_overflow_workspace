@@ -63,9 +63,14 @@ def get_full_protocol_str():
         str: Markdown with every required section
     """
     # THE TEMPLATE'S SECTIONS, SHORT
-    return ("# expZZ\n\nDerived from: none\n\n## 1. Background and research question\nq\n## 2. Success criteria\ns\n"
+    return ("# expZZ\n\nDerived from: none\n\nFamily: C, idea C1, variant 1 of 5\n\n"
+            "## 1. Background and research question\nq\n## 2. Success criteria\ns\n"
             "## 3.1 Data sources\nd\n## 4. Rules\nr\n## 5. Walk-forward and selection\nw\n## 6. Baselines\nb\n"
-            "## 7. Stopping rules\nx\n## 9. Discipline, implementation, limitations\nl\n## 11. Change log\nc\n")
+            "## 7. Stopping rules\nx\n## 9. Discipline, implementation, limitations\nl\n## 11. Change log\n"
+            "| Version | Date | Change |\n|---|---|---|\n| 1.0 | 2026-11-14 | Initial protocol |\n"
+            "| 1.1 | 2026-11-15 | bug-fix: the exit used the wrong column |\n"
+            "| 1.2 | 2026-11-16 | data-dependent: a wider buffer after the 1.1 result |\n"
+            "| 1.3 | 2026-11-17 | data-dependent: a fourth version |\n")
 
 
 # FUNCTION: THE GUARD KEEPS ITS MEMORY ACROSS A RESET (records/legacy/registered_versions.csv; 2026-11-09)
@@ -355,12 +360,144 @@ def test_helper_hash():
            "changes with a used helper; a logged version reruns only with its helper hash; not part of the design key")
 
 
+# FUNCTION: NEW VERSIONS ARE NEW DESIGNS IN N (REVIEW F1, F4; DECIDED 2026-11-14)
+def test_new_versions_are_counted():
+    """
+    An amended version that reuses a candidate name is refused; with new names it runs and N grows. The version limit
+    counts per family, so a renamed copy (expQQ_amend_v2) cannot add a fourth version. A folder under experiments/ must
+    carry EXPERIMENT_NAME. The Family line is linted; an amendment needs exactly one change-log label.
+
+    Returns:
+        None
+    """
+    # A LOGGED 1.0 WITH CANDIDATES A AND B
+    from so.core.multiple_testing import get_tried_design_count_dict
+    from so.runner.preregistration import get_family_line_dict, get_amendment_label_str
+    folder_str = tempfile.mkdtemp(prefix="so_prereg_amend_", dir=TEMP_ROOT_STR)
+    log_path_str = os.path.join(TEMP_ROOT_STR, "amend_trial_log.csv")
+    registered_str = os.path.join(TEMP_ROOT_STR, "amend_registered_versions.csv")
+    ledger_str = os.path.join(TEMP_ROOT_STR, "amend_no_ledger.csv")
+    base_row = {"experiment": "expQQ_amend", "protocol_version": "1.0", "stage": "validation", "metric_json": "{}"}
+    pd.DataFrame([{**base_row, "setting_json": json.dumps({"candidate": name_str, "design_folder_hash": "q1", "run_id": "r1"})}
+                  for name_str in ("A", "B")]).to_csv(log_path_str, index=False)
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write(get_full_protocol_str())
+    git_func = lambda arg_list_in: "preregister expQQ v1.1\n"
+    call_dict = {"git_func_in": git_func, "registered_path_str_in": registered_str}
+
+    def refusal_str(call_in):
+        try:
+            call_in()
+        except ValueError as error:
+            return str(error)
+        return ""
+    # A REUSED NAME IS REFUSED; NEW NAMES PASS, WITH THE LABEL AND THE FAMILY LINE IN THE RESULT
+    module_reuse = types.SimpleNamespace(EXPERIMENT_NAME="expQQ_amend", PROTOCOL_VERSION="1.1", CANDIDATE_LIST=["A", "C"])
+    assert "already logged" in refusal_str(lambda: check_preregistration_dict(module_reuse, folder_str, "q2", log_path_str, **call_dict))
+    module_new = types.SimpleNamespace(EXPERIMENT_NAME="expQQ_amend", PROTOCOL_VERSION="1.1", CANDIDATE_LIST=["v1.1|A", "v1.1|B"])
+    first_dict = check_preregistration_dict(module_new, folder_str, "q2", log_path_str, **call_dict)
+    assert first_dict["status_str"] == "first_run" and first_dict["amendment_label_str"] == "bug-fix"
+    assert first_dict["family_dict"] == {"family": "C", "idea": "C1", "variant": 1, "line": "Family: C, idea C1, variant 1 of 5"}
+    # N GROWS ONCE THE AMENDED VERSION'S ROWS ARE LOGGED
+    before_int = get_tried_design_count_dict(log_path_str, [ledger_str])["total_count"]
+    amended_pdf = pd.concat([pd.read_csv(log_path_str, dtype=str, keep_default_na=False), pd.DataFrame(
+        [{**base_row, "protocol_version": "1.1", "setting_json": json.dumps({"candidate": name_str, "design_folder_hash": "q2", "run_id": "r2"})}
+         for name_str in ("v1.1|A", "v1.1|B")])])
+    amended_pdf.to_csv(log_path_str, index=False)
+    assert (before_int, get_tried_design_count_dict(log_path_str, [ledger_str])["total_count"]) == (2, 4)
+    # AN AMENDMENT WITHOUT A LABEL, OR WITH BOTH LABELS, IS REFUSED
+    module_12 = types.SimpleNamespace(EXPERIMENT_NAME="expQQ_amend", PROTOCOL_VERSION="1.2", CANDIDATE_LIST=["v1.2|A"])
+    unlabelled_str = get_full_protocol_str().replace("| 1.2 | 2026-11-16 | data-dependent: a wider buffer after the 1.1 result |\n", "")
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write(unlabelled_str)
+    assert "label" in refusal_str(lambda: check_preregistration_dict(module_12, folder_str, "q3", log_path_str, **call_dict))
+    assert get_amendment_label_str(unlabelled_str + "| 1.2 | x | bug-fix, then data-dependent |\n", "1.2") is None
+    assert get_amendment_label_str(get_full_protocol_str(), "1.2") == "data-dependent"
+    # THE LIMIT COUNTS PER FAMILY: WITH 1.0, 1.1 AND 1.2 LOGGED, A RENAMED COPY CANNOT ADD A FOURTH
+    with open(os.path.join(folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write(get_full_protocol_str())
+    pd.concat([amended_pdf, pd.DataFrame([{**base_row, "protocol_version": "1.2",
+                                            "setting_json": json.dumps({"candidate": "v1.2|A", "design_folder_hash": "q3"})}])]).to_csv(log_path_str, index=False)
+    module_copy = types.SimpleNamespace(EXPERIMENT_NAME="expQQ_amend_v2", PROTOCOL_VERSION="1.0", CANDIDATE_LIST=["v2|A"])
+    assert "per family" in refusal_str(lambda: check_preregistration_dict(module_copy, folder_str, "q4", log_path_str, **call_dict))
+    # THE FAMILY LINE: MISSING OR MALFORMED (VARIANT 6 OF 5) IS A MISSING SECTION
+    assert get_family_line_dict("Family: c, idea C2, variant 5 of 5.")["family"] == "C"
+    for bad_str in ["", "Family: C, idea C1, variant 6 of 5", "Family: C1, variant 1 of 5", "Family: none"]:
+        assert any(item_str.startswith("Family:") for item_str in get_protocol_missing_list(get_full_protocol_str().replace(
+            "Family: C, idea C1, variant 1 of 5", bad_str))), bad_str
+    # A FOLDER UNDER experiments/ CARRIES ITS EXPERIMENT'S NAME (A TEMPORARY WORKSPACE)
+    workspace_str = tempfile.mkdtemp(prefix="so_prereg_workspace_", dir=TEMP_ROOT_STR)
+    wrong_folder_str = os.path.join(workspace_str, "experiments", "expRR_other")
+    os.makedirs(wrong_folder_str)
+    with open(os.path.join(wrong_folder_str, "PROTOCOL.md"), "w", encoding="utf-8") as file_obj:
+        file_obj.write(get_full_protocol_str())
+    module_rr = types.SimpleNamespace(EXPERIMENT_NAME="expRR_name", PROTOCOL_VERSION="1.0", CANDIDATE_LIST=["a"])
+    real_workspace_str = paths.WORKSPACE_PATH_STR
+    paths.WORKSPACE_PATH_STR = workspace_str
+    try:
+        assert "does not match EXPERIMENT_NAME" in refusal_str(lambda: check_preregistration_dict(
+            module_rr, wrong_folder_str, "r1", log_path_str, **call_dict))
+        module_ok = types.SimpleNamespace(EXPERIMENT_NAME="expRR_other", PROTOCOL_VERSION="1.0", CANDIDATE_LIST=["a"])
+        ok_dict = check_preregistration_dict(module_ok, wrong_folder_str, "r1", log_path_str, **call_dict)
+        assert ok_dict["status_str"] == "first_run" and ok_dict["amendment_label_str"] is None
+    finally:
+        paths.WORKSPACE_PATH_STR = real_workspace_str
+    passed("new versions are new designs: a reused candidate name refused, new names counted in N, the version limit per "
+           "family (a renamed copy refused), the folder carries EXPERIMENT_NAME, the Family line linted, one amendment label")
+
+
+# FUNCTION: THE RESET MARKER (REVIEW F3; DECIDED 2026-11-14)
+def test_reset_marker():
+    """
+    No marker passes. A marker matching the judge's two records passes (CRLF-neutral). A changed record, an
+    unreadable marker or another schema stops the run.
+
+    Returns:
+        None
+    """
+    # A TEMPORARY WORKSPACE WITH THE TWO RECORDS
+    from so.runner.preregistration import write_reset_marker_dict, check_reset_marker_dict, get_reset_record_path_dict
+    workspace_str = tempfile.mkdtemp(prefix="so_marker_workspace_", dir=TEMP_ROOT_STR)
+    os.makedirs(os.path.join(workspace_str, "records", "legacy"))
+    file_dict = get_reset_record_path_dict(workspace_str)
+    for path_str in file_dict.values():
+        with open(path_str, "wb") as file_obj:
+            file_obj.write(b"source,experiment\nx,exp\n")
+    marker_str = os.path.join(TEMP_ROOT_STR, "judge_test", "reset_marker.json")
+    assert check_reset_marker_dict(marker_str, workspace_str)["status_str"] == "no_marker"
+    write_reset_marker_dict("reset_test", marker_str, file_dict)
+    assert check_reset_marker_dict(marker_str, workspace_str)["status_str"] == "match"
+    with open(list(file_dict.values())[0], "wb") as file_obj:      # A WINDOWS CHECKOUT OF THE SAME FILE
+        file_obj.write(b"source,experiment\r\nx,exp\r\n")
+    assert check_reset_marker_dict(marker_str, workspace_str)["status_str"] == "match"
+    with open(list(file_dict.values())[1], "ab") as file_obj:      # THE DEPLOYED JUDGE LACKS A ROW THE RESET WROTE
+        file_obj.write(b"y,exp2\n")
+
+    def refused_bool(call_in):
+        try:
+            call_in()
+        except ValueError:
+            return True
+        return False
+    assert refused_bool(lambda: check_reset_marker_dict(marker_str, workspace_str))
+    with open(marker_str, "w", encoding="utf-8") as file_obj:
+        file_obj.write("{not json")
+    assert refused_bool(lambda: check_reset_marker_dict(marker_str, workspace_str))
+    with open(marker_str, "w", encoding="utf-8") as file_obj:
+        json.dump({"schema": "other", "file_sha256_dict": {}}, file_obj)
+    assert refused_bool(lambda: check_reset_marker_dict(marker_str, workspace_str))
+    passed("reset marker: no marker passes, a matching judge passes (CRLF-neutral), a changed record, an unreadable "
+           "marker or another schema stops the run")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     # RUN EVERY CHECK, THEN REMOVE THE TEMPORARY DATA ROOT
     try:
         test_preregistration_guard()
         test_registered_versions_survive_reset()
+        test_new_versions_are_counted()
+        test_reset_marker()
         test_helper_hash()
         test_cost_sensitivity_in_report()
         print("\nAll runner protocol tests passed ✅")
