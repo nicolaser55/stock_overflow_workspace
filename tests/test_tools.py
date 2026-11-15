@@ -1570,6 +1570,21 @@ def test_check_equivalence():
     number_declared_dict["return_dict"]["strategy_total_return"] = 0.4322
     assert not check_equivalence.get_equivalence_dict(baseline_str, make_run_str("declared_number", number_declared_dict, [1.0, 0.0]),
                                                       "pre-research-2026-11-14")["equivalent_bool"]
+    # R4f (2026-11-15): THE LIVE V IS INFORMATION ONLY, WITH OR WITHOUT A CHANGED V INPUT
+    live_base_dict = copy.deepcopy(report_dict)
+    live_base_dict["multiple_testing_dict"].update({"trial_sharpe_variance": 0.0131, "v_reference_sha256": "f" * 64,
+                                                    "trial_sharpe_design_count": 80, "live_trial_sharpe_variance": 0.0096,
+                                                    "live_trial_sharpe_design_count": 42})
+    live_new_dict = copy.deepcopy(live_base_dict)
+    live_new_dict["multiple_testing_dict"].update({"live_trial_sharpe_variance": 0.0131, "live_trial_sharpe_design_count": 80})
+    live_outcome_dict = check_equivalence.get_equivalence_dict(make_run_str("live_base", live_base_dict, [1.0, 0.0]),
+                                                               make_run_str("live_new", live_new_dict, [1.0, 0.0]))
+    assert live_outcome_dict["equivalent_bool"], live_outcome_dict
+    assert len(live_outcome_dict["information_difference_list"]) == 2, live_outcome_dict["information_difference_list"]
+    used_v_dict = copy.deepcopy(live_new_dict)
+    used_v_dict["multiple_testing_dict"]["trial_sharpe_variance"] = 0.02          # THE V THE VERDICT USES STILL COUNTS
+    assert not check_equivalence.get_equivalence_dict(make_run_str("live_base2", live_base_dict, [1.0, 0.0]),
+                                                      make_run_str("used_v", used_v_dict, [1.0, 0.0]))["equivalent_bool"]
     passed("equivalence check (identities ignored, any scoring number, decision or candidate difference fails, N changes "
            "explained; V changes explained only with a changed V input, named; the trial log's own count is information; a "
            "declared change explains only its own lines)")

@@ -54,11 +54,15 @@ V_INPUT_FIELD_LIST = ["trial_sharpe_variance_source_str", "v_reference_sha256", 
 # multiple_testing_dict FIELDS THAT FOLLOW V (AND NOT N): THE SPREAD, THE BAR IT SETS, THE DEFLATED SHARPE AND ITS PASS
 V_DEPENDENT_FIELD_LIST = ["trial_sharpe_variance", "trial_sharpe_variance_source_str", "trial_sharpe_design_count",
                           "v_reference_sha256", "expected_max_sharpe", "deflated_sharpe_probability", "dsr_pass_bool",
-                          "pass_bool", "live_trial_sharpe_variance", "live_trial_sharpe_design_count"]
+                          "pass_bool"]
 # TOP-LEVEL VALUES THAT FOLLOW THE MULTIPLE-TESTING PASS (EXPLAINED BY V ONLY WHEN dsr_pass_bool ITSELF CHANGED)
 V_PASS_DEPENDENT_KEY_LIST = ["grade_dict", "failed_list", "label_str", "email_worthy_bool", "verdict_pass_bool"]
-# REPORTED FOR INFORMATION ONLY (THE VERDICT DOES NOT USE IT): THE TRIAL LOG'S OWN DESIGN COUNT
-INFORMATION_FIELD_LIST = ["current_design_count"]
+# REPORTED FOR INFORMATION ONLY (THE VERDICT DOES NOT USE THEM): THE TRIAL LOG'S OWN DESIGN COUNT, AND THE LIVE V
+# (THE SPREAD OF THE TRIAL LOG AS IT STOOD WHEN THE RUN STARTED). WITH A FROZEN V REFERENCE THE VERDICT USES THE
+# REFERENCE (so.core.multiple_testing.get_multiple_testing_verdict_dict), SO THE LIVE V FOLLOWS QUEUE ORDER AND NOTHING
+# ELSE. R4f, 2026-11-15: UNTIL THEN THEY WERE V-DEPENDENT, EXCUSED ONLY WHEN A V INPUT CHANGED, SO THE R4e CHECK OF
+# exp04 AND exp05 (BASELINE RUN WITH 42 / 46 DESIGNS IN THE LOG, RERUN WITH 80) CAME OUT NOT EQUIVALENT ON THEM ALONE
+INFORMATION_FIELD_LIST = ["current_design_count", "live_trial_sharpe_variance", "live_trial_sharpe_design_count"]
 # DECLARED CHANGES: NAME -> THE EXACT DIFFERENCE LINES (FULL-LINE PATTERNS) THAT CHANGE AND NOTHING ELSE. WRITTEN BEFORE
 # THE CHECK RUNS; A LINE THAT MATCHES NONE OF THEM STAYS A SCORING DIFFERENCE
 DECLARED_CHANGE_DICT = {
@@ -72,6 +76,9 @@ DECLARED_CHANGE_DICT = {
         r"consistency_dict\.calendar_year_dict: only in the new run",
         r"cash_rate_sensitivity_dict: only in the new run",
         r"cost_sensitivity_list\[\d+\]\.return_reason_str: 'total_return_at_least_buy_hold' -> 'total_return_above_buy_hold'",
+        # ADDED BEFORE THE R4f RERUN OF THE NINE (2026-11-15): A COST LEVEL WHOSE RETURN SAT IN THE 90-100% BAND WITH A
+        # BETTER SHARPE OR DRAWDOWN PASSED BEFORE R4e AND FAILS NOW (ITS NUMBERS AND REASON STAY IDENTICAL)
+        r"cost_sensitivity_list\[\d+\]\.return_pass_bool: True -> False",
     ],
 }
 

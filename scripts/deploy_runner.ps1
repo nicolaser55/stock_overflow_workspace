@@ -1,6 +1,9 @@
 # Deploy main to the runner: the runner clone moves to origin/main and that commit becomes the judge of new jobs.
 #
-# Run as so_runner:   runas /user:so_runner powershell    then    .\scripts\deploy_runner.ps1   (from the runner clone)
+# Run as so_runner:   runas /user:so_runner powershell    then, from the runner clone (D:\stock_overflow\runner_workspace):
+#     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1
+# (so_runner's execution policy blocks scripts; the bypass applies to this one process only, 2026-11-15). Check after:
+#     git rev-parse refs/deployed      (must equal origin/main; if not, run the deploy again: the known stop on git's stderr)
 # Optional: -RunnerWorkspace <folder> (default D:\stock_overflow\runner_workspace), -DataRoot <folder> (default
 # D:\stock_overflow\data), -TaskName <name> (default "SO queue runner"), -Force (deploy while a job is running; the
 # restart then stops that job, which the next start resumes under the same run id and its pinned judge).
