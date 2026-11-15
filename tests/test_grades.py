@@ -133,6 +133,10 @@ def test_grade_every_combination():
     assert get_run_grade_dict(get_verdict_dict("pass", False, True, True, True))["reason_code_str"] == "return_below_buy_hold_no_cost_check"
     comparable_list = [{"slippage_per_share": 0.0, "return_pass_bool": False, "return_reason_str": "comparable_without_secondary"}]
     assert get_run_grade_dict(get_verdict_dict("pass", False, True, True, True), comparable_list)["reason_code_str"] == "return_comparable_without_secondary"
+    # 2026-11-14: THE COMPARABLE BAND WITH A BETTER SHARPE OR DRAWDOWN NO LONGER PASSES; ITS GRADE SAYS SO
+    secondary_list = [{"slippage_per_share": 0.0, "return_pass_bool": False, "return_reason_str": "comparable_with_secondary"}]
+    assert get_run_grade_dict(get_verdict_dict("pass", False, True, True, True), secondary_list)["reason_code_str"] == "return_comparable_with_secondary"
+    assert REASON_DICT["return_comparable_with_secondary"][0] == GRADE_NOT_BETTER_STR
     old_row_list = [{"slippage_per_share": 0.0, "strategy_total_return": 0.5, "buy_hold_total_return": 0.1}]
     assert get_run_grade_dict(get_verdict_dict("pass", False, True, True, True), old_row_list)["reason_code_str"] == "return_below_buy_hold_no_cost_check"
     assert get_run_grade_dict(get_verdict_dict("pass", True, False, True, True, enough_decisive_bool_in=False))["reason_code_str"] == "too_few_decisive_windows"
@@ -564,6 +568,13 @@ def test_reset_records():
     assert os.path.isdir(path_dict["status"]) and os.listdir(path_dict["status"]) == []
     assert os.path.isfile(os.path.join(done_dict["target_str"], "visible", "grades", "r1.json"))
     assert os.path.isfile(os.path.join(done_dict["target_str"], "visible", "status", "j1.json"))
+    # THE RESET MARKER (2026-11-14): THE HASHES OF THE TWO RECORDS AS WRITTEN; THE MARKER STAYS IN judge/ (NOT MOVED)
+    from so.runner.preregistration import get_lf_sha256_str
+    marker_path_str = os.path.join(os.path.dirname(path_dict["old_state"]), "judge", "reset_marker.json")
+    marker_dict = json.loads(Path(marker_path_str).read_text(encoding="utf-8"))
+    assert marker_dict == done_dict["marker_dict"] and marker_dict["reason"] == "reset_20261103_120000"
+    assert marker_dict["file_sha256_dict"] == {"records/legacy/pilot_designs.csv": get_lf_sha256_str(ledger_str),
+                                               "records/legacy/registered_versions.csv": get_lf_sha256_str(registered_str)}
     # REGISTERING THE MOVED LOG AGAIN ADDS NOTHING; A DRY RUN CHANGES NOTHING; A MISSING LOG IS AN ERROR
     moved_log_str = os.path.join(done_dict["target_str"], "trial_log.csv")
     assert reset_records.register_versions_dict(moved_log_str, False, registered_str)["new_row_count"] == 0

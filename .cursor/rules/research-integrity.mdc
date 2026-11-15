@@ -36,6 +36,13 @@ was tuned until it did is a failure of this project.
 Before the first run of a new experiment or version, commit `PROTOCOL.md` (question, hypothesis, success criteria,
 data, rules, the complete candidate list, selection rule, baselines including the uninformed version of each informed
 component, stopping rule, limitations, trial budget), `config.py`, `design.py` and tests, with a message starting
-`preregister expNN`. A change after a run is a new `PROTOCOL_VERSION` with the reason in the protocol's change log,
-labelled data-dependent if results motivated it. At most two new versions per experiment. Keep grids small (about 3-15
-candidates). When discussing significance, give the number of trials in the trial log behind the conclusion.
+`preregister expNN`. The commit touches only the experiment folder; its tests reach `main` first, in their own pull
+request (a queued job may change nothing outside `experiments/`). The protocol carries a "Family:" line (`Family: C,
+idea C1, variant 1 of 5`): a variant is a protocol version, at most 5 per idea across experiments, and the family
+ledger is `docs/STAGE1_RESEARCH_PLAN.md` section 4. A change after a run is a new `PROTOCOL_VERSION` of the same
+experiment (same name and folder; never a renamed copy), every candidate renamed so the new version counts as new designs,
+with a change-log row labelled `bug-fix` (the code did not do what the protocol says; found without results) or
+`data-dependent` (anything results prompted; when in doubt, data-dependent). A crash before the first trial row logs
+nothing: the fix may rerun as the same version after a new `preregister` commit, recorded as "pre-run fix: <what>".
+At most two new versions per family (three versions in all). Keep grids small (about 3-15 candidates per version).
+When discussing significance, give N, the designs tried with the pilot included, behind the conclusion.

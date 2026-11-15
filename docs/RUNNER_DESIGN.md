@@ -1,4 +1,4 @@
-# Point-in-time runner: design (2026-10-20, updated 2026-10-25)
+# Point-in-time runner: design (2026-10-20, updated through 2026-11-14)
 
 *Written by the assistant for infrastructure step 4 (audit S7 raised to a blocker by Nicolas on 2026-10-19; also S1,
 S2, S3, S6, S9, B6). Agreed by Nicolas on 2026-10-21, with the minute mode, the single holdout path and the extra
@@ -187,6 +187,21 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   several processes writing at once.
 - **Checkpoints:** after each period, so a crash resumes instead of restarting.
 - **Parallel:** candidates run in separate processes (8 cores).
+- **Verdict label (2026-11-14):** `pass` when every part below passes, otherwise `fail` with the failed parts
+  (`report.json` `label_str` and `verdict_pass_bool`; the manifest keeps the key `verdict.email_worthy`, the legacy name
+  of "the verdict passed", because `run_index.csv`, the queue records and the grade read it). A pass means "not
+  rejected", audit pending. Rows written before 2026-11-14 say "email-worthy" / "not email-worthy".
+- **Return part (decided by Nicolas on 2026-11-14):** passes only when the prior-only total return is strictly above
+  buy-and-hold's (`primary_success`). The comparable band (at least 90% of buy-and-hold) with a higher Sharpe ratio or a
+  smaller max drawdown fails with the reason `comparable_with_secondary` and is reported as
+  `return_dict.comparable_with_secondary_bool` and in `report.md`; no significance test stands behind that flag, and it
+  leads to no holdout evaluation or live test unless a test pre-registered for it passes. The grade reason
+  `return_comparable_with_secondary` names it. Until 2026-11-14 the band with a secondary win passed the part.
+- **Reported, not part of the verdict (2026-11-14):** the calendar years ahead of buy-and-hold, non-overlapping, next to
+  the rolling windows (`consistency_dict.calendar_year_dict`; a year within the tie band is a tie; partial first and last
+  years flagged), and a cash-rate row: the recorded decisions and buy-and-hold replayed at the standard slippage with
+  cash at the T-bill yield minus `CASH_RATE_SENSITIVITY_SPREAD` (0.005, floored at 0; `cash_rate_sensitivity_dict`),
+  because a broker sweep pays less than a bill.
 - **Verdict parts (2026-10-25):** return; consistency (ahead in at least 60% of the decisive rolling 12-month
   windows; a window within +/-0.5 percentage points of buy-and-hold is a tie and is not counted; at least 24 decisive
   windows; audit S1, a data-dependent amendment because exp13 failed only the old rule); baselines (constant exposure
@@ -238,6 +253,21 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   **Across resets (2026-11-09):** "logged" means in the trial log or in `records/legacy/registered_versions.csv`
   (experiment, version, folder hash, helper hash; no results), which `scripts/reset_records.py` fills before it moves
   the trial log and checks to cover it. The file is in the judge hash; the runner reads the deployed copy.
+  **New versions are new designs (2026-11-14, review F1 / F4):** the design key of N is the family and the candidate,
+  so the first run of a version not logged yet is also refused when its folder under `experiments/` is not named
+  `EXPERIMENT_NAME`, when its family (the name without a `_v<digits>` suffix) already has three versions over all its
+  names, when any of its candidate names is already logged for the family (an amendment renames every candidate, so it
+  adds its designs to N and keeps the earlier version's quarters in V), when `PROTOCOL.md` lacks a valid
+  `Family: <letter>, idea <id>, variant <k> of 5` line (a variant is a protocol version, at most 5 per idea; the line is
+  copied into the manifest's `preregistration.family_dict`), and, for an amendment, when the version's change-log row
+  lacks exactly one label, `bug-fix` or `data-dependent` (`preregistration.amendment_label_str`). Versions logged before
+  2026-11-14 are reruns and are not checked against these. A crash before the first trial row logs nothing, so the fix
+  reruns as the same version after a new `preregister` commit ("pre-run fix" in the change log).
+  **Reset marker (2026-11-14, review F3):** `scripts/reset_records.py` writes `store04_experiments/judge/reset_marker.json`
+  with the LF-normalized SHA-256 of `records/legacy/pilot_designs.csv` and `registered_versions.csv` as it wrote them
+  (`--register-from --confirm` rewrites it). Every development run on the real view compares its judge's copies with it
+  (`so.runner.preregistration.check_reset_marker_dict`) and stops on a mismatch: no run starts before the reset's records
+  pull request is merged and deployed. No marker (no reset since the rule) passes.
 - **Queue and runner account (audit S3 / S4, 2026-10-26; hardened A2, 2026-10-27):** `scripts/run_queue.py`. A job
   names a design commit. The runner account `so_runner` (scheduled task `SO queue runner`, `run_queue.py watch`)
   fetches origin once per pass (before it validates pending files) and builds the run commit from two sources:
@@ -288,7 +318,7 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). A job whose commit holds core changes
   that are on `main` but not deployed is rejected with that reason. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
-- **Report and verdict:** one shared decision rule (the agreed "consistently match or beat" rule) and one run
+- **Report and verdict:** one shared decision rule (the verdict parts above) and one run
   manifest (status, commit, `VIEW.json` stamp, trial ids, outputs, verdict) that the orchestrator reads. The stamp
   makes an old run reproducible after the view's edge has moved.
 - **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected

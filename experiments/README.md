@@ -32,17 +32,30 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 
 ## Adding an experiment
 
-1. Copy `_template/` to `expNN_<name>/` (next free number).
+1. Copy `_template/` to `expNN_<name>/` (next free number). The folder name must equal `EXPERIMENT_NAME`.
 2. Write `PROTOCOL.md` from the template before looking at any result: question, success criteria, data and sources,
-   rules, the complete candidate list, selection rule, baselines, stopping rule, limitations, trial budget, and the
-   "Derived from:" line. The first run of a new version is refused unless these sections exist and the last commit of
-   the folder is a `preregister` commit; a changed folder may not rerun an already-run version; at most three versions
-   per experiment (`so/runner/preregistration.py`).
+   rules, the complete candidate list, selection rule, baselines, stopping rule, limitations, trial budget, the
+   "Derived from:" line and the "Family:" line (`Family: C, idea C1, variant 1 of 5`; a variant is a protocol version,
+   at most 5 per idea). The first run of a new version is refused unless these sections and lines exist and the last
+   commit of the folder is a `preregister` commit; a changed folder may not rerun an already-run version; at most three
+   versions per family, whatever the experiment name (`so/runner/preregistration.py`).
 3. Fill `config.py` (`EXPERIMENT_NAME`, `PROTOCOL_VERSION = "1.0"`, every constant; shared constants are read from
    `so.config`, never copied).
 4. Write `design.py`. Declare every source in `DATA_SOURCE_LIST` (registered in `so.core.point_in_time`).
-5. Add tests (synthetic data: rule mechanics, no look-ahead of new features, the design on a short runner loop) to
-   `tests/test_experiments.py` or a new suite listed in `tests/run_all_tests.py`.
-6. Commit everything (`preregister expNN`), then run: `scripts\run_queue.py add experiments\expNN_<name> --note "<why>"`
-   and `scripts\run_queue.py run` (or `scripts\run_development.py experiments\expNN_<name>`).
-7. Add the experiment to the registry above.
+5. Tests and the registry line first, in their own pull request: tests (synthetic data: rule mechanics, no look-ahead
+   of new features, the design on a short runner loop) in `tests/test_experiments.py` or a new suite listed in
+   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it and deploys (`scripts\deploy_runner.ps1`): a queued
+   job may change nothing outside `experiments/`, and a job based on `main` commits that are not deployed is rejected.
+   The design folder may sit in the same pull request, or follow in step 6.
+6. One commit that touches only `experiments/` (the experiment folder, and its row in the registry above), with a
+   subject starting `preregister expNN` (merge commits keep it; a squash merge would rename it, so main allows merge
+   commits only). Push it, then queue that commit:
+   `scripts\run_queue.py add experiments\expNN_<name> --note "<why>"` (from a clean clone at that commit).
+7. Read the result: the email (verdict `pass` or `fail`, failed parts, grade), `store04_experiments/runs/<run id>/report.md`
+   (Nicolas and so_runner), and `docs/RESULTS_LOG.md` after `scripts\append_results_log.py` and its pull request.
+
+An amendment after a run is a new `PROTOCOL_VERSION` of the same experiment in the same folder: raise the version, rename
+every candidate (for example `v1.1|<name>`; a reused name would add nothing to N and is refused), add a change-log row
+labelled `bug-fix` or `data-dependent`, update the variant number of the "Family:" line, then steps 5-7 again. A crash
+before the first trial row is not a version: fix, note "pre-run fix: <what>" in the change log, commit with
+`preregister` again and requeue.

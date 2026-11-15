@@ -28,7 +28,13 @@ part depends on N, the designs in the trial log, which may grow between the two 
 the multiple-testing view (and the grade, when only that changed) are reported separately as "explained by N" when N
 differs. Exit 0 when the runs are equivalent, 1 otherwise. It prints numbers: run it as nico or so_runner only.
 
-    python scripts/check_equivalence.py --baseline <run id> --new <run id>
+    python scripts/check_equivalence.py --baseline <run id> --new <run id> [--declared-change <name>]
+
+A judge change that renames or adds reported fields without changing any number is declared here, in
+DECLARED_CHANGE_DICT, before its check runs: --declared-change <name> files exactly those lines (each an exact pattern)
+under "explained by the declared change" instead of DIFFERENT. Every other line still counts. The first one is
+"pre-research-2026-11-14" (the verdict labels pass / fail, the "beats buy-and-hold" return rule, the reported 90% flag,
+calendar years and cash-rate row; project doc claude/DESIGN_2026-11-14_pre_research_fixes.md).
 
 A run id is looked up under the live runs folder. After a reset (scripts/reset_records.py) the baseline run is no
 longer there: give it as its full backup path instead, for example
@@ -40,7 +46,7 @@ longer there: give it as its full backup path instead, for example
 IGNORED_KEY_PATTERN = re.compile(r"(^|_)(run_id|commit|hash|judge|path|folder|ts|seconds|trial_id|process_count|"
                                  r"preregistration|evaluated)(_|$)")
 # TOP-LEVEL REPORT KEYS WHOSE VALUES FOLLOW N (THE DESIGNS IN THE TRIAL LOG; THE TAIL SITS IN multiple_testing_dict)
-N_DEPENDENT_KEY_LIST = ["multiple_testing_dict", "grade_dict", "failed_list", "label_str", "email_worthy_bool"]
+N_DEPENDENT_KEY_LIST = ["multiple_testing_dict", "grade_dict", "failed_list", "label_str", "email_worthy_bool", "verdict_pass_bool"]
 # CANDIDATE FILES COMPARED
 CANDIDATE_FILE_LIST = ["decisions.pkl", "scores.pkl"]
 # THE INPUTS OF V (R4d, 2026-11-12): WHEN ONE DIFFERS, THE VALUES BUILT ON V ARE "EXPLAINED BY V" (EACH LINE NAMES THE INPUT)
@@ -50,9 +56,24 @@ V_DEPENDENT_FIELD_LIST = ["trial_sharpe_variance", "trial_sharpe_variance_source
                           "v_reference_sha256", "expected_max_sharpe", "deflated_sharpe_probability", "dsr_pass_bool",
                           "pass_bool", "live_trial_sharpe_variance", "live_trial_sharpe_design_count"]
 # TOP-LEVEL VALUES THAT FOLLOW THE MULTIPLE-TESTING PASS (EXPLAINED BY V ONLY WHEN dsr_pass_bool ITSELF CHANGED)
-V_PASS_DEPENDENT_KEY_LIST = ["grade_dict", "failed_list", "label_str", "email_worthy_bool"]
+V_PASS_DEPENDENT_KEY_LIST = ["grade_dict", "failed_list", "label_str", "email_worthy_bool", "verdict_pass_bool"]
 # REPORTED FOR INFORMATION ONLY (THE VERDICT DOES NOT USE IT): THE TRIAL LOG'S OWN DESIGN COUNT
 INFORMATION_FIELD_LIST = ["current_design_count"]
+# DECLARED CHANGES: NAME -> THE EXACT DIFFERENCE LINES (FULL-LINE PATTERNS) THAT CHANGE AND NOTHING ELSE. WRITTEN BEFORE
+# THE CHECK RUNS; A LINE THAT MATCHES NONE OF THEM STAYS A SCORING DIFFERENCE
+DECLARED_CHANGE_DICT = {
+    "pre-research-2026-11-14": [
+        r"verdict_pass_bool: only in the new run",
+        r"email_worthy_bool: only in the baseline run",
+        r"label_str: 'not email-worthy' -> 'fail'",
+        r"label_str: 'email-worthy' -> 'pass'",
+        r"return_dict\.comparable_with_secondary_bool: only in the new run",
+        r"return_dict\.reason_str: 'total_return_at_least_buy_hold' -> 'total_return_above_buy_hold'",
+        r"consistency_dict\.calendar_year_dict: only in the new run",
+        r"cash_rate_sensitivity_dict: only in the new run",
+        r"cost_sensitivity_list\[\d+\]\.return_reason_str: 'total_return_at_least_buy_hold' -> 'total_return_above_buy_hold'",
+    ],
+}
 
 
 # FUNCTION: THE DIFFERENCES BETWEEN TWO JSON VALUES
@@ -151,16 +172,17 @@ def get_frame_equal_bool(baseline_in, new_in):
 
 
 # FUNCTION: COMPARE TWO RUNS
-def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
+def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in, declared_change_str_in=None):
     """
     Args:
         baseline_folder_str_in, new_folder_str_in (str): Run folders
+        declared_change_str_in (str | None): A key of DECLARED_CHANGE_DICT (None = no declared change)
 
     Returns:
         dict: equivalent_bool, scoring_difference_list, n_difference_list (explained by N), n_pair (baseline N, new N),
             v_difference_list (explained by V), v_input_list (the V inputs that differ, "field: a -> b"),
-            information_difference_list (reported only, not used by the verdict), candidate_difference_list,
-            same_experiment_bool
+            information_difference_list (reported only, not used by the verdict), declared_difference_list
+            (explained by the declared change), candidate_difference_list, same_experiment_bool
     """
     # THE REPORTS; THE N-DEPENDENT PART APART
     baseline_report_dict = read_json(os.path.join(baseline_folder_str_in, "report.json"))
@@ -192,6 +214,13 @@ def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
             v_difference_list.append(line_str)
     scoring_difference_list = [line_str for line_str in remaining_list
                                if line_str not in v_difference_list and line_str not in information_difference_list]
+    # A DECLARED CHANGE TAKES ONLY THE LINES IT NAMES, EACH MATCHED AS A WHOLE LINE
+    declared_difference_list = []
+    if declared_change_str_in is not None:
+        pattern_list = [re.compile(pattern_str) for pattern_str in DECLARED_CHANGE_DICT[declared_change_str_in]]
+        declared_difference_list = [line_str for line_str in scoring_difference_list
+                                    if any(pattern.fullmatch(line_str) for pattern in pattern_list)]
+        scoring_difference_list = [line_str for line_str in scoring_difference_list if line_str not in declared_difference_list]
     candidate_difference_list = get_candidate_difference_list(baseline_folder_str_in, new_folder_str_in)
     same_experiment_bool = (baseline_report_dict.get("experiment_name_str") == new_report_dict.get("experiment_name_str")
                             and baseline_report_dict.get("protocol_version_str") == new_report_dict.get("protocol_version_str"))
@@ -199,6 +228,7 @@ def get_equivalence_dict(baseline_folder_str_in, new_folder_str_in):
             "scoring_difference_list": scoring_difference_list, "n_difference_list": n_difference_list,
             "n_pair": (baseline_n, new_n), "v_difference_list": v_difference_list, "v_input_list": v_input_list,
             "information_difference_list": information_difference_list,
+            "declared_difference_list": declared_difference_list,
             "candidate_difference_list": candidate_difference_list,
             "same_experiment_bool": same_experiment_bool}
 
@@ -211,9 +241,13 @@ if __name__ == "__main__":
                         help="Run id of the baseline run under the live runs folder, or, after a reset, its full path "
                              "(backup_records\\reset_<time>\\runs\\<run id>)")
     parser.add_argument("--new", required=True, help="Run id of the rerun under the new judge (or its full path)")
+    parser.add_argument("--declared-change", choices=sorted(DECLARED_CHANGE_DICT), default=None,
+                        help="A judge change declared before this check (DECLARED_CHANGE_DICT): its named lines are "
+                             "explained, every other difference still counts")
     arg_dict = parser.parse_args()
     runs_str = get_queue_path_dict()["runs"]
-    outcome_dict = get_equivalence_dict(os.path.join(runs_str, arg_dict.baseline), os.path.join(runs_str, arg_dict.new))
+    outcome_dict = get_equivalence_dict(os.path.join(runs_str, arg_dict.baseline), os.path.join(runs_str, arg_dict.new),
+                                        arg_dict.declared_change)
     if not outcome_dict["same_experiment_bool"]:
         print("NOT COMPARABLE: the two runs are of different experiments or protocol versions")
     for line_str in outcome_dict["scoring_difference_list"] + outcome_dict["candidate_difference_list"]:
@@ -226,6 +260,8 @@ if __name__ == "__main__":
         print(f"explained by V:  {line_str}")
     for line_str in outcome_dict["information_difference_list"]:
         print(f"information only (not used by the verdict):  {line_str}")
+    for line_str in outcome_dict["declared_difference_list"]:
+        print(f"explained by the declared change {arg_dict.declared_change}:  {line_str}")
     print("EQUIVALENT: every scoring number and every candidate file is identical" if outcome_dict["equivalent_bool"]
           else "NOT EQUIVALENT: a full rerun is needed (design 4.4)")
     sys.exit(0 if outcome_dict["equivalent_bool"] else 1)

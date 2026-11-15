@@ -254,7 +254,8 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 - [x] Decided 2026-11-05: **the judge hash stays broad** (every protected `.py` under `so/` and `scripts/`, plus the
   pilot ledger). Narrowing it to scoring code would need a judgement, file by file, of what can change a score; a
   mistake there would let a scoring change through unseen. The equivalence check makes the broad hash cheap instead.
-- [~] **R4c, intraday decision times (decided by Nicolas on 2026-11-11):** a daily fractional design may also decide
+- [x] **R4c, intraday decision times (decided by Nicolas on 2026-11-11; closed 2026-11-14: merged and deployed, and its
+  equivalence checks, NOT EQUIVALENT only through V, were resolved by R4d below):** a daily fractional design may also decide
   at declared times during the session (fill at the next bar's open), for the stage-1 intraday ideas (I1, I2), which
   the runner could not express. Records, replay, pattern-based random timing, bar-weighted constant exposure and
   intraday look-ahead cuts (`docs/RUNNER_DESIGN.md`, "Intraday decision times"). Designs without intraday times take
@@ -272,10 +273,33 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   **Done when** the suite passes on nicodesktop, the PR is merged and deployed, the reference is frozen under STOP,
   the records are reset and all nine experiments are rerun in baseline order (the final baseline), compared under a
   rule Nicolas states before the rerun.
+- [~] **R4e, pre-research fixes (decided by Nicolas on 2026-11-14, after the independent review
+  `claude/REVIEW_2026-11-14_research_readiness.md`; design `claude/DESIGN_2026-11-14_pre_research_fixes.md`):**
+  - F1: a new version must be a new design in N: refused when a candidate name is already logged for the family, when
+    the folder under `experiments/` is not named `EXPERIMENT_NAME`, or when the family already has three versions over
+    all its names; the template no longer says "new experiment name";
+  - F2: the return part passes only strictly above buy-and-hold; the 90% band with a better Sharpe ratio or drawdown is
+    reported (`comparable_with_secondary_bool`), never a pass; new grade reason `return_comparable_with_secondary`;
+  - F3: the reset marker (`judge/reset_marker.json`); a development run stops while the deployed records differ from it;
+  - F4: the linted `Family:` line (a variant is a protocol version, at most 5 per idea) and the amendment labels
+    `bug-fix` / `data-dependent`;
+  - reported only: calendar years ahead of buy-and-hold and the cash-rate row (T-bill minus 0.5%);
+  - the verdict label `pass` / `fail` (was "email-worthy" / "not email-worthy");
+  - documentation: total returns in `README.md` and `AGENTS.md`, the README status, the order of the experiment workflow
+    (tests first, then a `preregister` commit inside `experiments/`), the trial-budget section of the template.
+  **Done when** the full suite passes on nicodesktop, the PR is merged (merge commit) and deployed, and exp04 and exp05
+  rerun EQUIVALENT to their R4d final baseline runs under `scripts/check_equivalence.py --declared-change
+  pre-research-2026-11-14` (rule stated before the reruns in the design doc). No reset, no V rebuild.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
   then the agents carry on the work.
+  **Scope and stopping rule (decided by Nicolas on 2026-11-14, before any of them ran):** two or three experiments from
+  the open slots of section 4 (`docs/STAGE1_RESEARCH_PLAN.md`; recommended C1-C3, I1-I2), each at most one amendment
+  (protocol 1.0 plus one version); then the agents start, whatever the results. A design that shows only the 90% flag
+  (comparable return with a better Sharpe ratio or drawdown) is recorded and gets no holdout evaluation or live test
+  unless a test pre-registered for that claim passes. A pass leads to: an independent audit, the freeze, one holdout
+  evaluation (Nicolas), then the live test.
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 

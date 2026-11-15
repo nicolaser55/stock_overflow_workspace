@@ -1,8 +1,11 @@
 # Stock Overflow: research workspace
 
 Can a long-only, unlevered strategy on **SPY** (1-minute IBKR bars, 2005 onward) beat **buy-and-hold's return**
-after realistic costs, out of sample? Returns are price returns for now: dividends are not credited and cash earns 0%,
-for the strategy and for buy-and-hold alike (dividends and T-bill interest are planned; audit S2, 2026-10-25). Every experiment is a design on one shared point-in-time runner: the runner shows
+after realistic costs, out of sample? Returns are total returns on both sides (roadmap R4b, 2026-11-09): SPY dividends
+are credited at the ex-date open and cash earns the 3-month T-bill rate, for the strategy, buy-and-hold and every
+baseline. The verdict passes only a strategy whose total return is strictly above buy-and-hold's (2026-11-14); whether it
+reaches 90% of buy-and-hold with a better Sharpe ratio or drawdown is reported beside it, never as a pass. Every
+experiment is a design on one shared point-in-time runner: the runner shows
 a design only what was knowable at each decision, scores its candidates, selects with prior data only, compares with
 baselines, checks for look-ahead, and writes a report. Failed experiments are results.
 
@@ -80,6 +83,8 @@ the point-in-time layer (`so.core.point_in_time`, `docs/DATA_SOURCES.md`).
 
 ## Status
 
-All experiments (exp01-exp07, exp12, exp13) run on the runner under protocol 1.0 of the fresh log started 2026-10-22.
-Their results were withdrawn by the 2026-10-25 audit (baselines, look-ahead check, consistency rule) and are rerun
-once the fixes are merged; see `docs/RESULTS_LOG.md`. The holdout window is registered and has not been evaluated.
+The nine experiments (exp01-exp07, exp12, exp13) were rerun as the final stage-1 baseline on 2026-11-13/14 (judge
+`12142ab`, frozen V reference over 80 designs, N = 260 with the pilot): all nine fail the verdict (`docs/RESULTS_LOG.md`,
+`docs/STAGE1_RESEARCH_PLAN.md` section 2). Next: a few hand-designed experiments under the same rules (roadmap, after
+R4e), then the agents. The verdict's label is `pass` or `fail` since 2026-11-14 (earlier rows say "email-worthy" /
+"not email-worthy"). The holdout window is registered and has not been evaluated.

@@ -38,7 +38,7 @@ from so.runner.checkpoint import (prune_finished_run_folder, get_run_folder_str,
                                   write_run_identity_dict, read_run_identity_dict, set_runs_root_str)
 from so.runner.baselines import get_runner_baseline_dict, get_random_timing_tail_dict
 from so.core.multiple_testing import get_tried_design_count_dict, read_v_reference_dict
-from so.runner.preregistration import check_preregistration_dict, get_design_helper_dict
+from so.runner.preregistration import check_preregistration_dict, get_design_helper_dict, check_reset_marker_dict
 from so.runner.judge_identity import get_judge_hash_dict
 from so.runner.guard import design_code_guard, call_design_func, get_module_snapshot_dict, check_module_snapshot
 from so.runner.verdict import (get_equity_daily_return_pdf, get_runner_verdict_dict, get_report_payload_dict,
@@ -828,7 +828,9 @@ def write_runner_finish_dict(design_module_in, ohlcv_array_dict_in, stream_dict_
                      "trial_id_list": list(stream_dict_in["trial_id_list"]),
                      "preregistration": stream_dict_in.get("preregistration_dict"),
                      "output_files": list(output_file_list),
-                     "verdict": {"email_worthy": bool(verdict_dict["email_worthy_bool"]),
+                     # "email_worthy" IS THE LEGACY NAME OF "THE VERDICT PASSED" (run_index.csv, queue records and the
+                     # grade read it; kept so written records keep one meaning); "label" is "pass" or "fail"
+                     "verdict": {"email_worthy": bool(verdict_dict["verdict_pass_bool"]),
                                  "label": verdict_dict["label_str"], "failed_list": list(verdict_dict["failed_list"]),
                                  "look_ahead": look_ahead_status_str, "grade": grade_dict["grade_str"],
                                  "grade_reason_code": grade_dict["reason_code_str"]}}
@@ -881,8 +883,8 @@ def get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict
         ohlcv_array_dict_in (dict): Bars
         stream_dict_in (dict): Output of run_candidate_streams_dict
 
-    Each row also re-applies the full return check of the verdict (>= buy-and-hold, or the comparable band with a
-    better Sharpe ratio or drawdown) to that level's replay and buy-and-hold (roadmap R4): the grade uses the 0.00 row to
+    Each row also re-applies the full return check of the verdict (strictly above buy-and-hold since 2026-11-14; before,
+    the comparable band with a better Sharpe ratio or drawdown passed too) to that level's replay and buy-and-hold (roadmap R4): the grade uses the 0.00 row to
     tell "not better than buy-and-hold" from "gain disappears after costs". Broker fees are charged at every level.
 
     Returns:
@@ -915,6 +917,47 @@ def get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict
                          "buy_hold_total_return": float(buy_hold_dict["metric_dict"]["total_return"]),
                          "return_pass_bool": return_pass_value, "return_reason_str": return_reason_value})
     return row_list
+
+
+# FUNCTION: THE PRIOR-ONLY PATH AND BUY-AND-HOLD WITH A LOWER CASH RATE (REPORTED ONLY; 2026-11-14)
+def get_cash_rate_sensitivity_dict(design_module_in, ohlcv_array_dict_in, stream_dict_in, spread_in=None):
+    """
+    Replays the recorded decisions (no design call) at the standard slippage with cash earning the T-bill investment
+    yield minus CASH_RATE_SENSITIVITY_SPREAD (floored at 0), and buy-and-hold on the same bundle. A broker sweep pays
+    less than a bill; this row shows how much of a result rests on the full bill rate. Not part of the verdict or the
+    grade. A price-only bundle (no cash interest) gives None.
+
+    Args:
+        design_module_in (module): Design
+        ohlcv_array_dict_in (dict): Bars with their total-return schedule
+        stream_dict_in (dict): Output of run_candidate_streams_dict
+        spread_in (float | None): Annual spread (None = config.CASH_RATE_SENSITIVITY_SPREAD)
+
+    Returns:
+        dict | None: spread, strategy_total_return, buy_hold_total_return, strategy_above_buy_hold_bool
+    """
+    # ONLY A TOTAL-RETURN BUNDLE HAS A CASH RATE TO LOWER
+    from so.core.reentry_simulation import get_buy_and_hold_result_dict
+    from so.runner.total_return import TOTAL_RETURN_BASIS_STR, get_cash_spread_bundle_dict
+    if str(ohlcv_array_dict_in.get("total_return_basis_str", "")) != TOTAL_RETURN_BASIS_STR:
+        return None
+    spread_float = float(config.CASH_RATE_SENSITIVITY_SPREAD if spread_in is None else spread_in)
+    bundle_dict = get_cash_spread_bundle_dict(ohlcv_array_dict_in, spread_float)
+    dead_band = float(getattr(design_module_in, "DEAD_BAND", 0.0))
+    default_weight = 0.0 if get_design_mode_str(design_module_in) == MODE_MINUTE_STR else 1.0
+    initial_weight = float(getattr(design_module_in, "INITIAL_WEIGHT", default_weight))
+    entry_float, exit_float = float(config.ENTRY_SLIPPAGE_PER_SHARE), float(config.MARKET_EXIT_SLIPPAGE_PER_SHARE)
+    path_dict = run_prior_only_from_decisions_dict(
+        bundle_dict, stream_dict_in["date1"], stream_dict_in["date2"], stream_dict_in["window_session_date_list"],
+        stream_dict_in["candidate_decision_dict"], stream_dict_in["governing_dict"], stream_dict_in["period_pdf"],
+        dead_band, initial_weight, config.INITIAL_CAPITAL, entry_float, exit_float,
+        engine_in=get_candidate_engine(design_module_in, entry_float, exit_float), design_module_in=design_module_in)
+    buy_hold_dict = get_buy_and_hold_result_dict(bundle_dict, stream_dict_in["date1"], stream_dict_in["date2"],
+                                                 config.INITIAL_CAPITAL, entry_float, exit_float)
+    strategy_float = float(path_dict["metric_dict"].get("total_return", float("nan")))
+    buy_hold_float = float(buy_hold_dict["metric_dict"]["total_return"])
+    return {"spread": spread_float, "strategy_total_return": strategy_float, "buy_hold_total_return": buy_hold_float,
+            "strategy_above_buy_hold_bool": bool(strategy_float > buy_hold_float)}
 
 
 # FUNCTION: A DEVELOPMENT RUN OF EVERY CANDIDATE
@@ -959,6 +1002,8 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
     check_quarantine_refused()
     if check_view_bool_in:
         check_development_view()
+        # THE RECORDS THIS JUDGE READS MUST BE THE ONES THE LAST RESET WROTE (2026-11-14; FAILS CLOSED ON A MISMATCH)
+        check_reset_marker_dict()
     # THE FROZEN V (R4d): A RUN ON THE REAL DEVELOPMENT VIEW NEEDS IT, READ ONCE BEFORE ANY STREAM (FAILS CLOSED);
     # SYNTHETIC TESTS (check_view_bool_in False) USE THE LIVE SPREAD UNLESS THEY PASS ONE
     v_reference_dict = v_reference_dict_in
@@ -973,11 +1018,13 @@ def run_development_dict(design_module_in, ohlcv_array_dict_in, data_context_in=
         crash_after_period_id_in=crash_after_period_id_in, code_hash_str_in=code_hash_str_in,
         check_clean_tree_bool_in=check_clean_tree_bool_in, log_trial_bool_in=True, note_str_in=note_str_in)
     cost_sensitivity_list = get_cost_sensitivity_list(design_module_in, ohlcv_array_dict_in, stream_dict)
+    cash_rate_sensitivity_dict = get_cash_rate_sensitivity_dict(design_module_in, ohlcv_array_dict_in, stream_dict)
     finish_dict = write_runner_finish_dict(
         design_module_in, ohlcv_array_dict_in, stream_dict, stream_dict["prior_only_dict"], stream_dict["date1"],
         stream_dict["date2"], baseline_seed_count_int_in=baseline_seed_count_int_in,
         look_ahead_status_str_in=look_ahead_status_str_in, run_lookahead_bool_in=run_lookahead_bool_in,
         extra_report_dict_in={"cost_sensitivity_list": cost_sensitivity_list,
+                              "cash_rate_sensitivity_dict": cash_rate_sensitivity_dict,
                               "preregistration_dict": stream_dict.get("preregistration_dict")},
         v_reference_dict_in=v_reference_dict)
     # THE MANIFEST EXISTS: THE PICKLES AND CHECKPOINTS ARE NO LONGER NEEDED (AUDIT S11)

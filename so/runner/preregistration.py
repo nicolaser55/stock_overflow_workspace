@@ -1,11 +1,14 @@
 import ast
+import datetime
 import hashlib
 import json
 import os
+import re
 import subprocess
 # IMPORT THE WORKSPACE PATH AND THE TRIAL-LOG READER
 from so import paths
-from so.core.multiple_testing import read_trial_record_pdf
+from so.core.multiple_testing import (read_trial_record_pdf, get_experiment_family_str, get_design_key_set,
+                                      get_design_key_str, PILOT_LEDGER_REL_STR)
 # IMPORT THE DESIGN-FILE WALK AND THE PROTECTED-PATH MATCH
 from so.runner.preflight import (get_design_follow_path_list, get_import_follow_path_list, get_import_name_list,
                                  get_module_file_path_str)
@@ -44,6 +47,27 @@ version whose logged rows carry helper hashes may rerun only with one of them; a
 Rows logged before this rule have no helper hash: the first run under the rule records it. The helper hash is run
 bookkeeping in the multiple-testing design key (so.core.multiple_testing), not part of it: putting it in the key would
 count every rerun of an unchanged design as a new design; the forced new version is what records a changed helper.
+
+New versions must be visible to the count (decided by Nicolas on 2026-11-14, review F1 and F4). The multiple-testing
+design key is the family and the candidate name, so a first run of a version not logged yet is also refused when:
+    (4) its folder sits under experiments/ and its name differs from EXPERIMENT_NAME (a renamed copy would be counted
+        as a new experiment and escape the version limit);
+    (5) its family (EXPERIMENT_NAME without a trailing _v<digits> suffix) already holds RUNNER_MAX_PROTOCOL_VERSION_COUNT
+        versions over all its experiment names (the limit counts per family, not per name);
+    (6) any of its candidate names already has a design key in the trial log or the pilot ledger (an amended version
+        reusing a name would add nothing to N and push the earlier version out of V): an amendment renames every
+        candidate, for example with a "v1.1|" prefix;
+    (7) PROTOCOL.md lacks the "Family:" line ("Family: C, idea C1, variant 1 of 5"; a variant is a protocol version,
+        at most 5 per idea), or, for an amendment (the family already has a logged version), the change-log row of this
+        version lacks exactly one label: "bug-fix" or "data-dependent".
+A crash before the first trial row logs nothing, so the version is not logged yet: a fix may rerun as the same version
+after a new preregister commit (record it in the change log as "pre-run fix: <what>"). Versions logged before
+2026-11-14 are reruns and are not checked against (4)-(7).
+
+Resets (2026-11-14, review F3): scripts/reset_records.py writes store04_experiments/judge/reset_marker.json with the
+LF-normalized SHA-256 of the pilot ledger and the registered-versions file it wrote. Every development run on the real
+view checks that this workspace's copies (the deployed judge's) have those hashes, and stops otherwise: the records PR of
+a reset must be merged and deployed before any run. No marker (no reset since the rule) passes.
 """
 
 # SECTIONS A NEW PROTOCOL VERSION MUST HAVE (A ## HEADING CONTAINING EACH WORD OR PHRASE)
@@ -51,8 +75,16 @@ PROTOCOL_REQUIRED_SECTION_LIST = ["question", "success criteria", "data sources"
                                   "stopping", "limitations", "change log"]
 # THE LINE THAT DECLARES WHERE A DESIGN CAME FROM ("none", or the earlier experiment and how it was chosen)
 DERIVED_FROM_PREFIX_STR = "derived from:"
-# AT MOST 1.0 PLUS TWO AMENDMENTS
+# AT MOST 1.0 PLUS TWO AMENDMENTS (PER FAMILY SINCE 2026-11-14)
 RUNNER_MAX_PROTOCOL_VERSION_COUNT = 3
+# THE FAMILY LINE (2026-11-14): "Family: <letter>, idea <id>, variant <k> of 5" (A VARIANT IS A PROTOCOL VERSION)
+FAMILY_LINE_PATTERN = re.compile(r"^family:\s*([A-Za-z])\s*,\s*idea\s+([A-Za-z0-9_.-]+)\s*,\s*variant\s+([1-5])\s+of\s+5\s*\.?\s*$",
+                                 re.IGNORECASE)
+FAMILY_PREFIX_STR = "family:"
+# THE AMENDMENT LABELS (2026-11-14): ONE OF THEM IN THE CHANGE-LOG ROW OF EVERY AMENDED VERSION
+AMENDMENT_LABEL_LIST = ["bug-fix", "data-dependent"]
+# THE RESET MARKER (2026-11-14): THE RECORDS A RESET WROTE, BY LF-NORMALIZED SHA-256
+RESET_MARKER_SCHEMA_STR = "so_reset_marker_v1"
 # THE VERSIONS THAT SURVIVE A RESET (ONE ROW PER EXPERIMENT, VERSION, FOLDER HASH AND HELPER HASH; NO RESULTS)
 REGISTERED_VERSIONS_REL_STR = "records/legacy/registered_versions.csv"
 REGISTERED_VERSION_COLUMN_LIST = ["source", "experiment", "protocol_version", "design_folder_hash", "helper_hash"]
@@ -74,7 +106,107 @@ def get_protocol_missing_list(protocol_text_in):
                     if not any(section_str in heading_str for heading_str in heading_list)]
     if not any(line_str.strip().lower().startswith(DERIVED_FROM_PREFIX_STR) for line_str in str(protocol_text_in).splitlines()):
         missing_list.append("Derived from: line")
+    if get_family_line_dict(protocol_text_in) is None:
+        missing_list.append("Family: line (\"Family: <letter>, idea <id>, variant <k> of 5\")")
     return missing_list
+
+
+# FUNCTION: THE FAMILY LINE OF A PROTOCOL (2026-11-14)
+def get_family_line_dict(protocol_text_in):
+    """
+    Args:
+        protocol_text_in (str): PROTOCOL.md content
+
+    Returns:
+        dict | None: family (upper case), idea, variant (int, 1-5), line; None when the first Family: line is missing
+            or malformed
+    """
+    # THE FIRST LINE THAT STARTS WITH "Family:" DECIDES
+    for line_str in str(protocol_text_in).splitlines():
+        if line_str.strip().lower().startswith(FAMILY_PREFIX_STR):
+            match = FAMILY_LINE_PATTERN.match(line_str.strip())
+            if match is None:
+                return None
+            return {"family": match.group(1).upper(), "idea": match.group(2), "variant": int(match.group(3)),
+                    "line": line_str.strip()}
+    return None
+
+
+# FUNCTION: THE AMENDMENT LABEL OF ONE VERSION IN THE CHANGE LOG (2026-11-14)
+def get_amendment_label_str(protocol_text_in, version_str_in):
+    """
+    The change-log table rows whose first cell is the version; their text must hold exactly one label of
+    AMENDMENT_LABEL_LIST.
+
+    Args:
+        protocol_text_in (str): PROTOCOL.md content
+        version_str_in (str): PROTOCOL_VERSION
+
+    Returns:
+        str | None: The label, or None when no row of this version holds exactly one label
+    """
+    # TABLE ROWS ONLY: | version | date | change |
+    found_set = set()
+    for line_str in str(protocol_text_in).splitlines():
+        stripped_str = line_str.strip()
+        if not stripped_str.startswith("|"):
+            continue
+        cell_list = [cell_str.strip() for cell_str in stripped_str.strip("|").split("|")]
+        if not cell_list or cell_list[0] != str(version_str_in):
+            continue
+        row_text_str = " ".join(cell_list[1:]).lower()
+        found_set |= {label_str for label_str in AMENDMENT_LABEL_LIST if label_str in row_text_str}
+    return next(iter(found_set)) if len(found_set) == 1 else None
+
+
+# FUNCTION: EVERY (EXPERIMENT, VERSION) OF A FAMILY IN THE TRIAL LOG AND THE REGISTERED-VERSIONS FILE (2026-11-14)
+def get_family_version_set(trial_log_path_str_in, registered_path_str_in, family_str_in):
+    """
+    Args:
+        trial_log_path_str_in (str): Trial log
+        registered_path_str_in (str): records/legacy/registered_versions.csv
+        family_str_in (str): so.core.multiple_testing.get_experiment_family_str of the experiment
+
+    Returns:
+        set[tuple[str, str]]: (experiment, protocol version) pairs whose experiment belongs to the family
+    """
+    # BOTH RECORDS; A ROW WITHOUT A protocol_version COLUMN HOLDS NOTHING THE GUARD COULD READ
+    pair_set = set()
+    for path_str in (trial_log_path_str_in, registered_path_str_in):
+        record_pdf = read_trial_record_pdf(path_str)
+        if len(record_pdf) == 0 or "protocol_version" not in record_pdf.columns:
+            continue
+        for experiment_str, version_str in zip(record_pdf["experiment"], record_pdf["protocol_version"]):
+            if get_experiment_family_str(experiment_str) == str(family_str_in) and str(version_str):
+                pair_set.add((str(experiment_str), str(version_str)))
+    return pair_set
+
+
+# FUNCTION: CANDIDATE NAMES OF A NEW VERSION THAT ALREADY HAVE A DESIGN KEY (2026-11-14)
+def get_candidate_collision_list(design_module_in, trial_log_path_str_in, ledger_path_str_in=None):
+    """
+    The design key is the family and the candidate (so.core.multiple_testing.get_design_key_str), so a reused name in
+    the same family counts nothing new.
+
+    Args:
+        design_module_in (module): Design (EXPERIMENT_NAME, CANDIDATE_LIST)
+        trial_log_path_str_in (str): Trial log
+        ledger_path_str_in (str | None): Pilot ledger (None = records/legacy/pilot_designs.csv of this workspace)
+
+    Returns:
+        list: The candidates whose key is already logged, in CANDIDATE_LIST order
+    """
+    # THE SAME NORMALIZATION AS A LOGGED ROW: THE CANDIDATE THROUGH JSON
+    experiment_str = str(getattr(design_module_in, "EXPERIMENT_NAME", ""))
+    ledger_path_str = ledger_path_str_in or os.path.join(paths.WORKSPACE_PATH_STR, *PILOT_LEDGER_REL_STR.split("/"))
+    logged_key_set = get_design_key_set(read_trial_record_pdf(trial_log_path_str_in))
+    logged_key_set |= get_design_key_set(read_trial_record_pdf(ledger_path_str))
+    collision_list = []
+    for candidate in list(getattr(design_module_in, "CANDIDATE_LIST", []) or []):
+        setting_json_str = json.dumps({"candidate": json.loads(json.dumps(candidate, default=str))}, sort_keys=True)
+        if get_design_key_str(experiment_str, setting_json_str) in logged_key_set:
+            collision_list.append(candidate)
+    return collision_list
 
 
 # FUNCTION: VERSIONS AND FOLDER HASHES ALREADY LOGGED FOR AN EXPERIMENT
@@ -373,14 +505,139 @@ def check_preregistration_dict(design_module_in, design_folder_str_in, design_fo
     if len(version_dict) + 1 > RUNNER_MAX_PROTOCOL_VERSION_COUNT:
         raise ValueError(f"{experiment_str} already has versions {sorted(version_dict)}; at most two new versions per "
                          f"experiment (research-integrity.mdc).")
+    # (4) A FOLDER UNDER experiments/ CARRIES ITS EXPERIMENT'S NAME (2026-11-14)
+    experiments_root_str = os.path.normcase(os.path.abspath(os.path.join(paths.WORKSPACE_PATH_STR, "experiments")))
+    folder_abs_str = os.path.abspath(design_folder_str_in)
+    if os.path.normcase(os.path.dirname(folder_abs_str)) == experiments_root_str and os.path.basename(folder_abs_str) != experiment_str:
+        raise ValueError(f"the folder {os.path.basename(folder_abs_str)} does not match EXPERIMENT_NAME {experiment_str}; "
+                         f"an amendment keeps the experiment's name and folder and raises PROTOCOL_VERSION.")
+    # (5) THE VERSION LIMIT COUNTS PER FAMILY (2026-11-14)
+    family_str = get_experiment_family_str(experiment_str)
+    family_version_set = get_family_version_set(trial_log_path_str_in, registered_path_str_in or get_registered_versions_path_str(),
+                                                family_str)
+    if len(family_version_set) + 1 > RUNNER_MAX_PROTOCOL_VERSION_COUNT:
+        raise ValueError(f"the family {family_str} already has versions {sorted(family_version_set)}; at most "
+                         f"{RUNNER_MAX_PROTOCOL_VERSION_COUNT} versions per family, whatever the experiment name.")
+    # (6) A NEW VERSION'S CANDIDATES ARE NEW DESIGNS IN N (2026-11-14)
+    collision_list = get_candidate_collision_list(design_module_in, trial_log_path_str_in)
+    if collision_list:
+        raise ValueError(f"{experiment_str} version {version_str}: candidates {collision_list[:5]} are already logged for the "
+                         f"family {family_str}, so they would not count as new designs; rename every candidate of an "
+                         f"amended version (for example 'v{version_str}|<name>').")
     if not protocol_text_str:
         raise ValueError(f"{protocol_path_str} is missing; write and commit the protocol before the first run.")
     missing_list = get_protocol_missing_list(protocol_text_str)
     if missing_list:
         raise ValueError(f"{protocol_path_str} lacks required sections: {', '.join(missing_list)}.")
+    # (7) AN AMENDMENT SAYS WHY (2026-11-14)
+    amendment_label_str = None
+    if family_version_set:
+        amendment_label_str = get_amendment_label_str(protocol_text_str, version_str)
+        if amendment_label_str is None:
+            raise ValueError(f"{protocol_path_str}: version {version_str} amends {sorted(family_version_set)}; its change-log "
+                             f"row needs exactly one label of {AMENDMENT_LABEL_LIST} (when in doubt: data-dependent).")
     subject_str = get_last_folder_commit_subject_str(design_folder_str_in, git_func_in)
     if "preregister" not in subject_str.lower():
         raise ValueError(f"the last commit of {design_folder_str_in} is not a preregister commit ({subject_str!r}); "
                          f"commit PROTOCOL.md, config.py, design.py and tests with 'preregister {experiment_str}' first.")
     return {"status_str": "first_run", "experiment": experiment_str, "protocol_version": version_str,
-            "derived_from_str": derived_from_str, "helper_hash": helper_hash_str_in}
+            "derived_from_str": derived_from_str, "helper_hash": helper_hash_str_in,
+            "family_dict": get_family_line_dict(protocol_text_str), "amendment_label_str": amendment_label_str}
+
+
+"""
+The Reset Marker (2026-11-14, review F3)
+"""
+
+
+# FUNCTION: LF-NORMALIZED SHA-256 OF A FILE ("" WHEN IT DOES NOT EXIST)
+def get_lf_sha256_str(file_path_str_in):
+    """
+    Args:
+        file_path_str_in (str): File
+
+    Returns:
+        str: Hex digest of the bytes with CRLF turned into LF (a git checkout on Windows may convert line ends), or ""
+    """
+    # THE SAME NORMALIZATION AS THE JUDGE HASH
+    if not os.path.isfile(file_path_str_in):
+        return ""
+    with open(file_path_str_in, "rb") as file_obj:
+        return hashlib.sha256(file_obj.read().replace(b"\r\n", b"\n")).hexdigest()
+
+
+# FUNCTION: THE RECORD FILES A RESET WRITES, BY REPO PATH
+def get_reset_record_path_dict(workspace_path_str_in=None):
+    """
+    Args:
+        workspace_path_str_in (str | None): Workspace (None = this workspace; in a run: the deployed judge's worktree)
+
+    Returns:
+        dict: repo-relative path -> absolute path, for the pilot ledger and the registered-versions file
+    """
+    # THE TWO FILES THE RUNNER READS FROM THE DEPLOYED COMMIT
+    workspace_str = workspace_path_str_in or paths.WORKSPACE_PATH_STR
+    return {rel_str: os.path.join(workspace_str, *rel_str.split("/")) for rel_str in (PILOT_LEDGER_REL_STR, REGISTERED_VERSIONS_REL_STR)}
+
+
+# FUNCTION: WRITE THE MARKER AFTER A RESET WROTE THE RECORDS (scripts/reset_records.py)
+def write_reset_marker_dict(reason_str_in, marker_path_str_in=None, file_path_dict_in=None, now_in=None):
+    """
+    Args:
+        reason_str_in (str): What wrote the records ("reset_<time>", "register_from")
+        marker_path_str_in (str | None): Marker file (None = paths.LOCAL_RESET_MARKER_FILE_PATH_STR of the data root)
+        file_path_dict_in (dict | None): repo-relative path -> the file written (None = this workspace's two files)
+        now_in (datetime.datetime | None): Clock (tests)
+
+    Returns:
+        dict: The marker written
+    """
+    # THE HASHES OF THE FILES AS THE RESET LEFT THEM
+    marker_path_str = marker_path_str_in or paths.get_named_data_path_str("LOCAL_RESET_MARKER_FILE_PATH_STR")
+    now = now_in or datetime.datetime.now()
+    marker_dict = {"schema": RESET_MARKER_SCHEMA_STR, "written_ts": now.strftime("%Y-%m-%dT%H:%M:%S"),
+                   "reason": str(reason_str_in),
+                   "file_sha256_dict": {rel_str: get_lf_sha256_str(path_str)
+                                        for rel_str, path_str in (file_path_dict_in or get_reset_record_path_dict()).items()}}
+    os.makedirs(os.path.dirname(marker_path_str), exist_ok=True)
+    temporary_path_str = marker_path_str + ".tmp"
+    with open(temporary_path_str, "w", encoding="utf-8", newline="\n") as marker_file:
+        json.dump(marker_dict, marker_file, indent=2, sort_keys=True)
+        marker_file.write("\n")
+    os.replace(temporary_path_str, marker_path_str)
+    return marker_dict
+
+
+# FUNCTION: REFUSE A RUN WHOSE JUDGE READS OTHER RECORDS THAN THE LAST RESET WROTE
+def check_reset_marker_dict(marker_path_str_in=None, workspace_path_str_in=None):
+    """
+    No marker passes (no reset since 2026-11-14). A marker that cannot be read, has another schema, or names a hash
+    this workspace's file does not have stops the run: merge and deploy the reset's records PR first.
+
+    Args:
+        marker_path_str_in (str | None): Marker file (None = the data root's)
+        workspace_path_str_in (str | None): Workspace (None = this workspace: in a queued run, the deployed judge's)
+
+    Returns:
+        dict: status_str ("no_marker" or "match"), file_sha256_dict
+    """
+    # FAILS CLOSED ON ANYTHING BUT A MISSING FILE OR AN EXACT MATCH
+    marker_path_str = marker_path_str_in or paths.get_named_data_path_str("LOCAL_RESET_MARKER_FILE_PATH_STR")
+    if not os.path.isfile(marker_path_str):
+        return {"status_str": "no_marker", "file_sha256_dict": {}}
+    try:
+        with open(marker_path_str, "r", encoding="utf-8") as marker_file:
+            marker_dict = json.load(marker_file)
+        expected_dict = dict(marker_dict["file_sha256_dict"])
+        schema_ok_bool = marker_dict.get("schema") == RESET_MARKER_SCHEMA_STR
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ValueError(f"the reset marker {marker_path_str} cannot be read ({type(error).__name__}); the run stops") from error
+    if not schema_ok_bool:
+        raise ValueError(f"the reset marker {marker_path_str} has another schema; the run stops")
+    actual_dict = {rel_str: get_lf_sha256_str(path_str) for rel_str, path_str in get_reset_record_path_dict(workspace_path_str_in).items()}
+    mismatch_list = [rel_str for rel_str in sorted(actual_dict) if expected_dict.get(rel_str) != actual_dict[rel_str]]
+    if mismatch_list:
+        raise ValueError(f"{', '.join(mismatch_list)} of this judge differ from what the last reset wrote "
+                         f"({marker_dict.get('reason')}, {marker_dict.get('written_ts')}): merge and deploy the reset's "
+                         f"records pull request before any run (review F3, 2026-11-14)")
+    return {"status_str": "match", "file_sha256_dict": actual_dict}

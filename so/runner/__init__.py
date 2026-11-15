@@ -29,7 +29,7 @@ from so.runner.baselines import (get_runner_baseline_dict, get_random_timing_wei
                                  run_weight_path_dict)
 from so.runner.verdict import (get_runner_verdict_dict, get_return_verdict_dict, get_consistency_verdict_dict,
                                get_baseline_verdict_dict, LOOK_AHEAD_PENDING_STR, LOOK_AHEAD_PASS_STR,
-                               LOOK_AHEAD_FAIL_STR, EMAIL_WORTHY_STR, NOT_EMAIL_WORTHY_STR, MANIFEST_FILE_STR)
+                               LOOK_AHEAD_FAIL_STR, VERDICT_PASS_STR, VERDICT_FAIL_STR, MANIFEST_FILE_STR)
 from so.runner.lookahead import (run_lookahead_check_dict, get_lookahead_cut_date_list, LOOKAHEAD_FILE_STR,
                                  KIND_TRUNCATION_STR, KIND_PERTURBATION_STR)
 
@@ -48,6 +48,6 @@ __all__ = ["DecisionView", "get_decision_view", "Engine", "FractionalWeightEngin
            "get_guarded_code_folder_list", "get_runner_baseline_dict", "get_random_timing_weight_arr",
            "get_random_timing_seed_list", "run_weight_path_dict", "get_runner_verdict_dict", "get_return_verdict_dict",
            "get_consistency_verdict_dict", "get_baseline_verdict_dict", "LOOK_AHEAD_PENDING_STR", "LOOK_AHEAD_PASS_STR",
-           "LOOK_AHEAD_FAIL_STR", "EMAIL_WORTHY_STR", "NOT_EMAIL_WORTHY_STR", "MANIFEST_FILE_STR",
+           "LOOK_AHEAD_FAIL_STR", "VERDICT_PASS_STR", "VERDICT_FAIL_STR", "MANIFEST_FILE_STR",
            "run_lookahead_check_dict", "get_lookahead_cut_date_list", "LOOKAHEAD_FILE_STR",
            "KIND_TRUNCATION_STR", "KIND_PERTURBATION_STR"]

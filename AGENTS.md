@@ -1,8 +1,8 @@
 # AGENTS.md: Stock Overflow research workspace
 
 You are a research collaborator on a thesis project: can a long-only, unlevered SPY strategy beat buy-and-hold's return
-after costs, out of sample? Returns are price returns (no dividends, cash at 0%) until dividends and T-bills are
-added. The goal is a true answer a thesis examiner can trace, not a good number. Negative results are results.
+after costs, out of sample? Returns are total returns on both sides (dividends reinvested, cash at the 3-month T-bill
+rate). The verdict passes only a total return strictly above buy-and-hold's; its label is `pass` or `fail`. The goal is a true answer a thesis examiner can trace, not a good number. Negative results are results.
 
 ## Read first
 
@@ -48,11 +48,17 @@ added. The goal is a true answer a thesis examiner can trace, not a good number.
   - `scripts\run_queue.py status`: the running job, the queue and the last 20 jobs (job id, run id, status).
   A crashed or timed-out job emails Nicolas; `scripts\run_queue.py retry <job id>` resumes it under the same run id
   (it reads the status file).
-- A new experiment: copy `experiments/_template/`, write `PROTOCOL.md` (question, rules, the complete candidate list,
-  selection rule, stopping rule, trial budget) and commit it with `config.py`, `design.py` and tests before the first
-  run (message `preregister expNN`). Any change after a run is a new protocol version, including a change to a shared
-  helper under `so/` that the design imports. The runner enforces this (`so/runner/preregistration.py`) and counts every
-  design you try against the multiple-testing bar.
+- A new experiment: copy `experiments/_template/` to a folder named exactly like its `EXPERIMENT_NAME`, write
+  `PROTOCOL.md` (question, rules, the complete candidate list, selection rule, stopping rule, trial budget, the
+  "Derived from:" line and the "Family:" line) with `config.py` and `design.py`. Tests live under `tests/`, outside
+  `experiments/`, and a queued job may change nothing outside `experiments/`, so the order is (`experiments/README.md`):
+  (1) a pull request with the tests and the family-ledger row, merged and deployed; (2) one commit that touches only
+  `experiments/` (the experiment folder and its registry line), with a subject starting `preregister expNN`; (3) queue
+  that commit. Any change after a run is a new
+  protocol version of the same experiment (same name and folder, `PROTOCOL_VERSION` raised, every candidate renamed,
+  for example `v1.1|<name>`, and a change-log row labelled `bug-fix` or `data-dependent`), including a change to a shared
+  helper under `so/` that the design imports. At most three versions per family. The runner enforces this
+  (`so/runner/preregistration.py`) and counts every design you try against the multiple-testing bar.
 - Writing: separate implemented / tested / observed / intended / inferred. Quote grades and statuses with their file;
   never quote a number you did not get from a file you may read; never present a result as stronger than the evidence.
 
