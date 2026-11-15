@@ -290,6 +290,19 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   **Done when** the full suite passes on nicodesktop, the PR is merged (merge commit) and deployed, and exp04 and exp05
   rerun EQUIVALENT to their R4d final baseline runs under `scripts/check_equivalence.py --declared-change
   pre-research-2026-11-14` (rule stated before the reruns in the design doc). No reset, no V rebuild.
+  **Result (2026-11-15):** PR #46 merged (`7ae7f2f`) and deployed. exp04 and exp05 reran with every decision, return,
+  verdict part, N and the V the verdict uses identical, and exactly the six declared lines, but the check printed NOT
+  EQUIVALENT on two more lines: `multiple_testing_dict.live_trial_sharpe_variance` and `live_trial_sharpe_design_count`.
+  They are the live V, reported only since R4d (the verdict uses the frozen reference); the R4d baseline ran them with
+  42 and 46 designs in the trial log, the reruns with 80. `check_equivalence.py` grouped them with the V the verdict
+  uses, excused only when a V input changes, a gap the R4e rule did not account for. The rule is not amended after
+  the result (decided by Nicolas on 2026-11-15): R4e is proved the way the rule prescribes, by a full rerun of the nine.
+- [~] **R4f, close R4e (decided by Nicolas on 2026-11-15):** `check_equivalence.py` reports the live V as information
+  only (with a test); the deploy command with `-ExecutionPolicy Bypass` in `deploy_runner.ps1` and the docs; the
+  results-log rows of the two R4e reruns. Then, deployed, a full rerun of the nine in the R4d order (exp02, exp03, exp04,
+  exp05, exp06, exp07, exp12, exp13, exp01), no reset (N stays 260, V frozen), as the new baseline. **Done when** all nine
+  have run; each is also compared with its R4d final baseline run (`--declared-change pre-research-2026-11-14`, for the
+  record: expected EQUIVALENT); R4e and R4f are then ticked and research starts.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;

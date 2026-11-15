@@ -44,7 +44,8 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 4. Write `design.py`. Declare every source in `DATA_SOURCE_LIST` (registered in `so.core.point_in_time`).
 5. Tests and the registry line first, in their own pull request: tests (synthetic data: rule mechanics, no look-ahead
    of new features, the design on a short runner loop) in `tests/test_experiments.py` or a new suite listed in
-   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it and deploys (`scripts\deploy_runner.ps1`): a queued
+   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it and deploys (as so_runner:
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1`): a queued
    job may change nothing outside `experiments/`, and a job based on `main` commits that are not deployed is rejected.
    The design folder may sit in the same pull request, or follow in step 6.
 6. One commit that touches only `experiments/` (the experiment folder, and its row in the registry above), with a

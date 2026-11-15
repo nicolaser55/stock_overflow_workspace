@@ -315,7 +315,10 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   `queue/failed/` did not produce one. Both words stay (written records are not rewritten). `scripts/deploy_runner.ps1` (the deploy button) moves the runner clone (the
   queue script itself) to `origin/main`, sets `refs/deployed` to that commit with a reflog entry (time and account;
   `git reflog refs/deployed`), and restarts the task when no job is running. PowerShell reads a script before running
-  it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). A job whose commit holds core changes
+  it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). Run it
+  as `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1` from the runner clone: so_runner's
+  execution policy blocks scripts, and the bypass applies to that one process only (2026-11-15). Then check that
+  `git rev-parse refs/deployed` equals `origin/main`; if not, run it again (the known stop on git's stderr). A job whose commit holds core changes
   that are on `main` but not deployed is rejected with that reason. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the verdict parts above) and one run
