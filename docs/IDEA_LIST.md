@@ -133,7 +133,11 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 
 **I1. Last-half-hour exit on weak days (market intraday momentum)** · key `I:last_half_hour_momentum` ·
 **Promise: high-medium**
-- *Status:* **selected (2026-11-16): exp14, the first hand-designed experiment.** Fits the runner's intraday decision
+- *Status:* **used (2026-11-16): exp14 v1.0, fail** (run `exp14_last_half_hour_exit_20261116224736406552`, judge
+  2e9cfb0): +256.24% vs buy-and-hold +256.72% over 2015-2024; ahead at zero slippage, behind at the standard $0.01;
+  failed return, consistency, baselines and multiple testing; look-ahead pass. Variant 1 of 5 spent; no second
+  variant planned (any change chosen after this result would be data-dependent). Was selected 2026-11-16 as the first
+  hand-designed experiment. Fits the runner's intraday decision
   times (roadmap R4c: a 15:30 call on the fractional-weight engine, the 15:58 daily call buys back at 15:59).
   Overlap: Gao et al.'s sample (1993-2013) covers 2005-2013 of our development data.
 - *Mechanism:* the first half-hour return (from the previous close) predicts the last half-hour return

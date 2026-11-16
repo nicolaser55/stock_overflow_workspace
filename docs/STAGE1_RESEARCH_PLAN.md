@@ -163,7 +163,7 @@ experiments below are protocol 1.0 and keep their assignment; they are not relab
 | **L** Learned models | 2 | 1 | exp01 (minute take-profit model), exp02 (trailing stop + model re-entry) | none proposed |
 | **X** Anchors and highs | 1 | 2 | exp03 (sell near the all-time high) | X1 |
 | **C** Calendar and event windows | 0 | 3 | — | C1-C5 (choose 3; recommended C1, C2, C3) |
-| **I** Intraday | 0 | 3 | — | I1, I2, I3 |
+| **I** Intraday | 1 | 2 | exp14 (I1 last-half-hour exit on weak days; variant 1 of 5, 6 candidates; run 2026-11-16: fail, the gain disappears after costs) | I2, I3 |
 | **R** Short-term reversal | 0 | 3 | — | R1, R2 |
 | **M** Macro and valuation | 0 | 3 | — | M1, M2 (T3 could move here as a macro idea) |
 
@@ -202,7 +202,7 @@ Note 2026-11-12: since R4c (merged 2026-11-11) the runner can express I1 and I2:
 
 Moved to its own file on 2026-11-16: **`docs/IDEA_LIST.md`** (v1, agreed by Nicolas). It holds the constraints, the
 ideas with their status, data needs and caveats, and the ideas considered and not recommended. The first
-hand-designed experiment is **I1** (exp14, family I, idea I1).
+hand-designed experiment is **I1** (exp14, family I, idea I1); run 2026-11-16, fail (results log).
 
 ---
 
