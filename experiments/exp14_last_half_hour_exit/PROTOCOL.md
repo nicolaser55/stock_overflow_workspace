@@ -1,14 +1,11 @@
-# DRAFT — not for preregister or queue
-
 # exp14_last_half_hour_exit: Protocol
 
-*DRAFT version 1.0 (2026-11-16). Experiment name `exp14_last_half_hour_exit`. Config:
+*Version 1.0 (2026-11-16). Experiment name `exp14_last_half_hour_exit`. Config:
 `experiments/exp14_last_half_hour_exit/config.py`. Design: `design.py`. Review decisions of 2026-11-16
-are applied (section 11). This file is still a draft: the commit that may be queued must start with
-`preregister exp14`, and that commit has not been made. After the first development run, any rule
-change is a new `PROTOCOL_VERSION` of this same experiment (same name, same folder; never a renamed
-copy), with every candidate renamed (for example `v1.1|<name>`) and a change-log row labelled
-`bug-fix` or `data-dependent`. The folder name must equal `EXPERIMENT_NAME`.*
+are applied (section 11). After the first development run, any rule change is a new
+`PROTOCOL_VERSION` of this same experiment (same name, same folder; never a renamed copy), with
+every candidate renamed (for example `v1.1|<name>`) and a change-log row labelled `bug-fix` or
+`data-dependent`. The folder name must equal `EXPERIMENT_NAME`.*
 
 Derived from: none
 
@@ -217,7 +214,7 @@ holdout env vars or read the quarantine.
 
 | Version | Date | Change |
 |---|---|---|
-| 1.0 | 2026-11-16 | Draft from the research brief, then the review: VIX gate dropped (6 candidates, `SPY_1MIN` only); always-skip baseline removed in favour of the R4c random-timing test; `FOLD_TRAIN_WINDOW_YEARS` 10 so validation quarters are 2015–2024 (gives up 2008); prices are the previous session’s last close, the 09:59 close and the 15:30 close; the skip is 15:31–15:59; weak-day skip kept. Config, design and synthetic tests written. Not preregistered. |
+| 1.0 | 2026-11-16 | Draft from the research brief, then the review: VIX gate dropped (6 candidates, `SPY_1MIN` only); always-skip baseline removed in favour of the R4c random-timing test; `FOLD_TRAIN_WINDOW_YEARS` 10 so validation quarters are 2015–2024 (gives up 2008); prices are the previous session’s last close, the 09:59 close and the 15:30 close; the skip is 15:31–15:59; weak-day skip kept. Config, design and synthetic tests written. Preregistered. |
 
 An amended version after a run adds a row labelled exactly `bug-fix` or `data-dependent`. A crash
 before the first trial row is not a version: write "pre-run fix: <what>" and commit again with
