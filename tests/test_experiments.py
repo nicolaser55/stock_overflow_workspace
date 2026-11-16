@@ -1,5 +1,5 @@
 """
-Workspace Tests: the experiment designs on the runner (exp01 minute; exp02-exp07, exp12, exp13 daily) and their shared helpers
+Workspace Tests: the experiment designs on the runner (exp01 minute; exp02-exp07, exp12-exp14 daily) and their shared helpers
 
 Run from the workspace root:   python tests/test_experiments.py   (or python tests/run_all_tests.py)
 Synthetic data only (about 3 years of minute bars, synthetic VIX and VIX3M daily closes). The data root is a temporary
@@ -14,6 +14,8 @@ What is verified:
        every session.
     4. TSDAY no longer serves the columns computed after the decision bar (fill_open, complete-session OHLC).
     5. A development run of exp12 (6 candidates, VIX sources) and of exp02 (model) passes the runner's look-ahead check.
+    6. exp14: fh and rod signal arithmetic, the exact -x edge, the 15:30 sell and 15:58 buy-back, an early
+       close, missing bars, and a change after 15:30 that must not move the 15:30 decision.
 """
 
 import os
@@ -49,8 +51,12 @@ assert_temporary_data_root()
 
 from so import paths
 from so.core.trade_execution import get_ohlcv_array_dict
+from so.core.backtest_simulation import get_session_first_entry_idx
 from so.core.point_in_time import get_minute_bar_available_ts, get_runner_context, get_feature_column_pdf, TSDAY_AFTER_DECISION_COLUMN_LIST
-from so.features.daily_features import get_daily_feature_pdf
+from so.features.daily_features import get_daily_feature_pdf, get_session_decision_idx_dict
+from so.runner.view import (DecisionView, get_empty_bar_buffer_dict, fill_bar_buffer_through_decision,
+                            get_sliced_bar_array_dict, get_decision_view)
+from so.runner.intraday import INTRADAY_LIST_KEY_STR, get_session_call_list
 from so.features.vix_features import get_vix_table_pdf, get_vix_feature_pdf
 from so.runner import run_daily_dict, run_development_dict, LOOK_AHEAD_PASS_STR
 from so.runner.run import get_candidate_engine
@@ -65,12 +71,16 @@ from experiments.exp06_capped_regret_reentry import design as exp06_design
 from experiments.exp07_warning_lights_exit import design as exp07_design
 from experiments.exp12_vix_fear_reentry import design as exp12_design
 from experiments.exp13_e1m1_robustness import design as exp13_design
+from experiments.exp14_last_half_hour_exit import config as exp14_config
+from experiments.exp14_last_half_hour_exit import design as exp14_design
+from experiments.exp14_last_half_hour_exit.design import get_signal_return_float, get_weak_day_bool
 
 # KEEP THE REAL REGISTRY PATH AND POINT THIS SUITE AT A TEMPORARY FILE
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
 paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
 # EVERY DAILY DESIGN
-DESIGN_LIST = [exp02_design, exp03_design, exp04_design, exp05_design, exp06_design, exp07_design, exp12_design, exp13_design]
+DESIGN_LIST = [exp02_design, exp03_design, exp04_design, exp05_design, exp06_design, exp07_design, exp12_design,
+               exp13_design, exp14_design]
 
 
 # FUNCTION: PRINT A PASSED TEST
@@ -364,9 +374,370 @@ def test_exp01_model():
            f"{enter_arr[tp_arr].mean():.0%} of planted vs {enter_arr[~tp_arr].mean():.0%} of other rows; <200 rows never enters")
 
 
+# FUNCTION: ROWS OF A SYNTHETIC FRAME AT ONE CLOCK
+def get_exp14_clock_mask(ohlcv_pdf_in, ts_str_in):
+    """
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic minute bars
+        ts_str_in (str): Bar start
+
+    Returns:
+        pd.Series: Boolean mask, one row
+    """
+    # MATCH THE CLOCK, NOT THE TIMEZONE OBJECT
+    clock_str = pd.Timestamp(ts_str_in).strftime("%Y-%m-%d %H:%M")
+    stamp_str = ohlcv_pdf_in["timestamp"].dt.tz_convert("America/New_York").dt.strftime("%Y-%m-%d %H:%M")
+    return stamp_str == clock_str
+
+
+# FUNCTION: SET ONE BAR'S OPEN AND CLOSE
+def set_exp14_bar(ohlcv_pdf_in, ts_str_in, close_float_in, open_float_in=None):
+    """
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic minute bars
+        ts_str_in (str): Bar start
+        close_float_in (float): Close
+        open_float_in (float | None): Open (defaults to the close)
+
+    Returns:
+        None
+    """
+    # ONE BAR
+    mask_arr = get_exp14_clock_mask(ohlcv_pdf_in, ts_str_in)
+    assert int(mask_arr.sum()) == 1, ts_str_in
+    open_float = float(close_float_in if open_float_in is None else open_float_in)
+    close_float = float(close_float_in)
+    ohlcv_pdf_in.loc[mask_arr, "open"] = open_float
+    ohlcv_pdf_in.loc[mask_arr, "close"] = close_float
+    ohlcv_pdf_in.loc[mask_arr, "high"] = max(open_float, close_float)
+    ohlcv_pdf_in.loc[mask_arr, "low"] = min(open_float, close_float)
+
+
+# FUNCTION: DROP ONE BAR
+def drop_exp14_bar(ohlcv_pdf_in, ts_str_in):
+    """
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic minute bars
+        ts_str_in (str): Bar start to remove
+
+    Returns:
+        pd.DataFrame: Copy without that bar
+    """
+    # ONE BAR
+    mask_arr = get_exp14_clock_mask(ohlcv_pdf_in, ts_str_in)
+    assert int(mask_arr.sum()) == 1, ts_str_in
+    return ohlcv_pdf_in.loc[~mask_arr].reset_index(drop=True)
+
+
+# FUNCTION: THREE JUNE SESSIONS WITH A KNOWN PREVIOUS CLOSE, fh CLOSE AND rod CLOSE
+def get_exp14_june_dict(drop_ts_list_in=None, fh_close_in=198.0, rod_close_in=196.0, later_close_in=None):
+    """
+    2010-06-01 last close is 200. 2010-06-02 09:59 and 15:30 are the signal ends. 09:58 and 15:29 are
+    planted far below 200 so a design that substitutes the previous bar would skip.
+
+    Args:
+        drop_ts_list_in (list | None): Bar clocks to remove
+        fh_close_in (float): 09:59 close
+        rod_close_in (float): 15:30 close
+        later_close_in (float | None): Close of every 2010-06-02 bar after 15:30
+
+    Returns:
+        dict: Bar arrays
+    """
+    # ZERO MINUTE NOISE; THE BARS THE SIGNAL READS ARE OVERWRITTEN
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-06-01", "2010-06-03", start_price_in=200.0, minute_vol_in=0.0, seed_in=1)
+    set_exp14_bar(ohlcv_pdf, "2010-06-01 15:59", 200.0)
+    set_exp14_bar(ohlcv_pdf, "2010-06-02 09:58", 180.0)
+    set_exp14_bar(ohlcv_pdf, "2010-06-02 09:59", fh_close_in)
+    set_exp14_bar(ohlcv_pdf, "2010-06-02 15:29", 180.0)
+    set_exp14_bar(ohlcv_pdf, "2010-06-02 15:30", rod_close_in)
+    if later_close_in is not None:
+        stamp = ohlcv_pdf["timestamp"].dt.tz_convert("America/New_York")
+        later_mask = (stamp.dt.date == pd.Timestamp("2010-06-02").date()) & (stamp.dt.hour * 60 + stamp.dt.minute > 15 * 60 + 30)
+        ohlcv_pdf.loc[later_mask, ["open", "high", "low", "close"]] = float(later_close_in)
+    else:
+        set_exp14_bar(ohlcv_pdf, "2010-06-02 15:31", 195.50)
+        set_exp14_bar(ohlcv_pdf, "2010-06-02 15:59", 194.25)
+    for ts_str in list(drop_ts_list_in or []):
+        ohlcv_pdf = drop_exp14_bar(ohlcv_pdf, ts_str)
+    return get_ohlcv_array_dict(ohlcv_pdf)
+
+
+# FUNCTION: SESSION POSITION OF A DATE
+def get_exp14_session_idx(ohlcv_array_dict_in, day_str_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bar arrays
+        day_str_in (str): Session date
+
+    Returns:
+        int: Session position
+    """
+    # THE DATE LIST IS datetime.date
+    day = pd.Timestamp(day_str_in).date()
+    day_list = [pd.Timestamp(session_date).date() for session_date in ohlcv_array_dict_in["session_date_list"]]
+    return day_list.index(day)
+
+
+# FUNCTION: BAR INDEX OF A CLOCK
+def get_exp14_bar_idx(ohlcv_array_dict_in, ts_str_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bar arrays
+        ts_str_in (str): Bar start
+
+    Returns:
+        int: Bar index
+    """
+    # ONE BAR
+    clock_str = pd.Timestamp(ts_str_in).strftime("%Y-%m-%d %H:%M")
+    stamp = ohlcv_array_dict_in["timestamp_index"].tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M")
+    hit_idx_arr = np.flatnonzero(np.asarray(stamp) == clock_str)
+    assert len(hit_idx_arr) == 1, (ts_str_in, len(hit_idx_arr))
+    return int(hit_idx_arr[0])
+
+
+# FUNCTION: THE VIEW THE RUNNER WOULD BUILD AT ONE BAR
+def get_exp14_view(ohlcv_array_dict_in, session_idx_in, bar_idx_in, time_str_in):
+    """
+    Args:
+        ohlcv_array_dict_in (dict): Bar arrays
+        session_idx_in (int): Session
+        bar_idx_in (int): Decision bar
+        time_str_in (str | None): Intraday time, or None for the 15:58 call
+
+    Returns:
+        DecisionView: View that stops at that bar
+    """
+    # THE SAME BUFFER FILL THE LOOP USES
+    buffer_dict = get_empty_bar_buffer_dict(ohlcv_array_dict_in)
+    fill_bar_buffer_through_decision(buffer_dict, ohlcv_array_dict_in, int(session_idx_in), int(bar_idx_in))
+    return get_decision_view(buffer_dict, int(session_idx_in), int(bar_idx_in), {}, None, time_str_in)
+
+
+# FUNCTION: A VIEW WHOSE ARRAYS CONTINUE PAST THE 15:30 DECISION BAR
+def get_exp14_leaked_view(ohlcv_array_dict_in, session_idx_in, decision_idx_in, end_idx_in):
+    """
+    The slice includes later bars. decision_bar_idx stays at the 15:30 bar.
+
+    Args:
+        ohlcv_array_dict_in (dict): Bar arrays
+        session_idx_in (int): Session
+        decision_idx_in (int): 15:30 bar
+        end_idx_in (int): Last bar of the session
+
+    Returns:
+        DecisionView: Leaked view
+    """
+    # FILL THROUGH THE CLOSE, THEN POINT THE DECISION AT 15:30
+    buffer_dict = get_empty_bar_buffer_dict(ohlcv_array_dict_in)
+    fill_bar_buffer_through_decision(buffer_dict, ohlcv_array_dict_in, int(session_idx_in), int(end_idx_in))
+    bar_dict = get_sliced_bar_array_dict(buffer_dict, int(end_idx_in), int(session_idx_in))
+    decision_ts = get_minute_bar_available_ts(ohlcv_array_dict_in["timestamp_index"][int(decision_idx_in)])
+    session_date = ohlcv_array_dict_in["session_date_list"][int(session_idx_in)]
+    return DecisionView(decision_ts, int(decision_idx_in), int(session_idx_in), session_date, bar_dict, {}, None, "15:30")
+
+
+# FUNCTION: THE RECORDED DAILY DECISION OF ONE SESSION
+def get_exp14_record(result_dict_in, day_str_in):
+    """
+    Args:
+        result_dict_in (dict): run_daily_dict output
+        day_str_in (str): Session date
+
+    Returns:
+        dict: Decision record
+    """
+    # ONE ROW PER SESSION THE LOOP CALLED
+    day = pd.Timestamp(day_str_in).date()
+    record_dict = {pd.Timestamp(session_date).date(): decision_dict
+                   for session_date, decision_dict in zip(result_dict_in["decision_session_list"], result_dict_in["decision_dict_list"])}
+    return record_dict[day]
+
+
+# FUNCTION: INTERFACE, SIGNAL ARITHMETIC, AND THE EXACT -x EDGE
+def test_exp14_signal_and_threshold():
+    """
+    Returns:
+        None
+    """
+    # THE PRE-REGISTERED LIST AND THE FOLD LENGTH
+    check_design_file(exp14_design.__file__)
+    assert exp14_design.EXPERIMENT_NAME == "exp14_last_half_hour_exit" and exp14_design.PROTOCOL_VERSION == "1.0"
+    assert exp14_design.DATA_SOURCE_LIST == ["SPY_1MIN"] and exp14_design.ENGINE_NAME == "fractional"
+    assert exp14_design.CANDIDATE_LIST == ["fh|x050", "fh|x100", "fh|x150", "rod|x050", "rod|x100", "rod|x150"]
+    assert exp14_design.INTRADAY_DECISION_TIME_LIST == ["15:30"]
+    assert list(exp14_design.Design.INTRADAY_DECISION_TIME_LIST) == ["15:30"]
+    assert exp14_config.FOLD_TRAIN_WINDOW_YEARS == 10 and exp14_design.PERIOD_RULE["train_years"] == [10]
+    # 198/200 - 1 SITS A HAIR BELOW -0.01; THAT MUST NOT SKIP. ONE CENT THROUGH THE LINE MUST
+    assert get_weak_day_bool(198.0 / 200.0 - 1.0, 0.01) is False
+    assert get_weak_day_bool(197.99 / 200.0 - 1.0, 0.01) is True
+    assert get_weak_day_bool(197.0 / 200.0 - 1.0, 0.015) is False
+    assert get_weak_day_bool(196.99 / 200.0 - 1.0, 0.015) is True
+    assert get_weak_day_bool(np.nan, 0.01) is False
+    # THE VIEW: fh IS THE 09:59 CLOSE, rod IS THE 15:30 CLOSE, BOTH OVER THE PREVIOUS LAST CLOSE
+    ohlcv_array_dict = get_exp14_june_dict()
+    session_idx = get_exp14_session_idx(ohlcv_array_dict, "2010-06-02")
+    bar_1530 = get_exp14_bar_idx(ohlcv_array_dict, "2010-06-02 15:30")
+    bar_1558 = get_exp14_bar_idx(ohlcv_array_dict, "2010-06-02 15:58")
+    view_1530 = get_exp14_view(ohlcv_array_dict, session_idx, bar_1530, "15:30")
+    fh_float = get_signal_return_float(view_1530, "fh")
+    rod_float = get_signal_return_float(view_1530, "rod")
+    assert np.isclose(fh_float, 198.0 / 200.0 - 1.0) and np.isclose(rod_float, 196.0 / 200.0 - 1.0)
+    # EXACTLY -1% DOES NOT SKIP; -1% IS BELOW -0.5% AND DOES
+    fh_edge = exp14_design.get_candidate_design("fh|x100")
+    assert fh_edge.decide(view_1530) == 1.0 and np.isclose(fh_edge.last_signal_return_float, fh_float)
+    assert exp14_design.get_candidate_design("fh|x050").decide(view_1530) == 0.0
+    # -2% SKIPS THE WIDEST rod THRESHOLD; THE 15:58 CALL ON THE SAME OBJECT IS WEIGHT 1
+    rod_design = exp14_design.get_candidate_design("rod|x150")
+    assert rod_design.decide(view_1530) == 0.0
+    assert rod_design.decide(get_exp14_view(ohlcv_array_dict, session_idx, bar_1558, None)) == 1.0
+    assert [row["weight_float"] for row in rod_design.call_log_list] == [0.0, 1.0]
+    # THE FIRST SESSION HAS NO PREVIOUS CLOSE
+    first_idx = get_exp14_session_idx(ohlcv_array_dict, "2010-06-01")
+    first_view = get_exp14_view(ohlcv_array_dict, first_idx, get_exp14_bar_idx(ohlcv_array_dict, "2010-06-01 15:30"), "15:30")
+    assert not np.isfinite(get_signal_return_float(first_view, "fh"))
+    assert not np.isfinite(exp14_design.get_candidate_design("rod|x050").decide(first_view))
+    passed("exp14 signal arithmetic (fh 09:59, rod 15:30, over the previous last close); exactly -x does not skip")
+
+
+# FUNCTION: THE 15:30 SELL FILLS AT 15:31 AND THE 15:58 BUY-BACK FILLS AT 15:59
+def test_exp14_sell_and_buy_back():
+    """
+    Returns:
+        None
+    """
+    # rod IS -2%, SO EVEN x150 SELLS. fh IS EXACTLY -1%, SO x100 DOES NOT
+    ohlcv_array_dict = get_exp14_june_dict()
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    sell_idx = get_exp14_bar_idx(ohlcv_array_dict, "2010-06-02 15:31")
+    buy_idx = get_exp14_bar_idx(ohlcv_array_dict, "2010-06-02 15:59")
+    sold_dict = run_daily_dict(exp14_design.get_candidate_design("rod|x150"), ohlcv_array_dict, date1, date2,
+                               initial_weight_in=1.0, dead_band_in=0.0)
+    record_dict = get_exp14_record(sold_dict, "2010-06-02")
+    intraday_tuple = record_dict[INTRADAY_LIST_KEY_STR]
+    assert len(intraday_tuple) == 1 and intraday_tuple[0][0] == "15:30" and float(intraday_tuple[0][1]) == 0.0
+    assert float(record_dict["target_weight"]) == 1.0
+    trade_pdf = sold_dict["trade_pdf"]
+    sell_pdf = trade_pdf[trade_pdf["trade_idx"].astype(int) == sell_idx]
+    buy_pdf = trade_pdf[trade_pdf["trade_idx"].astype(int) == buy_idx]
+    assert len(sell_pdf) == 1 and int(sell_pdf["delta_share_count"].iloc[0]) < 0
+    assert float(sell_pdf["raw_price"].iloc[0]) == 195.50
+    assert len(buy_pdf) == 1 and int(buy_pdf["delta_share_count"].iloc[0]) > 0
+    assert float(buy_pdf["raw_price"].iloc[0]) == 194.25
+    held_dict = run_daily_dict(exp14_design.get_candidate_design("fh|x100"), ohlcv_array_dict, date1, date2,
+                               initial_weight_in=1.0, dead_band_in=0.0)
+    held_tuple = get_exp14_record(held_dict, "2010-06-02")[INTRADAY_LIST_KEY_STR]
+    assert float(held_tuple[0][1]) == 1.0
+    assert not (held_dict["trade_pdf"]["trade_idx"].astype(int) == sell_idx).any()
+    passed("exp14 15:30 sell fills at the 15:31 open; 15:58 buy-back fills at the 15:59 open; exactly -x does not sell")
+
+
+# FUNCTION: AN EARLY CLOSE HAS NO 15:30 CALL AND NO SKIP
+def test_exp14_early_close():
+    """
+    Returns:
+        None
+    """
+    # 2010-11-26 CLOSES AT 13:00. PRICES ARE FAR BELOW THE PREVIOUS CLOSE, SO A CALL WOULD SKIP
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2010-11-24", "2010-11-29", start_price_in=200.0, minute_vol_in=0.0, seed_in=2)
+    set_exp14_bar(ohlcv_pdf, "2010-11-24 15:59", 200.0)
+    stamp = ohlcv_pdf["timestamp"].dt.tz_convert("America/New_York")
+    half_mask = stamp.dt.date == pd.Timestamp("2010-11-26").date()
+    assert int(half_mask.sum()) > 0
+    ohlcv_pdf.loc[half_mask, ["open", "high", "low", "close"]] = 150.0
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    session_idx = get_exp14_session_idx(ohlcv_array_dict, "2010-11-26")
+    decision_idx = int(get_session_decision_idx_dict(ohlcv_array_dict)["decision_idx_arr"][session_idx])
+    call_list = get_session_call_list(ohlcv_array_dict, session_idx, ("15:30",), decision_idx,
+                                      get_session_first_entry_idx(ohlcv_array_dict, session_idx))
+    assert call_list == []
+    end_ts = ohlcv_array_dict["timestamp_index"][int(ohlcv_array_dict["session_end_idx_arr"][session_idx])]
+    end_ts = end_ts.tz_convert("America/New_York")
+    assert (end_ts.hour, end_ts.minute) < (15, 30)
+    result_dict = run_daily_dict(exp14_design.get_candidate_design("rod|x050"), ohlcv_array_dict,
+                                 ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1],
+                                 initial_weight_in=1.0, dead_band_in=0.0)
+    record_dict = get_exp14_record(result_dict, "2010-11-26")
+    assert len(record_dict[INTRADAY_LIST_KEY_STR]) == 0 and float(record_dict["target_weight"]) == 1.0
+    start_idx = int(ohlcv_array_dict["session_start_idx_arr"][session_idx])
+    end_idx = int(ohlcv_array_dict["session_end_idx_arr"][session_idx])
+    trade_idx_arr = result_dict["trade_pdf"]["trade_idx"].astype(int)
+    on_half_pdf = result_dict["trade_pdf"].loc[(trade_idx_arr >= start_idx) & (trade_idx_arr <= end_idx)]
+    assert not (on_half_pdf["delta_share_count"] < 0).any()
+    passed("exp14 early close: no 15:30 call and no skip, even when the session is far below the previous close")
+
+
+# FUNCTION: A MISSING 09:59 OR 15:30 BAR DOES NOT SKIP, AND A NEIGHBOUR IS NOT A SUBSTITUTE
+def test_exp14_missing_bars():
+    """
+    Returns:
+        None
+    """
+    # 09:58 IS 180. USING IT WOULD SKIP EVERY THRESHOLD
+    dropped_fh_dict = get_exp14_june_dict(drop_ts_list_in=["2010-06-02 09:59"])
+    session_idx = get_exp14_session_idx(dropped_fh_dict, "2010-06-02")
+    view_fh = get_exp14_view(dropped_fh_dict, session_idx, get_exp14_bar_idx(dropped_fh_dict, "2010-06-02 15:30"), "15:30")
+    assert not np.isfinite(get_signal_return_float(view_fh, "fh"))
+    assert not np.isfinite(exp14_design.get_candidate_design("fh|x150").decide(view_fh))
+    assert np.isclose(get_signal_return_float(view_fh, "rod"), 196.0 / 200.0 - 1.0)
+    # THE RUNNER MAPS A MISSING 15:30 TO 15:29. THAT BAR'S CLOSE IS 180 AND MUST NOT BE THE rod END
+    dropped_rod_dict = get_exp14_june_dict(drop_ts_list_in=["2010-06-02 15:30"])
+    session_idx = get_exp14_session_idx(dropped_rod_dict, "2010-06-02")
+    decision_idx = int(get_session_decision_idx_dict(dropped_rod_dict)["decision_idx_arr"][session_idx])
+    call_list = get_session_call_list(dropped_rod_dict, session_idx, ("15:30",), decision_idx,
+                                      get_session_first_entry_idx(dropped_rod_dict, session_idx))
+    assert len(call_list) == 1 and call_list[0][0] == "15:30"
+    mapped_ts = dropped_rod_dict["timestamp_index"][call_list[0][1]].tz_convert("America/New_York")
+    assert (mapped_ts.hour, mapped_ts.minute) == (15, 29)
+    view_rod = get_exp14_view(dropped_rod_dict, session_idx, call_list[0][1], "15:30")
+    assert float(view_rod.get_bar_array_dict()["close_arr"][int(view_rod.decision_bar_idx)]) == 180.0
+    assert not np.isfinite(get_signal_return_float(view_rod, "rod"))
+    assert not np.isfinite(exp14_design.get_candidate_design("rod|x050").decide(view_rod))
+    passed("exp14 missing 09:59 and missing 15:30: no skip, and the previous bar is not the signal")
+
+
+# FUNCTION: BARS AFTER 15:30 DO NOT CHANGE THE 15:30 DECISION
+def test_exp14_no_lookahead():
+    """
+    Returns:
+        None
+    """
+    # THE PROPER SLICE STOPS AT 15:30. THE LEAKED SLICE KEEPS LATER BARS AND decision_bar_idx STILL POINTS AT 15:30
+    base_dict = get_exp14_june_dict()
+    pumped_dict = get_exp14_june_dict(later_close_in=500.0)
+    session_idx = get_exp14_session_idx(base_dict, "2010-06-02")
+    bar_1530 = get_exp14_bar_idx(base_dict, "2010-06-02 15:30")
+    assert get_exp14_bar_idx(pumped_dict, "2010-06-02 15:30") == bar_1530
+    weight_base = exp14_design.get_candidate_design("rod|x150").decide(get_exp14_view(base_dict, session_idx, bar_1530, "15:30"))
+    pumped_design = exp14_design.get_candidate_design("rod|x150")
+    weight_pumped = pumped_design.decide(get_exp14_view(pumped_dict, session_idx, bar_1530, "15:30"))
+    assert weight_base == 0.0 and weight_pumped == 0.0
+    assert np.isclose(pumped_design.last_signal_return_float, 196.0 / 200.0 - 1.0)
+    end_idx = int(base_dict["session_end_idx_arr"][session_idx])
+    leaked_pumped = get_exp14_leaked_view(pumped_dict, session_idx, bar_1530, end_idx)
+    assert int(leaked_pumped.decision_bar_idx) == bar_1530
+    assert int(leaked_pumped.decision_bar_idx) < len(leaked_pumped.get_bar_array_dict()["close_arr"]) - 1
+    assert float(leaked_pumped.get_bar_array_dict()["close_arr"][-1]) == 500.0
+    assert exp14_design.get_candidate_design("rod|x150").decide(leaked_pumped) == 0.0
+    assert exp14_design.get_candidate_design("rod|x150").decide(get_exp14_leaked_view(base_dict, session_idx, bar_1530, end_idx)) == 0.0
+    # CHANGING THE 15:30 CLOSE ITSELF DOES CHANGE THE DECISION, WITH THE SAME LATER BARS AT 500
+    strong_dict = get_exp14_june_dict(rod_close_in=210.0, later_close_in=500.0)
+    assert exp14_design.get_candidate_design("rod|x150").decide(get_exp14_view(strong_dict, session_idx, bar_1530, "15:30")) == 1.0
+    strong_end = int(strong_dict["session_end_idx_arr"][session_idx])
+    assert exp14_design.get_candidate_design("rod|x150").decide(
+        get_exp14_leaked_view(strong_dict, session_idx, bar_1530, strong_end)) == 1.0
+    passed("exp14 no look-ahead: a change after 15:30 does not change the 15:30 decision; a change of the 15:30 close does")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     try:
+        test_exp14_signal_and_threshold()
+        test_exp14_sell_and_buy_back()
+        test_exp14_early_close()
+        test_exp14_missing_bars()
+        test_exp14_no_lookahead()
         print("Generating synthetic data...", flush=True)
         synthetic_ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2021-01-04", "2023-12-29", minute_vol_in=0.0007, seed_in=23))
         synthetic_daily_pdf = get_daily_feature_pdf(synthetic_ohlcv_array_dict)

@@ -5,8 +5,9 @@ development results were read for this brief. Numbers below are from the cited p
 `so/config.py` / `docs/RUNNER_DESIGN.md` only.*
 
 Status of idea I1 in `docs/IDEA_LIST.md`: **selected (2026-11-16): exp14**. Family I has 3 slots left
-(`docs/STAGE1_RESEARCH_PLAN.md` section 4). This brief is step 1 of 3; `PROTOCOL.md` here is a **DRAFT**
-only (not a `preregister` commit).
+(`docs/STAGE1_RESEARCH_PLAN.md` section 4). The 2026-11-16 review decisions are applied below and in
+`PROTOCOL.md`. `config.py`, `design.py` and synthetic tests now exist. `PROTOCOL.md` stays a **DRAFT**
+(not a `preregister` commit). Trial budget of this version: **6**.
 
 ---
 
@@ -17,8 +18,12 @@ only (not a `preregister` commit).
 | Gao, Han, Li & Zhou, “Market Intraday Momentum”, *JFE* 129 (2018) 394–414 | Full published PDF (courtlistener exhibit / journal text) |
 | Baltussen, Da, Lammers & Martens, “Hedging Demand and Market Intraday Momentum”, *JFE* 142 (2021) 377–403 | Full published PDF (Notre Dame working/published text) |
 | CXO Advisory, “First and Last Half Hours of Trading Linked?” (Steve LeCompte, 11 Jun 2014) | Full note at the URL listed in `docs/IDEA_LIST.md` Sources |
+| Dim, Eraker & Vilkov, “0DTEs: Trading, Gamma Risk and Volatility Propagation”, SSRN 4692190 | Abstract only (one web search, 2026-11-16). No SPY, VIX or rate levels taken from it |
+| “Delta-hedging demand and intraday momentum: Evidence from China”, *Physica A* 600 (2022) | Abstract / IDEAS record only (same search). Authors not named in the snippet |
+| “Intraday momentum in the VIX futures market”, *Journal of Banking & Finance* 148 (2023) | Abstract / IDEAS record only (same search). VIX futures, not a SPY level |
+| Cboe, “Much Ado About 0DTEs: Separating Fact From Fiction” (note circulated 2023; PDF dated in the path 2023/09) | Search snippet of the note. No index, VIX or rate levels copied from it |
 
-No other CXO notes are listed under I1 in `docs/IDEA_LIST.md`. Abstracts on WashU Profiles and Erasmus Pure were checked; effect sizes below come from the full papers / CXO page, not the abstracts alone.
+No other CXO notes are listed under I1 in `docs/IDEA_LIST.md`. Abstracts on WashU Profiles and Erasmus Pure were checked; effect sizes below come from the full papers / CXO page, not the abstracts alone. The post-2020 rows are one web search (section 7). No SPY, VIX or interest-rate values after 2024-12-31 were looked up.
 
 ---
 
@@ -112,19 +117,27 @@ No other CXO notes are listed under I1 in `docs/IDEA_LIST.md`. Abstracts on Wash
 
 ## 5. Map onto our runner (R4c, verdict, costs)
 
-### Decision times and fills (`docs/RUNNER_DESIGN.md`, Intraday decision times)
+### Decision times, prices and fills (`docs/RUNNER_DESIGN.md`, Intraday decision times)
 - Engine: **`fractional` only** (required for `INTRADAY_DECISION_TIME_LIST`).
 - Declare `INTRADAY_DECISION_TIME_LIST = ["15:30"]`.
-- At **15:30**: `decide(view)` with view ending at that bar; `view.intraday_time_str == "15:30"`. Fill = **next bar’s open** (15:31 open). Target weight only (or NaN = keep).
-- At **15:58** (daily call): `intraday_time_str is None`. Fill at **15:59** open (unchanged convention).
-- Early closes without a mappable 15:30 bar: **no intraday call** that session.
+- Bars are start-labelled (`SPY_1MIN`). **Previous close** = close of the previous session’s last bar (on a full day, the 15:59 bar, whose close is 16:00).
+- **`fh`** = previous close → close of the **09:59** bar (the 10:00 price). Gao’s first half-hour.
+- **`rod`** = previous close → close of the **15:30** bar. Baltussen’s rest-of-day through the decision.
+- At **15:30**: `decide(view)` with the view ending at that bar; `view.intraday_time_str == "15:30"`. Fill = **next bar’s open** (15:31 open). Target weight only (or NaN = keep).
+- At **15:58** (daily call): `intraday_time_str is None`. Target weight **1**. Fill at **15:59** open.
+- The cash spell is **15:31 → 15:59**. The last minute (the 15:59 bar) and the close stay held. That is shorter than Gao’s \(r_{13}\) (15:30–16:00), which includes the close.
+- Early close (no mappable 15:30 bar, for example a 13:00 close): **no intraday call, and no skip**.
+- A missing exact bar (no 09:59 bar for `fh`, no 15:30 bar for `rod`, no previous session): **do not skip** (NaN = keep). A nearby bar is not a substitute. A missing 15:30 minute maps, in the runner, to the previous bar; the design still requires the 15:30 bar’s close for `rod`.
 - Same slippage and fees on every fill (decided 2026-11-11).
+- **No special intraday cash accrual.** Cash earns the runner’s T-bill credit on cash held at the previous close (`open_session`). The half-hour skip does not get its own interest calculation.
 
-### Intended long-only overlay (idea sketch)
+### Long-only overlay (review decision)
 - Default: weight **1** (fully invested).
-- At 15:30: if the chosen “weak day” signal is true, target weight **0** (sell into cash for the last ~half hour).
-- At 15:58: target weight **1** (buy back; fill 15:59).
-- Identity that can beat buy-and-hold after costs: skipped last-half-hour spells must return **less** than cash (T-bill) over those minutes, by more than round-trip costs — verdict return part needs prior-only **total return strictly above** buy-and-hold (`docs/RUNNER_DESIGN.md`).
+- At 15:30: target weight **0** only when the signal return is **strictly below** \(-x\). A return **equal to** \(-x\) does not skip (weight 1).
+- At 15:58: target weight **1** (buy back if the 15:30 call sold; no trade if the account is already at 1).
+- **Why the weak side.** Baltussen, Da, Lammers & Martens tie last-half-hour continuation to leveraged-ETF rebalancing and to option dealers who are short gamma: on a down day those hedgers sell into the decline, which extends it into the close. That is the reason to step aside when the day is already down.
+- **Limitation, not a flip of the sign.** Gao Table 10: the link is weaker when \(r_1 < 0\) (joint \(R^2\) 0.9%) than when \(r_1 > 0\) (joint \(R^2\) 4.5%). This overlay only uses that weaker side.
+- Identity that can beat buy-and-hold after costs: skipped spells must return **less** than cash (T-bill) over those minutes, by more than round-trip costs. The verdict return part needs prior-only **total return strictly above** buy-and-hold (`docs/RUNNER_DESIGN.md`).
 
 ### Our costs per round trip (`so/config.py`)
 One skip = one sell fill + one buy fill:
@@ -142,56 +155,68 @@ One skip = one sell fill + one buy fill:
 
 ---
 
-## 6. Proposed candidate grid (12 designs)
+## 6. Candidate grid (6 designs)
 
-Dimensions and why each exists (literature, not our data):
+The VIX gate is **out** of this version. A large \(|\mathrm{signal}|\) already selects high-volatility days; the gate would halve the trade count and add 6 designs to N. `DATA_SOURCE_LIST = ["SPY_1MIN"]` only. Dividends and T-bills stay on the runner’s total-return path; `decide` does not read them.
 
 | Dimension | Levels | Reason |
 |---|---|---|
-| **Signal** | `fh` = first half-hour (prev close → 10:00); `rod` = rest-of-day (prev close → 15:30 decision close) | Gao’s primary predictor vs Baltussen’s stronger \(r_{ROD}\). Both are knowable at the 15:30 call from SPY bars. |
-| **Threshold \(x\)** | 0.5%, 1.0%, 1.5% | IDEA_LIST sketch; CXO says extremes drive the mean effect — a flat “any negative” skip would trade too often for our costs. |
-| **VIX gate** | `off`; `vixmed` = previous-session VIX above its expanding median so far | Gao: effect stronger on volatile / crisis / recession days. Point-in-time previous close only (`VIX_DAILY`). |
+| **Signal** | `fh` = previous close → 09:59 close; `rod` = previous close → 15:30 close | Gao’s primary predictor vs Baltussen’s stronger \(r_{ROD}\). Both are knowable at the 15:30 call from SPY bars in the view. |
+| **Threshold \(x\)** | 0.5%, 1.0%, 1.5% | IDEA_LIST sketch; CXO says extremes drive the mean effect. A flat “any negative” skip would trade too often for our costs. |
 
-Complete list (12 = 2 × 3 × 2), every name a design in N:
+Complete list (6 = 2 × 3), every name a design in N:
 
-1. `fh|x050|off`
-2. `fh|x100|off`
-3. `fh|x150|off`
-4. `fh|x050|vixmed`
-5. `fh|x100|vixmed`
-6. `fh|x150|vixmed`
-7. `rod|x050|off`
-8. `rod|x100|off`
-9. `rod|x150|off`
-10. `rod|x050|vixmed`
-11. `rod|x100|vixmed`
-12. `rod|x150|vixmed`
+1. `fh|x050`
+2. `fh|x100`
+3. `fh|x150`
+4. `rod|x050`
+5. `rod|x100`
+6. `rod|x150`
 
-Rule (all candidates): weight 1 by default; at 15:30 set weight 0 iff signal return \(< -x\) (and VIX gate passes when on); at 15:58 set weight 1. Missing bars / missing VIX: keep (NaN) or stay at 1 — to be fixed in `design.py` with Nicolas if needed.
+Rule (all candidates): weight 1 by default; at 15:30 set weight 0 iff the signal return is strictly below \(-x\); at 15:58 set weight 1. Exactly \(-x\) does not skip. Missing bars: NaN (keep).
 
-**Not in this version (park for later variants):** twelfth-half-hour confirmation; recession/news calendars (need registered calendars); continuous regression weights; shorting the last half-hour.
+**Not in this version (park for later variants):** VIX or other stress gates; twelfth-half-hour confirmation; recession/news calendars; continuous regression weights; shorting the last half-hour.
 
-**Uninformed baselines to name in the protocol:** (1) runner shared baselines; (2) **always skip** last half-hour (weight 0 at every 15:30, 1 at 15:58) — information in the signal must beat indiscriminate skipping; (3) buy-and-hold.
+**Baselines.** Runner shared baselines, same engine, same costs: buy-and-hold; daily-rebalanced constant exposure; 100-seed random timing. The information test is that **intraday-aware random-timing baseline** (`docs/RUNNER_DESIGN.md`, R4c): each non-base spell keeps its time of day, so a 15:30-to-15:59 cash spell is the rate-matched comparison. There is **no** always-skip baseline.
 
-**Trial budget:** 12 candidates this version; family I idea I1 **variant 1 of 5**; experiment may use at most three versions in the family; N today starts from the judge v1 baseline (260 with pilot) and will rise by 12 if this grid runs.
+**Folds.** `FOLD_TRAIN_WINDOW_YEARS = 10`, the template’s fold-schedule name, set to the 10 years exp03 and exp04 store as `FIXED_TRAIN_WINDOW_YEARS`. Validation quarters are then **2015–2024**: after Gao’s sample end, and the same span the frozen V was built on. This **gives up 2008**, where Gao finds the effect strongest (crisis \(R^2\) 4.1% for \(r_1\), joint 6.9%).
+
+**Trial budget:** 6 candidates this version; family I idea I1 **variant 1 of 5**; this experiment may still use two further versions (three in the family). N rises by 6 if this grid runs.
 
 ---
 
-## 7. Open questions for Nicolas
+## 7. Post-2020 evidence (one web search, 2026-11-16)
 
-1. **Sign asymmetry:** Gao Table 10 finds much weaker predictability when \(r_1 < 0\). Our long-only skip only uses the weak side. Accept that as the hypothesis, or should variant 1 instead skip when the signal is *positive* (avoid continuing strength — not the IDEA_LIST sketch)? Recommendation: keep weak-day skip as in IDEA_LIST; record the asymmetry as a limitation.
-2. **VIX in variant 1:** include the 6 `vixmed` candidates (12 total) or drop VIX to keep a 6-candidate grid and save N? Recommendation: keep 12; volatile-day concentration is central in Gao.
-3. **Signal at 15:30 for `fh`:** confirm first half-hour ends at **10:00** bar close (Gao) using view bars only — no new source.
-4. **Cash during the skip:** total-return path credits T-bill on cash (R4b). For ~30 minutes that is tiny; confirm we do **not** need a special intraday cash accrual beyond the engine.
-5. **Early closes / missing 15:30:** treat as “no skip” (no call) per runner — acceptable for the protocol?
-6. **Uninformed baseline:** is “always skip last half-hour” the right information test, or random skips matched to each candidate’s skip rate (path-dependent; harder to pre-register)?
-7. **Selection / folds:** follow template (development quarters, last 4 pooled, ties by name) with **no** rolling model — pure rules. Confirm no train-window candidates.
-8. **Family ledger / IDEA_LIST status:** when tests land, mark idea I1 used and add exp14 to family I in section 4 (Nicolas merges protected docs).
-9. **Post-2020 decay:** Baltussen ends May 2020; any published post-2020 replication you want cited before preregister, or is CXO 2012–2014 + McLean–Pontiff enough caution?
-10. **Step 2 scope:** approve this grid and draft protocol before `config.py` / `design.py` / tests?
+One search for post-2020 evidence on market intraday momentum, including the growth of 0DTE options and dealer gamma since 2022. No SPY, VIX or rate values after 2024-12-31 were looked up. Snippets and titles only; the papers were not downloaded.
+
+**A post-2020 replication of Gao’s SPY first-half-hour → last-half-hour result through 2024: none found.**
+
+What the search did return:
+
+- **Dim, Eraker & Vilkov (SSRN 4692190), “0DTEs: Trading, Gamma Risk and Volatility Propagation.”** They study the growth of same-day S&P 500 options. Market-makers’ inventory gamma is on average positive and negatively related to later intraday volatility. Positive inventory gamma strengthens intraday **reversal**; negative inventory gamma strengthens intraday **momentum**. They read that as delta-hedging, not as informed trading. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4692190
+- **Cboe, “Much Ado About 0DTEs: Separating Fact From Fiction” (2023).** On their reading, SPX 0DTE customer flow is balanced, so market-maker net gamma stays small relative to S&P futures liquidity and is not a one-sided short-gamma overhang. They report no rise in last-hour gap-move frequency in the year they studied, after 0DTE volume had grown. https://spotgamma.com/wp-content/uploads/2023/09/cboeqqq.pdf
+- **“Delta-hedging demand and intraday momentum: Evidence from China”, *Physica A* 600 (2022).** Rest-of-day return predicts the last 30 minutes of the SSE 50 ETF; the authors link that to short-gamma hedging and say the predictability decays over the next three days. Not SPY. https://ideas.repec.org/a/eee/phsmap/v600y2022ics0378437122003624.html
+- **“Intraday momentum in the VIX futures market”, *Journal of Banking & Finance* 148 (2023).** Intraday momentum in VIX futures shows up when net gamma is negative and fades when it is not. VIX futures, not the SPY cash ETF. https://ideas.repec.org/a/eee/jbfina/v148y2023ics0378426622003260.html
+
+**Implication for this version (inference, not a data result).** Growth of 0DTE since 2022 does not, on this search, show that the weak-day last-half-hour decline got larger. If dealer gamma is often positive, hedging dampens moves (reversal) rather than extending a down day the way Baltussen’s short-gamma story does. That is a limitation on expecting the pre-2020 effect to be stronger now. The pre-registered test is still the weak-day skip.
 
 ---
 
-## 8. Bottom line for step 1
+## 8. Review decisions (2026-11-16)
 
-The literature supports a small positive link from early-day (esp. rest-of-day) weakness/strength into the last half-hour, stronger in stress, with a structural hedging story that need not have died by 2020. CXO and Gao’s own cost section say the **per-trade last-half-hour move is small**; our ~$0.03/share round trip is the binding constraint. The proposed 12-candidate grid tests signal definition, threshold rarity, and a VIX stress gate — without reading our SPY/VIX series until a `preregister` protocol is committed.
+The open questions in the step-1 draft are closed as follows. Nicolas and Claude reviewed; this revision applies their decisions.
+
+1. **Weak-day skip stays.** Reason: Baltussen’s leveraged-ETF and short-gamma flow on down days. Gao’s weaker \(r_1 < 0\) evidence is a limitation, not a reason to skip strong days instead.
+2. **VIX gate dropped.** Six candidates. A large \(|\mathrm{signal}|\) already selects high-volatility days; the gate would cut the trade count about in half and add six designs to N.
+3. **Prices** are the 09:59 close (`fh`) and the 15:30 close (`rod`), each over the previous session’s last-bar close. The skip is 15:31 → 15:59; the last minute and the close stay held.
+4. **No special intraday cash accrual.** Early close: no call, no skip.
+5. **No always-skip baseline.** The runner’s intraday-aware random-timing baseline (R4c) is the rate-matched information test.
+6. **Folds:** 10 training years (`FOLD_TRAIN_WINDOW_YEARS`, the template name; exp03/exp04 call the same length `FIXED_TRAIN_WINDOW_YEARS`). Validation quarters 2015–2024. This gives up 2008.
+7. **Family ledger / `docs/IDEA_LIST.md`:** still Nicolas’s. Both files are protected; this revision does not edit them.
+8. **Step 2** is this revision: brief, draft protocol, `config.py`, `design.py`, synthetic tests. Still not a `preregister` commit and not queued.
+
+---
+
+## 9. Bottom line
+
+The literature supports a small positive link from earlier-day returns into the last half-hour, with a hedging story that is conditional on dealers being short gamma. CXO and Gao’s own cost section say the per-trade move is small; our round trip of about $0.03/share is the binding constraint. This version tests two signal definitions and three thresholds (6 designs), on validation quarters after Gao’s sample, and leaves 2008 out of the scored windows. No SPY, VIX or rate series was read to write it.

@@ -29,6 +29,7 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 | `exp07_warning_lights_exit` | Exit when at least k of 5 warning lights are on | daily, trailing-stop engine |
 | `exp12_vix_fear_reentry` | Exits and re-entries modified by VIX fear and term structure (previous-session values) | daily, trailing-stop engine |
 | `exp13_e1m1_robustness` | exp12's E1M1 rule alone. Derived from: exp12 candidate E1M1, chosen after exp12's results on the same development data were seen (audit B5); not an independent test | daily, trailing-stop engine |
+| `exp14_last_half_hour_exit` | Sell before the last half-hour when the first half-hour or the rest of the day is below −x; buy back at 15:59. Draft, not yet run | daily, fractional, one intraday call at 15:30 |
 
 ## Adding an experiment
 
