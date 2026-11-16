@@ -10,6 +10,8 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
 2. `.cursor/rules/research-integrity.mdc`: what you may and may not do. Its "Never" rules override everything else.
 3. `docs/RESULTS_LOG.md`: every run so far (once agents run, new rows hold identifiers, grade and reason only).
 4. `experiments/README.md` and the `PROTOCOL.md` of the experiment you work on.
+4a. `docs/IDEA_LIST.md` (the ideas, their status and evidence) and section 4 of `docs/STAGE1_RESEARCH_PLAN.md` (the
+   family ledger) when you prepare a new experiment.
 5. `docs/RUNNER_DESIGN.md` when you touch a design (what the runner guarantees and what a design writes).
 
 ## How work is done

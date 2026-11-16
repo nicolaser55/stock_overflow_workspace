@@ -312,6 +312,10 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
   then the agents carry on the work.
+  **First experiment (decided by Nicolas on 2026-11-16):** I1, the last-half-hour exit on weak days (exp14, family I,
+  idea I1, variant 1 of 5; `docs/IDEA_LIST.md`). A Cursor agent on nicodesktop prepares the brief, the protocol, the
+  design and the tests under `AGENTS.md`; Claude reviews; Nicolas commits the `preregister` commit and queues it. The
+  independent audit of any pass is done by an LLM in a fresh claude.ai conversation that has not seen the work.
   **Scope and stopping rule (decided by Nicolas on 2026-11-14, before any of them ran):** two or three experiments from
   the open slots of section 4 (`docs/STAGE1_RESEARCH_PLAN.md`; recommended C1-C3, I1-I2), each at most one amendment
   (protocol 1.0 plus one version); then the agents start, whatever the results. A design that shows only the 90% flag
