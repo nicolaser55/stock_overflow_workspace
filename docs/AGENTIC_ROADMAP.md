@@ -273,7 +273,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   **Done when** the suite passes on nicodesktop, the PR is merged and deployed, the reference is frozen under STOP,
   the records are reset and all nine experiments are rerun in baseline order (the final baseline), compared under a
   rule Nicolas states before the rerun.
-- [~] **R4e, pre-research fixes (decided by Nicolas on 2026-11-14, after the independent review
+- [x] **R4e, pre-research fixes (decided by Nicolas on 2026-11-14, after the independent review
   `claude/REVIEW_2026-11-14_research_readiness.md`; design `claude/DESIGN_2026-11-14_pre_research_fixes.md`):**
   - F1: a new version must be a new design in N: refused when a candidate name is already logged for the family, when
     the folder under `experiments/` is not named `EXPERIMENT_NAME`, or when the family already has three versions over
@@ -297,12 +297,17 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   42 and 46 designs in the trial log, the reruns with 80. `check_equivalence.py` grouped them with the V the verdict
   uses, excused only when a V input changes, a gap the R4e rule did not account for. The rule is not amended after
   the result (decided by Nicolas on 2026-11-15): R4e is proved the way the rule prescribes, by a full rerun of the nine.
-- [~] **R4f, close R4e (decided by Nicolas on 2026-11-15):** `check_equivalence.py` reports the live V as information
+- [x] **R4f, close R4e (decided by Nicolas on 2026-11-15):** `check_equivalence.py` reports the live V as information
   only (with a test); the deploy command with `-ExecutionPolicy Bypass` in `deploy_runner.ps1` and the docs; the
   results-log rows of the two R4e reruns. Then, deployed, a full rerun of the nine in the R4d order (exp02, exp03, exp04,
   exp05, exp06, exp07, exp12, exp13, exp01), no reset (N stays 260, V frozen), as the new baseline. **Done when** all nine
   have run; each is also compared with its R4d final baseline run (`--declared-change pre-research-2026-11-14`, for the
   record: expected EQUIVALENT); R4e and R4f are then ticked and research starts.
+  **Result (2026-11-16):** PR #47 merged (`e4da312`) and deployed; the nine reran 2026-11-15 in the R4d order; all nine
+  EQUIVALENT to their R4d final baseline runs (every scoring number and candidate file identical; only the declared
+  lines, and the live V as information only). N 260, V frozen, all nine FAIL with their failed parts unchanged. These
+  nine runs are the reference baseline from now on (`docs/STAGE1_RESEARCH_PLAN.md` section 2). PR #45 (docs) closed as
+  superseded; its R4d record and open items are carried here and into section 2.
 - [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
@@ -431,5 +436,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 
 - [ ] Inspect `D:\stock_overflow\archive` (keep, merge into quarantine, or delete).
 - [ ] About 10 in-window minute rows in public git history (`7c024ba`).
+- [ ] `scripts/deploy_runner.ps1` sets `$ErrorActionPreference = "Stop"`: in Windows PowerShell 5 git's message on
+  stderr at checkout ends the script before `refs/deployed` is set (2026-11-13; a second run finished the deploy).
+  Handle git's stderr instead (check `$LASTEXITCODE` only).
+- [ ] `scripts/check_agent_access.py` leaves an empty `access_probe_*.tmp` in `queue/pending` where `so_agent` may not
+  delete (found 2026-11-13). The runner and the reset count `*.json` only.
+- [ ] `so_runner` (and so design code, until R7 A4) can write under `store04_experiments/judge/`: the content hash
+  catches a careless edit of `v_reference.json`, not a deliberate rebuild, which shows only as a changed reference hash
+  in the reports and the equivalence check. Options: pin the expected hash in a protected record (review D7), or a
+  read-only grant for `so_runner` on `judge/` in `scripts/setup_so_runner.ps1` (Nicolas to decide).
 - [ ] The preflight walks only `experiments/` imports (closed by R7's sandbox).
 - [ ] `test_execute_notebook.py` needs the `venv-main` kernel registered where it runs.

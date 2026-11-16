@@ -37,6 +37,24 @@ in the multiple-testing N; a pass is frozen and paper-traded on data after its f
 
 ## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-11)
 
+**Reference baseline from 2026-11-16 (roadmap R4f):** judge commit `e4da312` (PR #47, R4e + R4f), N = 260, V frozen
+(0.013139771685914705 over 80 designs). Reran 2026-11-15 in the order exp02, exp03, exp04, exp05, exp06, exp07, exp12,
+exp13, exp01, no reset, under the rule `claude/RULE_2026-11-15_R4f_rerun_of_the_nine.md`: all nine EQUIVALENT to the
+R4d final runs below. Every total return and failed part in the table is unchanged; all nine fail. Run ids:
+`exp02_stop_reentry_20261115155747854506`, `exp03_ath_exit_20261115165249676430`,
+`exp04_trend_exit_20261115172619121900`, `exp05_vol_scaled_exposure_20261115174711595785`,
+`exp06_capped_regret_reentry_20261115180350301944`, `exp07_warning_lights_exit_20261115183241505900`,
+`exp12_vix_fear_reentry_20261115184734993576`, `exp13_e1m1_robustness_20261115191757428426`,
+`exp01_minute_entry_20261115193823172094`.
+
+**R4d final baseline (2026-11-13/14), for the record:** judge `12142ab` (PR #42), V read from the frozen reference
+`store04_experiments/judge/v_reference.json` (built under STOP just before the reset of 2026-11-13, backup
+`reset_20261113_131212`). Rule stated 2026-11-13 before the rerun: each rerun equivalent to its previous run (decisions
+and scoring numbers identical; other differences explained by N or V; the V inputs differing only in source, reference
+hash and design count), and the reference rebuilt from the new trial log reproducing (80 designs, variance within
+1e-12). Result: 9 of 9 equivalent, the reference reproduced exactly (difference 0.0); the deflated Sharpe probability
+moved with V and stays far from a pass (largest exp13, 0.081, before 0.071).
+
 **Superseded as the reference by the R4d final baseline (2026-11-13/14):** judge `12142ab` (PR #42), frozen V
 reference `judge/v_reference.json` (V 0.013139771685914705 over 80 designs), N = 260 with the pilot, records reset
 2026-11-13. Under the rule stated before that rerun, all nine are equivalent to the rows below (differences only through
