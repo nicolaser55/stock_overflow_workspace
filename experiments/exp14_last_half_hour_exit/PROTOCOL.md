@@ -66,7 +66,7 @@ No SPY, VIX or other market series were explored for this draft.
 The runner’s shared verdict (return / consistency / baselines / look-ahead / multiple testing) is
 `pass` or `fail`. It does not replace this protocol’s stopping rule.
 
-## 3. Data
+## 3. Data and data sources
 
 - **Instrument:** SPY 1-minute IBKR bars via the point-in-time view. The design reads no other source.
 - **Period:** development view through the embargo before the registered holdout (boundary from
@@ -214,7 +214,7 @@ holdout env vars or read the quarantine.
 
 | Version | Date | Change |
 |---|---|---|
-| 1.0 | 2026-11-16 | Draft from the research brief, then the review: VIX gate dropped (6 candidates, `SPY_1MIN` only); always-skip baseline removed in favour of the R4c random-timing test; `FOLD_TRAIN_WINDOW_YEARS` 10 so validation quarters are 2015–2024 (gives up 2008); prices are the previous session’s last close, the 09:59 close and the 15:30 close; the skip is 15:31–15:59; weak-day skip kept. Config, design and synthetic tests written. Preregistered. |
+| 1.0 | 2026-11-16 | Draft from the research brief, then the review: VIX gate dropped (6 candidates, `SPY_1MIN` only); always-skip baseline removed in favour of the R4c random-timing test; `FOLD_TRAIN_WINDOW_YEARS` 10 so validation quarters are 2015–2024 (gives up 2008); prices are the previous session’s last close, the 09:59 close and the 15:30 close; the skip is 15:31–15:59; weak-day skip kept. Config, design and synthetic tests written. Preregistered. Pre-run fix (2026-11-16): section 3 heading renamed so the runner finds "data sources"; no rule changed. |
 
 An amended version after a run adds a row labelled exactly `bug-fix` or `data-dependent`. A crash
 before the first trial row is not a version: write "pre-run fix: <what>" and commit again with
