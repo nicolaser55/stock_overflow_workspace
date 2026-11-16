@@ -316,6 +316,11 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   idea I1, variant 1 of 5; `docs/IDEA_LIST.md`). A Cursor agent on nicodesktop prepares the brief, the protocol, the
   design and the tests under `AGENTS.md`; Claude reviews; Nicolas commits the `preregister` commit and queues it. The
   independent audit of any pass is done by an LLM in a fresh claude.ai conversation that has not seen the work.
+  **Result (2026-11-16):** exp14 v1.0 ran on judge 2e9cfb0 (PRs #50, #51): **fail** (return, consistency, baselines,
+  multiple testing; look-ahead pass; N 266). Two earlier jobs crashed in the preregistration check before any trial
+  row (the `## ... data sources` heading was missing); fixed as a pre-run fix of the same version 1.0 (PR #51). The
+  queue, the grade, the technical status, the report and the emails all worked. Lesson: run
+  `get_protocol_missing_list` on the protocol before the `preregister` commit.
   **Scope and stopping rule (decided by Nicolas on 2026-11-14, before any of them ran):** two or three experiments from
   the open slots of section 4 (`docs/STAGE1_RESEARCH_PLAN.md`; recommended C1-C3, I1-I2), each at most one amendment
   (protocol 1.0 plus one version); then the agents start, whatever the results. A design that shows only the 90% flag
