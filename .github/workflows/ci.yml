@@ -1,5 +1,7 @@
 # Continuous integration (audit B4 / S12, 2026-10-25). Required by branch protection on main.
-#   tests             the fast test set on synthetic data (no real data, no holdout variables)
+#   tests             the protocol lint of every experiment version not in records/legacy/registered_versions.csv
+#                     (scripts/check_experiment_ready.py --lint-unregistered; review 2026-11-17, B1), then the fast
+#                     test set on synthetic data (no real data, no holdout variables)
 #   protected-paths   main's copy of the protected-path check, with main's list: reports protected changes
 #                     (CODEOWNERS then requires Nicolas's review) and fails on an edited row of docs/RESULTS_LOG.md
 #   windows-tests     the same fast test set on Windows (nicodesktop runs Windows; roadmap R7, 2026-11-08)
@@ -33,6 +35,10 @@ jobs:
           python -m pip install -r requirements/ci_requirements.txt
           python -m pip install -e . --no-deps
           python -m ipykernel install --user --name venv-main
+      - name: Protocol lint of every experiment version not registered yet
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python scripts/check_experiment_ready.py --lint-unregistered
       - name: Fast test set
         env:
           PYTHONIOENCODING: utf-8

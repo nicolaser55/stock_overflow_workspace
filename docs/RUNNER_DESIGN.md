@@ -316,9 +316,13 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   queue script itself) to `origin/main`, sets `refs/deployed` to that commit with a reflog entry (time and account;
   `git reflog refs/deployed`), and restarts the task when no job is running. PowerShell reads a script before running
   it, so when a merge changes `deploy_runner.ps1` itself, run it twice (the first run still uses the old script). Run it
-  as `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1` from the runner clone: so_runner's
-  execution policy blocks scripts, and the bypass applies to that one process only (2026-11-15). Then check that
-  `git rev-parse refs/deployed` equals `origin/main`; if not, run it again (the known stop on git's stderr). A job whose commit holds core changes
+  as `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1 -ExpectCommit <merge commit>` from
+  the runner clone: so_runner's execution policy blocks scripts, and the bypass applies to that one process only
+  (2026-11-15). Since 2026-11-17 (review B3) the script refuses another account and an `origin/main` other than the
+  expected commit, runs git through a wrapper that checks exit codes instead of stopping on git's stderr (D6), prints
+  the judge hash of the deployed commit and of the new one with the protected files changed between them, asks for
+  the first 8 characters of the new judge hash when it changes, and ends by checking that HEAD and `refs/deployed`
+  name the same commit (a cancelled or failed deploy moves HEAD back). A job whose commit holds core changes
   that are on `main` but not deployed is rejected with that reason. A finished run deletes its bar and source pickles, checkpoints
   and fit cache; decisions, scores, reports and the manifest stay (audit S11).
 - **Report and verdict:** one shared decision rule (the verdict parts above) and one run

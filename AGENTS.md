@@ -52,7 +52,7 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
   view only; keep experiment constants in the experiment's `config.py`.
 - Runs: until the agents run on their own (roadmap R6), Nicolas queues every run after he has merged and deployed
-  it; do not add a job yourself. A job (`scripts\run_queue.py add experiments\<exp> --note "<why>"`, from a clean
+  it (`scripts\nico_queue.ps1`, which refuses a commit other than the deployed one); do not add a job yourself. A job (`scripts\run_queue.py add experiments\<exp> --note "<why>"`, from a clean
   clone at the commit) records the commit and brings only `experiments/**`:
   the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the commit Nicolas last deployed,
   so a commit that changes other files, or is based on `main` commits not deployed yet, is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
@@ -73,8 +73,12 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   `experiments/`, and a queued job may change nothing outside `experiments/`, so the order is (`experiments/README.md`):
   (1) a pull request with the tests and the family-ledger row, merged and deployed; (2) one commit that touches only
   `experiments/` (the experiment folder and its registry line), with a subject starting `preregister expNN`; (3) queue
-  that commit. Before asking for a review of the `preregister` commit, check the protocol: `get_protocol_missing_list`
-  (`so/runner/preregistration.py`) on its `PROTOCOL.md` must return `[]` (keep the template's `## ` headings). Any
+  that commit. Before asking for each review, run the checklist of `experiments/README.md` and paste its output:
+  `scripts\check_experiment_ready.py experiments\<exp>` (with `--draft` before the `preregister` commit; with
+  `--reviewed <commit of review 2>` after it, in place of a third review), the protocol's candidate table against
+  `CANDIDATE_LIST`, the "Family:" line against section 4 of `docs/STAGE1_RESEARCH_PLAN.md` (the idea, the next free
+  variant), no DRAFT left, the fast tests and the experiment's tests. No FAIL line may remain; SKIPPED lines need the
+  trial log, which you cannot read: never report them as passed (keep the template's `## ` headings). Any
   change after a run is a new
   protocol version of the same experiment (same name and folder, `PROTOCOL_VERSION` raised, every candidate renamed,
   for example `v1.1|<name>`, and a change-log row labelled `bug-fix` or `data-dependent`), including a change to a shared
