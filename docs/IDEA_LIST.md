@@ -18,6 +18,10 @@ not what we observed. Where a source was not checked, the entry says so.*
   that brings the experiment's tests, together with the ledger row in section 4 of the plan.
 - **Suggested order** among eligible ideas: I1 → C1 → V1 → C2 → I2 → X1 → C3 → R1 → M2 → R2 → M1 → I3. The first
   five spend little time out of the market, state a mechanism, and (except C1) need no new data.
+- **Choosing among eligible ideas (decided by Nicolas on 2026-11-17):** prefer ideas that trade rarely and stay
+  invested most of the time (costs removed exp14's small gross gain), and ideas whose effect was replicated out of
+  sample (other periods, other markets) over a single large reported effect. Re-check the suggested order against
+  these two criteria when the next idea is picked. About 3-5 candidates per version.
 - **This file is protected** (`protected_paths.txt`): an agent proposes a change in its report; Nicolas merges it.
 - **Statuses:** eligible · selected (an experiment is being prepared) · used (expNN, result) · parked (family closed)
   · drop candidate (weak; keep only if a slot is spare) · needs data (eligible once Nicolas supplies and registers it).
@@ -62,8 +66,8 @@ dates, unemployment vintages (`docs/STAGE1_RESEARCH_PLAN.md` section 5). Each en
 `so.core.point_in_time` with its availability clock before any design reads it (code work, a protected change).
 
 **Budget** (decided): 3 ideas per family (the ledger, `docs/STAGE1_RESEARCH_PLAN.md` section 4; existing experiments
-count) and 5 variants per idea, a variant being a protocol version (decided 2026-11-14), with about 3-15 candidates
-per version. Every candidate is a design in N.
+count) and 5 variants per idea, a variant being a protocol version (decided 2026-11-14), with about 3-5 candidates
+per version (2026-11-17; was about 3-15). Every candidate is a design in N.
 
 **"Promise"** is Claude's suggestion for the order (Nicolas decides; the hand-designed phase takes two or three ideas,
 later the agents' planner continues from this list). It weighs: the time spent out of the

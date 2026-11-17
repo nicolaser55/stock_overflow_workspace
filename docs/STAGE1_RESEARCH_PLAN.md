@@ -33,6 +33,57 @@ Earlier decisions that bind this plan (design 2026-10-28): the planner picks the
 only grades; the coder never sees results; budget 5 variants per idea and 3 ideas per family; every variant is counted
 in the multiple-testing N; a pass is frozen and paper-traded on data after its freeze date.
 
+## 1.1 Decisions taken (Nicolas, 2026-11-17, after the codebase and pipeline review)
+
+Taken before any design has passed the verdict. They are not amended after a result.
+
+1. **Goal.** More total return than buy-and-hold after costs. Lower risk is not the aim (Nicolas already holds SPY
+   and similar ETFs long term); the 90% band stays reported only. A long-only, unlevered strategy gains only by being
+   in cash on sessions that would have lost, so a realistic edge is a few points a year at most.
+2. **The multiple-testing bar stays as it is** (N with the pilot included, V frozen; no counting of "independent"
+   designs). What it means: with N = 266, the frozen V and 42 scored quarters, a path needs a quarterly excess Sharpe
+   ratio of about 0.58 over buy-and-hold, about 1.2 a year. A single untuned design would need about 0.5 a year on
+   this span. Published timing effects, where they hold, are around 0.3-0.5 a year. **A fail on multiple testing
+   alone is expected for a real but modest edge; it is not evidence that the edge is absent.** Each result is read by
+   the parts that carry information: the return at zero and at standard slippage, the constant-exposure baseline, the
+   plain random-timing count (draws at or above the path, of the registered draws) and consistency.
+3. **A reported-only distance to the bar** in every report: the path's quarterly excess Sharpe ratio, the bar it was
+   compared with, and the plain random-timing count. It changes no verdict and no grade; the grade file keeps its
+   no-digits rule. Not built yet (roadmap: the judge pull request before the agents).
+4. **A lower tier, "candidate for a small live test"** (agreed in principle; never called a pass; the full verdict
+   stays the only pass). Its criteria are written and decided before the next experiment runs, and checked against
+   the existing results first so that it changes no existing reading. Conditions: (a) it is written down before any
+   result reaches it; (b) development data screens, the holdout and the live test confirm, and only one or two
+   candidates go to the holdout; (c) money is sized to the evidence, with a stop rule stated before the live test.
+5. **Holdout rule.** A holdout evaluation (12 months, once per design, run only by Nicolas) **confirms** a design when
+   all three hold on the window: (a) the run is valid (the look-ahead check passes, no undeclared source was read);
+   (b) its total return after costs (standard slippage and fees, dividends and T-bill interest on both sides) is
+   strictly above buy-and-hold's; (c) it is strictly above the constant-exposure baseline's. Random timing,
+   consistency and multiple testing are reported, not decisive: one year cannot support them. A design that fails is
+   dropped; there is no second evaluation of it, or of a version derived from it after the result. A design with no
+   edge beats buy-and-hold in a given year about half the time, so a confirmation means "not contradicted by new
+   data"; a failure is the more informative outcome. The holdout report still applies the development verdict, which
+   cannot pass on one year (consistency needs 24 decisive windows); its own label is to be built (roadmap).
+6. **Other indices confirm; they do not search.** A design that reaches the lower tier or passes is tested frozen,
+   without re-tuning, on similar indices (QQQ, IWM and others). No "any stock" support is built until a second symbol
+   is actually needed; experiments come first.
+7. **End of stage 1:** after **15 experiments** or when the family budget (section 4) is spent, whichever comes first.
+   Counted from exp14 (experiment 1 of 15), hand-designed and agent experiments together. Reruns, pre-run fixes and
+   amended versions of an experiment do not count as new experiments. If nothing reaches even the lower tier, that is
+   the stage-1 result, recorded as a negative result.
+8. **Forward data.** Nicolas keeps downloading new data into the quarantine. The development view and the holdout
+   window stay frozen (no `refresh_development_view.py`) until a deliberate refresh, so results stay comparable and
+   the new months stay untouched by any experiment.
+9. **Research practice.**
+   - Prefer ideas that trade rarely and stay invested most of the time: costs removed exp14's small gross gain.
+   - Rank eligible ideas by expected turnover and by out-of-sample evidence (replications across periods and
+     markets), not only by the size of the reported effect.
+   - About 3-5 candidates per version (was about 3-15), so the plain random-timing count stays readable.
+   - One prediction line in each protocol, written before the first run: the expected direction of the effect and
+     the part of the verdict most likely to fail.
+   - Two Claude reviews per experiment (brief and protocol; design and tests). The third is replaced by the
+     readiness check and a diff showing that only the DRAFT marker changed.
+
 ---
 
 ## 2. Baseline: the nine experiments under judge v1 (total returns, 2026-11-11)
@@ -151,9 +202,11 @@ spent before the budget existed are not refunded or charged; they are already in
 
 **A variant is a protocol version (decided by Nicolas on 2026-11-14).** Each idea has at most 5 versions, across all the
 experiments filed under it (an experiment itself has at most three per family; a derived experiment such as exp13
-spends a version of its source idea). Grid width is limited separately: about 3-15 candidates per version, every
-candidate a design in N. Every new protocol carries `Family: <letter>, idea <id>, variant <k> of 5`, linted by the
-runner; this table is updated in the pull request that brings the experiment's tests (before its first run). The nine
+spends a version of its source idea). Grid width is limited separately: about 3-5 candidates per version (2026-11-17;
+was about 3-15), every candidate a design in N. Every new protocol carries `Family: <letter>, idea <id>, variant <k>
+of 5`, linted by the runner for its format only (the budget itself is checked by hand against this table until the
+judge pull request before the agents enforces it);
+this table is updated in the pull request that brings the experiment's tests (before its first run). The nine
 experiments below are protocol 1.0 and keep their assignment; they are not relabelled.
 
 | Family | Ideas used | Slots left | Experiments | Eligible new ideas (`docs/IDEA_LIST.md`) |

@@ -7,7 +7,9 @@ baseline. The verdict passes only a strategy whose total return is strictly abov
 reaches 90% of buy-and-hold with a better Sharpe ratio or drawdown is reported beside it, never as a pass. Every
 experiment is a design on one shared point-in-time runner: the runner shows
 a design only what was knowable at each decision, scores its candidates, selects with prior data only, compares with
-baselines, checks for look-ahead, and writes a report. Failed experiments are results.
+baselines, checks for look-ahead, and writes a report. Failed experiments are results. What a result can and cannot
+show, the lower tier "candidate for a small live test", the holdout rule and the end of stage 1 are decided in
+`docs/STAGE1_RESEARCH_PLAN.md` section 1.1 (2026-11-17).
 
 ## Layout
 
@@ -85,6 +87,10 @@ the point-in-time layer (`so.core.point_in_time`, `docs/DATA_SOURCES.md`).
 
 The nine experiments (exp01-exp07, exp12, exp13) were rerun as the final stage-1 baseline on 2026-11-13/14 (judge
 `12142ab`, frozen V reference over 80 designs, N = 260 with the pilot): all nine fail the verdict (`docs/RESULTS_LOG.md`,
-`docs/STAGE1_RESEARCH_PLAN.md` section 2). Next: a few hand-designed experiments under the same rules (roadmap, after
-R4e), then the agents. The verdict's label is `pass` or `fail` since 2026-11-14 (earlier rows say "email-worthy" /
-"not email-worthy"). The holdout window is registered and has not been evaluated.
+`docs/STAGE1_RESEARCH_PLAN.md` section 2), and were rerun unchanged under R4e/R4f on 2026-11-15 as the reference
+baseline. The first hand-designed experiment, exp14 (idea I1), ran on 2026-11-16 and failed. Next: the fixes the
+2026-11-17 review listed before the second experiment and the lower-tier rule (roadmap), then the remaining
+hand-designed experiments, then the agents. Stage 1 ends after 15 experiments counted from exp14, or when the family
+budget is spent. The verdict's label is `pass` or `fail` since 2026-11-14 (earlier rows say "email-worthy" /
+"not email-worthy"). The holdout window is registered and has not been evaluated; the development view stays frozen
+while new data are downloaded.
