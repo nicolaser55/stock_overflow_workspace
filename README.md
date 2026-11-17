@@ -50,7 +50,11 @@ Environment variables: `SO_DATA_PATH` (the data root, required). Nicolas only: `
 |---|---|
 | Fast tests (after an edit, a few minutes) | `tests\run_all_tests.py --fast` |
 | Full tests (before a merge) | `tests\run_all_tests.py` |
-| Queue a run at the current (pushed, clean) commit | `scripts\run_queue.py add experiments\<exp> --note "<why>"` |
+| Readiness of an experiment folder before a review or a queue (so_agent, nico) | `scripts\check_experiment_ready.py experiments\<exp> [--draft] [--reviewed <commit>]` |
+| Merge a pull request and bring the clone to its merge commit (nico) | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\nico_merge.ps1 -Pr <n>` |
+| Deploy main to the runner (so_runner, in the runner clone) | `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1 -ExpectCommit <merge commit>` |
+| Queue a run at the deployed commit (nico) | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\nico_queue.ps1 -Experiment <exp> -Note "<why>"` |
+| Queue a run at the current (pushed, clean) commit (low level; the wrapper above checks the commit) | `scripts\run_queue.py add experiments\<exp> --note "<why>"` |
 | Queue state / retry a failed job | `scripts\run_queue.py status`, `scripts\run_queue.py retry <job id>` |
 | Run the queue (so_runner; normally the scheduled task `SO queue runner`) | `scripts\run_queue.py watch` (or `run` for one pass) |
 | Append finished runs to `docs/RESULTS_LOG.md` (Nicolas; then a pull request) | `scripts\append_results_log.py` |

@@ -48,16 +48,18 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 4. Write `design.py`. Declare every source in `DATA_SOURCE_LIST` (registered in `so.core.point_in_time`).
 5. Tests and the registry line first, in their own pull request: tests (synthetic data: rule mechanics, no look-ahead
    of new features, the design on a short runner loop) in `tests/test_experiments.py` or a new suite listed in
-   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it and deploys (as so_runner:
-   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1`): a queued
+   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it
+   (`scripts\nico_merge.ps1 -Pr <n>`) and deploys (as so_runner:
+   `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1 -ExpectCommit <merge commit>`): a queued
    job may change nothing outside `experiments/`, and a job based on `main` commits that are not deployed is rejected.
    The design folder may sit in the same pull request, or follow in step 6.
 6. One commit that touches only `experiments/` (the experiment folder, and its row in the registry above), with a
    subject starting `preregister expNN` (merge commits keep it; a squash merge would rename it, so main allows merge
-   commits only). Before that commit, the protocol check must print `[]`:
-   `python -c "from so.runner.preregistration import get_protocol_missing_list; print(get_protocol_missing_list(open('experiments/expNN_<name>/PROTOCOL.md', encoding='utf-8').read()))"`.
-   Push it. Nicolas merges it, deploys, checks that his clone is at the deployed commit, and queues that commit:
-   `scripts\run_queue.py add experiments\expNN_<name> --note "<why>"` (from a clean clone at that commit).
+   commits only). After that commit, `scripts\check_experiment_ready.py experiments\expNN_<name>` must end with no
+   FAIL (the checklist below). Push it. Nicolas merges it (`scripts\nico_merge.ps1 -Pr <n>`), deploys
+   (`deploy_runner.ps1 -ExpectCommit <merge commit>`), and queues with the wrapper, which refuses unless his clone,
+   `origin/main` and the deployed commit agree and the readiness check passes with the trial log:
+   `scripts\nico_queue.ps1 -Experiment expNN_<name> -Note "<why>"`.
 7. Read the result: the email (verdict `pass` or `fail`, failed parts, grade), `store04_experiments/runs/<run id>/report.md`
    (Nicolas and so_runner), and `docs/RESULTS_LOG.md` after `scripts\append_results_log.py` and its pull request.
    What a result can and cannot show, the lower tier and the holdout rule: `docs/STAGE1_RESEARCH_PLAN.md` section 1.1.
@@ -67,3 +69,24 @@ every candidate (for example `v1.1|<name>`; a reused name would add nothing to N
 labelled `bug-fix` or `data-dependent`, update the variant number of the "Family:" line, then steps 5-7 again. A crash
 before the first trial row is not a version: fix, note "pre-run fix: <what>" in the change log, commit with
 `preregister` again and requeue.
+
+## The checklist before each review (the agent, as so_agent; review 2026-11-17, B5 and B6)
+
+Paste the output of each item into the review request. Run `git fetch origin` first.
+
+1. `scripts\check_experiment_ready.py experiments\expNN_<name>` (add `--draft` while the protocol is still a draft:
+   the DRAFT marker, the `preregister` commit and files outside `experiments/` are then PENDING or INFO). It calls the
+   runner's own checks (preflight, protocol lint, folder name, versions, candidate names, the `preregister` subject,
+   only `experiments/` changed since `origin/main`, `check_preregistration_dict`). Lines marked SKIPPED need the trial
+   log, which so_agent cannot read: they are not passed, and Nicolas's queue wrapper runs them. No FAIL line may remain.
+2. The candidate table of `PROTOCOL.md` against the HAND line `candidates`: the same names, in the same order, about 3-5.
+3. The "Family:" line against the HAND line of section 4: the idea is eligible in that family, and the variant is the
+   next free one for the idea (versions already used, across experiments).
+4. No DRAFT left in `PROTOCOL.md` (for the `preregister` commit).
+5. `tests\run_all_tests.py --fast` and the experiment's own tests (`tests\run_all_tests.py --suite test_experiments.py`).
+
+Reviews (decided 2026-11-17): two Claude reviews per experiment, (1) the brief and the draft protocol, (2) the design,
+the config and the tests. The third is not a review: after the `preregister` commit, the agent pastes
+`scripts\check_experiment_ready.py experiments\expNN_<name> --reviewed <commit of review 2>`, which adds
+`git diff --stat <reviewed>..HEAD` and the folder's diff since that commit; it must show only the DRAFT marker removed
+(and the change-log row's status).
