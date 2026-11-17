@@ -327,6 +327,39 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   (comparable return with a better Sharpe ratio or drawdown) is recorded and gets no holdout evaluation or live test
   unless a test pre-registered for that claim passes. A pass leads to: an independent audit, the freeze, one holdout
   evaluation (Nicolas), then the live test.
+  **Decisions of 2026-11-17** (after the independent codebase and pipeline review; `docs/STAGE1_RESEARCH_PLAN.md`
+  section 1.1): the multiple-testing bar stays and what it means is written down (a fail on multiple testing alone is
+  expected for a modest edge); a lower tier "candidate for a small live test" is agreed in principle; the holdout
+  rule; other indices only confirm a frozen design; stage 1 ends after 15 experiments counted from exp14 or when the
+  family budget is spent; forward data are collected without refreshing the development view; research practice
+  (rare trading, 3-5 candidates per version, a prediction line, two reviews per experiment).
+- [ ] **Before the second hand-designed experiment** (review 2026-11-17; none of these changes the judge hash):
+  - a readiness check (`scripts/check_experiment_ready.py`) that the agent runs before asking for a review and
+    Nicolas runs before queueing: preflight, the protocol lint (`get_protocol_missing_list`), folder name, candidate
+    names, versions, the `preregister` subject, only `experiments/` changed since `main`; plus a CI job that lints the
+    `PROTOCOL.md` of every version not registered yet;
+  - a merge script for nico with an explicit pull-request number: required checks, merge commit, pull, and HEAD equal
+    to the merge commit;
+  - `scripts/deploy_runner.ps1`: refuse another account, take the expected commit, handle git's stderr (the D6 item
+    below), print the judge hash before and after and the protected files changed since the last deploy;
+  - a queue wrapper that refuses unless the job commit is the deployed commit and `origin/main`;
+  - the agent's checklist before each review (the readiness output, the candidate table against `CANDIDATE_LIST`, the
+    "Family:" line against section 4, no DRAFT, tests); two Claude reviews per experiment.
+- [ ] **The lower-tier rule** ("candidate for a small live test") written and decided before the next experiment runs
+  (`docs/STAGE1_RESEARCH_PLAN.md` section 1.1, point 4).
+- [ ] **One judge pull request before the agents** (review 2026-11-17, proposal B9), with one equivalence check on
+  exp04 and exp05:
+  - the runner rejects a job whose commit is older than the deployed judge when its design folder differs (today such
+    a job is accepted and runs the old copy of the design); `run_queue.py add` runs the pre-registration check;
+  - the protocol lint accepts a section heading at any level (`### 3.1 Data sources` crashed exp14 twice);
+  - the family budget enforced from a record in `records/` (today the "Family:" line is checked for format only);
+  - the V reference hash pinned in a protected record (D7); `assert` replaced by `raise` in
+    `so/core/external_data.py` (D8);
+  - report lines: an early-stopped random-timing p-value printed as a bound with the plain count; for intraday
+    designs the number of non-base sessions instead of daily switches; the distance to the bar (section 1.1, point 3);
+  - the holdout report's own label under the holdout rule (section 1.1, point 5);
+  - imports from another experiment folder covered by the version lock (or refused for new versions);
+  - a job's claim removed before the run-index append, so an index failure cannot file a finished run twice.
 
 ## R4b. Total returns: dividends and T-bill interest (decided 2026-10-29; before any agent runs)
 

@@ -44,5 +44,7 @@ experiment (same name and folder; never a renamed copy), every candidate renamed
 with a change-log row labelled `bug-fix` (the code did not do what the protocol says; found without results) or
 `data-dependent` (anything results prompted; when in doubt, data-dependent). A crash before the first trial row logs
 nothing: the fix may rerun as the same version after a new `preregister` commit, recorded as "pre-run fix: <what>".
-At most two new versions per family (three versions in all). Keep grids small (about 3-15 candidates per version).
+At most two new versions per family (three versions in all). Keep grids small (about 3-5 candidates per version;
+decided 2026-11-17). Write one prediction line in the protocol before the first run (expected direction, the
+part of the verdict most likely to fail).
 When discussing significance, give N, the designs tried with the pilot included, behind the conclusion.

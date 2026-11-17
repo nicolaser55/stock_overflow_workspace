@@ -25,6 +25,9 @@ and the report live in `so.runner`. Development is `scripts/run_development.py <
 ## 1. Background and research question
 What is tested, why, and what earlier experiments showed. The identity that decides success (e.g. "buys back lower than it sold").
 
+Prediction (written before the first run): the expected direction of the effect and the part of the verdict most
+likely to fail (for example "a small positive gross effect; likely to fail after costs").
+
 ## 2. Success criteria
 Primary / comparable return / secondary / information test (the uninformed baseline the information must beat) /
 statistical support (`so/core/evaluation.py`). State the minimum detectable effect you expect to face.
@@ -82,7 +85,7 @@ Signal check (base rate, two-sided, ≥ 6 months per bin, pooled validation), ex
 (prior-only path vs buy-and-hold and baselines). Apply this protocol's rule as written. The runner verdict is reported beside it.
 
 ## 7.1 Trial budget
-The candidates of this version (about 3-15), the versions this experiment may still use (at most three per family in
+The candidates of this version (about 3-5), the versions this experiment may still use (at most three per family in
 all) and the variants of its idea already spent (section 4 of `docs/STAGE1_RESEARCH_PLAN.md`). Every candidate is a
 design in N.
 
@@ -103,6 +106,11 @@ the holdout sessions are reported. Every decision uses only information availabl
 The development boundary is not a hard-coded date. It is `so.core.holdout.get_development_end_date(embargo)`: the session
 an embargo before the active holdout start. Validation folds come from `so.core.schedule.get_development_fold_pdf`
 (validation windows only). Do not read the holdout for exploration, validation or any decision.
+
+A holdout evaluation confirms the design when the run is valid (look-ahead check passed, no undeclared source),
+its total return after costs is strictly above buy-and-hold's, and strictly above the constant-exposure baseline's.
+Random timing, consistency and multiple testing are reported, not decisive. A design that fails is dropped
+(decided 2026-11-17, `docs/STAGE1_RESEARCH_PLAN.md` section 1.1).
 
 Only Nicolas runs the evaluation (`scripts/holdout_evaluate.py`), once per frozen design per window. Agents never run
 that script or `scripts/holdout_window.py`, and never set `SO_HOLDOUT_PATH` or `SO_HOLDOUT_EVALUATION_TOKEN`.
@@ -129,3 +137,4 @@ An amended version adds a row whose first cell is its `PROTOCOL_VERSION` and who
 | template | 2026-10-11 | Holdout evaluation rewritten to the frozen prior-only path (audit R1–R3, H1): design interface, truncation test, ledger status |
 | template | 2026-10-12 | Rolling retrain example (Nicolas, 2026-10-11): weekly logistic regression, windows 6M/2Y/10Y, purge by dropping unfinished labels. VIX is no longer read. |
 | template | 2026-10-22 | Runner port (infrastructure 4c). `decide(view)` with `view.get_labels("TSDAY_FWD")`. No copied replay, selection, baseline or report code. Entry point `scripts/run_development.py`. |
+| template | 2026-11-17 | Prediction line in section 1; about 3-5 candidates per version; holdout confirmation rule in section 10 |

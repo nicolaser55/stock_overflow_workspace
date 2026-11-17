@@ -14,6 +14,21 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
    family ledger) when you prepare a new experiment.
 5. `docs/RUNNER_DESIGN.md` when you touch a design (what the runner guarantees and what a design writes).
 
+## The mission and what counts (Nicolas, 2026-11-17)
+
+- The aim is more total return than buy-and-hold after costs, not lower risk. A long-only, unlevered strategy gains
+  only by being in cash on sessions that would have lost, so prefer ideas that stay invested most of the time and
+  trade rarely: costs remove small gross edges (exp14). Prefer ideas whose effect was replicated out of sample in the
+  literature over a single large reported effect.
+- The multiple-testing bar is high on purpose and stays: after every design ever tried, a real but modest edge is
+  expected to fail it. Never present a fail as nearly a pass, and never propose lowering a bar.
+- Only the full verdict is a pass. A lower tier, "candidate for a small live test", is agreed in principle and is
+  Nicolas's to define; never claim it for a design.
+- Other indices (QQQ, IWM and others) are used only to confirm a frozen design, never to search.
+- Stage 1 ends after 15 experiments counted from exp14, or when the family budget is spent.
+- Protocols: about 3-5 candidates per version and one prediction line written before the first run
+  (`experiments/README.md`). Details: `docs/STAGE1_RESEARCH_PLAN.md` section 1.1.
+
 ## How work is done
 
 - Account and folders: you run as `so_agent` in your own clone. You can write only in that clone and in
@@ -31,12 +46,14 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   `docs/RESULTS_LOG.md` only grows, and only from the run index (`scripts/append_results_log.py`); never write a row.
 - Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
 - Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never
-  commit failing tests. New tests go in a new `tests/test_*.py` added to `tests/run_all_tests.py` (synthetic data only).
+  commit failing tests. New experiment tests go in `tests/test_experiments.py` (synthetic data only);
+  `tests/run_all_tests.py` is protected, so a new suite file needs Nicolas to list it.
 - Design code runs behind a guard (`so/runner/guard.py`): it may not open, list or write anything under the data
   root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
   view only; keep experiment constants in the experiment's `config.py`.
-- Runs: commit and push your branch first, then `scripts\run_queue.py add experiments\<exp> --note "<why>"` (it
-  records the commit; uncommitted changes in the experiment folder are refused). A job brings only `experiments/**`:
+- Runs: until the agents run on their own (roadmap R6), Nicolas queues every run after he has merged and deployed
+  it; do not add a job yourself. A job (`scripts\run_queue.py add experiments\<exp> --note "<why>"`, from a clean
+  clone at the commit) records the commit and brings only `experiments/**`:
   the runner takes everything else (the judge: `so/`, `scripts/`, the rules) from the commit Nicolas last deployed,
   so a commit that changes other files, or is based on `main` commits not deployed yet, is rejected, never run (`scripts\run_queue.py status` lists it with the reason under `recent`).
   The runner writes the report, the manifest and a `run_index.csv` row, which only it and Nicolas read. What you see
@@ -56,7 +73,9 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   `experiments/`, and a queued job may change nothing outside `experiments/`, so the order is (`experiments/README.md`):
   (1) a pull request with the tests and the family-ledger row, merged and deployed; (2) one commit that touches only
   `experiments/` (the experiment folder and its registry line), with a subject starting `preregister expNN`; (3) queue
-  that commit. Any change after a run is a new
+  that commit. Before asking for a review of the `preregister` commit, check the protocol: `get_protocol_missing_list`
+  (`so/runner/preregistration.py`) on its `PROTOCOL.md` must return `[]` (keep the template's `## ` headings). Any
+  change after a run is a new
   protocol version of the same experiment (same name and folder, `PROTOCOL_VERSION` raised, every candidate renamed,
   for example `v1.1|<name>`, and a change-log row labelled `bug-fix` or `data-dependent`), including a change to a shared
   helper under `so/` that the design imports. At most three versions per family. The runner enforces this
