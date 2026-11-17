@@ -333,7 +333,8 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   rule; other indices only confirm a frozen design; stage 1 ends after 15 experiments counted from exp14 or when the
   family budget is spent; forward data are collected without refreshing the development view; research practice
   (rare trading, 3-5 candidates per version, a prediction line, two reviews per experiment).
-- [ ] **Before the second hand-designed experiment** (review 2026-11-17; none of these changes the judge hash):
+- [x] **Before the second hand-designed experiment** (review 2026-11-17; none of these changes the judge hash). Done:
+  PR #54, merge `c6050d0`, deployed 2026-11-17, judge hash unchanged (`5b2eb368`):
   - a readiness check (`scripts/check_experiment_ready.py`) that the agent runs before asking for a review and
     Nicolas runs before queueing: preflight, the protocol lint (`get_protocol_missing_list`), folder name, candidate
     names, versions, the `preregister` subject, only `experiments/` changed since `main`; plus a CI job that lints the
@@ -345,8 +346,8 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   - a queue wrapper that refuses unless the job commit is the deployed commit and `origin/main`;
   - the agent's checklist before each review (the readiness output, the candidate table against `CANDIDATE_LIST`, the
     "Family:" line against section 4, no DRAFT, tests); two Claude reviews per experiment.
-- [ ] **The lower-tier rule** ("candidate for a small live test") written and decided before the next experiment runs
-  (`docs/STAGE1_RESEARCH_PLAN.md` section 1.1, point 4).
+- [x] **The lower-tier rule** ("candidate for a small live test") written and decided before the next experiment runs
+  (`docs/STAGE1_RESEARCH_PLAN.md` section 1.1, point 4; decided 2026-11-17).
 - [ ] **One judge pull request before the agents** (review 2026-11-17, proposal B9), with one equivalence check on
   exp04 and exp05:
   - the runner rejects a job whose commit is older than the deployed judge when its design folder differs (today such
@@ -478,7 +479,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
 
 - [ ] Inspect `D:\stock_overflow\archive` (keep, merge into quarantine, or delete).
 - [ ] About 10 in-window minute rows in public git history (`7c024ba`).
-- [ ] `scripts/deploy_runner.ps1` sets `$ErrorActionPreference = "Stop"`: in Windows PowerShell 5 git's message on
+- [x] (fixed 2026-11-17, PR #54: native calls checked by exit code) `scripts/deploy_runner.ps1` sets `$ErrorActionPreference = "Stop"`: in Windows PowerShell 5 git's message on
   stderr at checkout ends the script before `refs/deployed` is set (2026-11-13; a second run finished the deploy).
   Handle git's stderr instead (check `$LASTEXITCODE` only).
 - [ ] `scripts/check_agent_access.py` leaves an empty `access_probe_*.tmp` in `queue/pending` where `so_agent` may not

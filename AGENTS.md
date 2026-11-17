@@ -22,8 +22,8 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   literature over a single large reported effect.
 - The multiple-testing bar is high on purpose and stays: after every design ever tried, a real but modest edge is
   expected to fail it. Never present a fail as nearly a pass, and never propose lowering a bar.
-- Only the full verdict is a pass. A lower tier, "candidate for a small live test", is agreed in principle and is
-  Nicolas's to define; never claim it for a design.
+- Only the full verdict is a pass. A lower tier, "candidate for a small live test", exists (decided 2026-11-17,
+  `docs/STAGE1_RESEARCH_PLAN.md` section 1.1 point 4); only Nicolas reads it from a report. Never claim it for a design.
 - Other indices (QQQ, IWM and others) are used only to confirm a frozen design, never to search.
 - Stage 1 ends after 15 experiments counted from exp14, or when the family budget is spent.
 - Protocols: about 3-5 candidates per version and one prediction line written before the first run

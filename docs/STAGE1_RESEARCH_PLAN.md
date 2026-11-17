@@ -50,11 +50,25 @@ Taken before any design has passed the verdict. They are not amended after a res
 3. **A reported-only distance to the bar** in every report: the path's quarterly excess Sharpe ratio, the bar it was
    compared with, and the plain random-timing count. It changes no verdict and no grade; the grade file keeps its
    no-digits rule. Not built yet (roadmap: the judge pull request before the agents).
-4. **A lower tier, "candidate for a small live test"** (agreed in principle; never called a pass; the full verdict
-   stays the only pass). Its criteria are written and decided before the next experiment runs, and checked against
-   the existing results first so that it changes no existing reading. Conditions: (a) it is written down before any
-   result reaches it; (b) development data screens, the holdout and the live test confirm, and only one or two
-   candidates go to the holdout; (c) money is sized to the evidence, with a stop rule stated before the live test.
+4. **A lower tier, "candidate for a small live test"** (decided 2026-11-17, before any result reached it; project doc
+   `claude/RULE_2026-11-17_lower_tier.md`). Never called a pass; the full verdict stays the only pass; not part of the
+   judge, not in the grades and not shown to agents. Nicolas reads it from `report.md` / `report.json`. A frozen design
+   reaches it when all of these hold on its development run:
+   (a) every verdict part passes except multiple testing: return strictly above buy-and-hold after standard costs;
+   consistency; baselines (strictly above constant exposure and above at least 95 of the 100 registered random-timing
+   draws, `random_timing_beaten_count`); look-ahead;
+   (b) still strictly above buy-and-hold at $0.02 slippage (`cost_sensitivity_list`) and with cash at the T-bill yield
+   minus 0.5% (`cash_rate_sensitivity_dict`);
+   (c) the idea is in `docs/IDEA_LIST.md` with a published mechanism and out-of-sample evidence, recorded in the
+   protocol before the first run; the version is 1.0 or a `bug-fix` amendment (not `data-dependent`), and "Derived
+   from:" is `none`.
+   Then: at most **two** such designs go to the holdout in stage 1, in the order they reach the tier (a third waits for
+   stage 2); a holdout confirmation (point 5) allows a live test whose amount, length (about 2-3 months) and stop rule
+   are written per strategy before it starts. What it means: (a) needs roughly an annual information ratio of 0.5; a
+   no-edge design meets the random-timing condition about 5% of the time, so over the remaining experiments one may
+   reach the tier by luck, and the holdout confirms a no-edge design about half the time. The tier is a small, bounded
+   bet on weak evidence, not evidence of an edge. Checked on 2026-11-17 against every current result: none reaches it
+   (exp13 fails consistency and is derived from exp12's results; exp14 is below buy-and-hold after costs).
 5. **Holdout rule.** A holdout evaluation (12 months, once per design, run only by Nicolas) **confirms** a design when
    all three hold on the window: (a) the run is valid (the look-ahead check passes, no undeclared source was read);
    (b) its total return after costs (standard slippage and fees, dividends and T-bill interest on both sides) is
