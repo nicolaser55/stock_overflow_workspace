@@ -1,0 +1,70 @@
+# IMPORT THE SHARED CONFIGURATION
+from so import config
+from so.core.rolling_retrain import TRAIN_WINDOW_MONTH_DICT as SHARED_TRAIN_WINDOW_MONTH_DICT
+
+"""
+Experiment Configuration: exp15_vrp_exit (PROTOCOL.md of this folder)
+
+Every constant specific to this experiment. Shared constants are READ from so.config, never copied. The trial-log
+configuration hash covers both files (so.core.trial_log.get_config_hash_str).
+
+Rule: once the first validation run exists, any change to a constant below is a new protocol version with a new
+EXPERIMENT_NAME, recorded in PROTOCOL.md.
+
+Step 1 (DRAFT): only EXPERIMENT_NAME is set; remaining constants stay template placeholders until step 2.
+"""
+
+"""
+Experiment
+"""
+
+# DEFINE THE EXPERIMENT NAME (TRIAL LOG AND DATA FOLDER) AND THE PROTOCOL VERSION
+EXPERIMENT_NAME = "exp15_vrp_exit"
+PROTOCOL_VERSION = "1.0"
+
+"""
+Rules / Model / Walk-Forward / Baselines (one section per topic, every constant commented)
+"""
+
+# DEFINE THE EMBARGO BETWEEN WINDOWS (SESSIONS; THE LABEL HORIZON, READ FROM THE SHARED CONFIG)
+EMBARGO_TRADING_DAYS = config.LABEL_HORIZON_SESSIONS
+# DEFINE THE FOLD-SCHEDULE TRAINING LENGTH (YEARS). THIS IS NOT THE MODEL'S ROLLING WINDOW
+FOLD_TRAIN_WINDOW_YEARS = 1
+# DEFINE HOW MANY COMPLETED QUARTERS ARE POOLED WHEN A CANDIDATE IS CHOSEN
+SELECTION_POOLED_QUARTER_COUNT = config.CANDIDATE_SELECTION_POOLED_QUARTERS_DEFAULT
+
+"""
+Retraining (Nicolas, 2026-10-11)
+"""
+
+# DEFINE THE RETRAINING FREQUENCY (A CHANGE AFTER RESULTS IS A NEW VERSION)
+RETRAIN_FREQUENCY_STR = config.RETRAIN_FREQUENCY_DEFAULT_STR
+# DEFINE THE OPTIONAL PRE-REGISTERED FREQUENCY COMPARISON (EMPTY: THIS TEMPLATE DOES NOT PRE-REGISTER ONE)
+RETRAIN_FREQUENCY_COMPARISON_STR = ""
+# DEFINE THE TRAINING-WINDOW CANDIDATES
+TRAIN_WINDOW_CANDIDATE_LIST = list(config.TRAIN_WINDOW_CANDIDATE_LIST_DEFAULT)
+# DEFINE THE MONTH-LENGTH USED ONLY AS A TIE BREAK (LONGER WINS). READ FROM THE SHARED MAP, NOT COPIED
+TRAIN_WINDOW_TIE_DICT = {window_str: int(SHARED_TRAIN_WINDOW_MONTH_DICT[window_str]) for window_str in TRAIN_WINDOW_CANDIDATE_LIST}
+# DEFINE THE TWO DAILY FEATURES THE LOGISTIC REGRESSION READS
+FEATURE_COL_LIST = ["intraday_return_pct", "prev_day_return_pct"]
+# DEFINE THE LABEL COLUMN (THE FIXED-HORIZON SIGN, HORIZON = so.config.LABEL_HORIZON_SESSIONS)
+LABEL_COL_STR = "y_fwd_positive"
+# DEFINE THE MINIMUM ROWS A REFIT MUST HAVE (NO FALLBACK WINDOW)
+MIN_TRAIN_ROW_COUNT = 20
+# DEFINE HOW MANY SESSIONS PAST THAT MINIMUM THE FIRST DECISION WAITS, SO THE FIRST REFIT CAN MEET IT
+FIRST_DECISION_EXTRA_SESSIONS = 5
+# DEFINE THE LOGISTIC PENALTY AND THE SEED EVERY REFIT RECEIVES
+LOGISTIC_C = 1.0
+MODEL_SEED = config.RANDOM_SEED
+# DEFINE THE UNINFORMED BASELINE (CONSTANT EXPOSURE, NOT A WEIGHT FIT ON THE HOLDOUT)
+CONSTANT_EXPOSURE_WEIGHT = 1.0
+# THE ENGINE NAME, DEAD BAND AND INITIAL WEIGHT LIVE ON design.py (ENGINE_NAME, DEAD_BAND, INITIAL_WEIGHT)
+
+"""
+Holdout
+"""
+
+# THE DEVELOPMENT BOUNDARY IS NOT A DATE IN THIS FILE
+# It is the session an embargo before the active holdout start (so.core.holdout.get_development_end_date).
+# Validation folds come from so.core.schedule.get_development_fold_pdf (validation windows only).
+# Holdout evaluation is run only by Nicolas, once per window (design.py and PROTOCOL.md, "Holdout evaluation").
