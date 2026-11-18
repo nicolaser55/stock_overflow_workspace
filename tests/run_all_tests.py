@@ -1,9 +1,11 @@
 import os
+import re
 import sys
 import shutil
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 """
 Run the Test Suites
@@ -14,6 +16,16 @@ Run the Test Suites
                                             the named suites only, each with its own temporary SO_DATA_PATH (running a
                                             suite file directly uses the window's SO_DATA_PATH, which a suite refuses
                                             when it is not a temporary folder)
+    python tests/run_all_tests.py --experiment exp15
+                                            the fast set, plus test_experiments.py limited to that experiment: its own
+                                            test_exp15_* functions, every candidate of its design on the runner, and the
+                                            runner's look-ahead check on it (an experiment pull request that changes
+                                            nothing under so/; the full run is still required when so/ changes)
+    python tests/run_all_tests.py --jobs 4  [with any of the above]
+                                            run suites in parallel (each still in its own interpreter and temporary
+                                            SO_DATA_PATH); each suite's output is printed in one block when it ends.
+                                            Default 1: one after another, output streamed. A suite that fails only with
+                                            --jobs > 1 shares a file outside its data folder: report it
 
 Each suite runs in its own interpreter with its own empty temporary SO_DATA_PATH. A failing suite does not stop the
 others; the end lists every failing suite. If SO_DATA_PATH was already set, the trial log under that folder must keep
@@ -56,6 +68,48 @@ SLOW_SUITE_SET = {"test_runner_minute.py", "test_experiments.py"}
 FAST_SUITE_LIST = [suite_str for suite_str in SUITE_LIST if suite_str not in SLOW_SUITE_SET]
 # DEFINE THE TESTS FOLDER
 TESTS_PATH_STR = os.path.dirname(os.path.abspath(__file__))
+# THE EXPERIMENT FILTER OF test_experiments.py (ENVIRONMENT VARIABLE READ BY THAT SUITE)
+EXPERIMENT_SUITE_STR = "test_experiments.py"
+EXPERIMENT_ENV_STR = "SO_TEST_EXPERIMENT"
+EXPERIMENT_PATTERN = re.compile(r"^exp\d+$")
+
+
+# FUNCTION: THE OPTIONS --jobs AND --experiment, AND THE REMAINING ARGUMENTS
+def get_option_tuple(argument_list_in):
+    """
+    Args:
+        argument_list_in (list): sys.argv[1:]
+
+    Returns:
+        tuple: (job count int, experiment str or "", remaining argument list); a bad value raises SystemExit
+    """
+    # TAKE THE TWO OPTIONS OUT; THE REST GOES TO get_suite_list
+    job_count_int, experiment_str, rest_list = 1, "", []
+    idx = 0
+    while idx < len(argument_list_in):
+        argument_str = argument_list_in[idx]
+        if argument_str in ("--jobs", "--experiment"):
+            if idx + 1 >= len(argument_list_in):
+                raise SystemExit(f"{argument_str} needs a value")
+            value_str = argument_list_in[idx + 1]
+            if argument_str == "--jobs":
+                if not value_str.isdigit() or int(value_str) < 1:
+                    raise SystemExit(f"--jobs needs a positive whole number (got {value_str!r})")
+                job_count_int = int(value_str)
+            else:
+                if not EXPERIMENT_PATTERN.match(value_str):
+                    raise SystemExit(f"--experiment needs an experiment number such as exp15 (got {value_str!r})")
+                experiments_path_str = os.path.join(os.path.dirname(TESTS_PATH_STR), "experiments")
+                if not [name_str for name_str in os.listdir(experiments_path_str) if name_str.startswith(value_str + "_")]:
+                    raise SystemExit(f"no folder experiments/{value_str}_*")
+                experiment_str = value_str
+            idx += 2
+            continue
+        rest_list.append(argument_str)
+        idx += 1
+    if experiment_str and rest_list:
+        raise SystemExit("--experiment runs the fast set plus that experiment's tests; do not combine it with --fast or --suite")
+    return job_count_int, experiment_str, rest_list
 
 # FUNCTION: THE SUITES TO RUN FROM THE COMMAND LINE
 def get_suite_list(argument_list_in):
@@ -80,7 +134,7 @@ def get_suite_list(argument_list_in):
         if argument_str.startswith("--suite="):
             named_list.append(argument_str.split("=", 1)[1])
         elif argument_str != "--fast":
-            raise SystemExit(f"unknown argument {argument_str!r} (use --fast or --suite NAME)")
+            raise SystemExit(f"unknown argument {argument_str!r} (use --fast, --suite NAME, --experiment expNN or --jobs N)")
         idx += 1
     if named_list:
         named_list = [os.path.basename(name_str) + ("" if name_str.endswith(".py") else ".py") for name_str in named_list]
@@ -141,32 +195,85 @@ if __name__ == "__main__":
     exit_code_int = 0
     failed_list = []
     try:
-        # THE NAMED SUITES, THE FAST SET OR EVERY SUITE
-        suite_list = get_suite_list(sys.argv[1:])
-        label_str = ("all suites" if suite_list == SUITE_LIST else "fast set" if suite_list == FAST_SUITE_LIST
-                     else "named suites")
-        print(f"{label_str}: {len(suite_list)} suites", flush=True)
-        for suite_str in suite_list:
-            # DISPLAY INFORMATION
-            print(f"\n===== {suite_str} =====", flush=True)
-            # ONE EMPTY TEMPORARY DATA FOLDER FOR THIS SUITE
+        # THE OPTIONS, THEN THE NAMED SUITES, THE FAST SET, THE FAST SET PLUS ONE EXPERIMENT, OR EVERY SUITE
+        job_count_int, experiment_str, rest_list = get_option_tuple(sys.argv[1:])
+        if experiment_str:
+            suite_list = list(FAST_SUITE_LIST) + [EXPERIMENT_SUITE_STR]
+            label_str = f"fast set + {EXPERIMENT_SUITE_STR} for {experiment_str}"
+        else:
+            suite_list = get_suite_list(rest_list)
+            label_str = ("all suites" if suite_list == SUITE_LIST else "fast set" if suite_list == FAST_SUITE_LIST
+                         else "named suites")
+        print(f"{label_str}: {len(suite_list)} suites" + (f", {job_count_int} at a time" if job_count_int > 1 else ""), flush=True)
+
+        # FUNCTION: RUN ONE SUITE IN ITS OWN INTERPRETER AND EMPTY DATA FOLDER
+        def run_suite_tuple(suite_str_in, capture_bool_in):
+            """
+            Args:
+                suite_str_in (str): Suite file name
+                capture_bool_in (bool): Capture the output (parallel runs) instead of streaming it
+
+            Returns:
+                tuple: (suite, return code, elapsed seconds, captured output or "")
+            """
+            # ONE EMPTY TEMPORARY DATA FOLDER FOR THIS SUITE; THE EXPERIMENT FILTER FOR test_experiments.py ONLY
             suite_dir_str = tempfile.mkdtemp(prefix="so_suite_")
             suite_env_dict = {**suite_env_base_dict, "SO_DATA_PATH": suite_dir_str}
+            suite_env_dict.pop(EXPERIMENT_ENV_STR, None)
+            if experiment_str and suite_str_in == EXPERIMENT_SUITE_STR:
+                suite_env_dict[EXPERIMENT_ENV_STR] = experiment_str
             start_time = time.time()
             try:
-                # RUN THE SUITE
-                result = subprocess.run([sys.executable, os.path.join(TESTS_PATH_STR, suite_str)], env=suite_env_dict)
+                if capture_bool_in:
+                    result = subprocess.run([sys.executable, os.path.join(TESTS_PATH_STR, suite_str_in)], env=suite_env_dict,
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    output_str = result.stdout.decode("utf-8", errors="replace")
+                else:
+                    result = subprocess.run([sys.executable, os.path.join(TESTS_PATH_STR, suite_str_in)], env=suite_env_dict)
+                    output_str = ""
             finally:
                 # REMOVE THE SUITE'S TEMPORARY FOLDER
                 shutil.rmtree(suite_dir_str, ignore_errors=True)
+            return suite_str_in, result.returncode, time.time() - start_time, output_str
+
+        # FUNCTION: RECORD ONE FINISHED SUITE
+        def record_suite(suite_str_in, return_code_in, elapsed_in):
+            """
+            Args:
+                suite_str_in (str): Suite
+                return_code_in (int): Its exit code
+                elapsed_in (float): Seconds
+
+            Returns:
+                None
+            """
             # RECORD A FAILURE AND CONTINUE, SO ONE RUN LISTS EVERY FAILING SUITE
-            elapsed_str = f"{time.time() - start_time:.0f} s"
-            if result.returncode != 0:
-                print(f"\n❌ {suite_str} failed ({elapsed_str})", flush=True)
-                failed_list.append(suite_str)
-                exit_code_int = exit_code_int or result.returncode
+            global exit_code_int
+            elapsed_str = f"{elapsed_in:.0f} s"
+            if return_code_in != 0:
+                print(f"\n❌ {suite_str_in} failed ({elapsed_str})", flush=True)
+                failed_list.append(suite_str_in)
+                exit_code_int = exit_code_int or return_code_in
             else:
                 print(f"({elapsed_str})", flush=True)
+
+        if job_count_int == 1:
+            # ONE AFTER ANOTHER, OUTPUT STREAMED
+            for suite_str in suite_list:
+                print(f"\n===== {suite_str} =====", flush=True)
+                _name_str, return_code, elapsed, _output_str = run_suite_tuple(suite_str, False)
+                record_suite(suite_str, return_code, elapsed)
+        else:
+            # IN PARALLEL; EACH SUITE'S OUTPUT IN ONE BLOCK, IN THE ORDER THEY END; THE SLOW ONES START FIRST
+            ordered_list = [name_str for name_str in suite_list if name_str in SLOW_SUITE_SET] + \
+                           [name_str for name_str in suite_list if name_str not in SLOW_SUITE_SET]
+            with ThreadPoolExecutor(max_workers=job_count_int) as executor:
+                future_list = [executor.submit(run_suite_tuple, suite_str, True) for suite_str in ordered_list]
+                for future in as_completed(future_list):
+                    suite_str, return_code, elapsed, output_str = future.result()
+                    print(f"\n===== {suite_str} =====", flush=True)
+                    print(output_str.rstrip(), flush=True)
+                    record_suite(suite_str, return_code, elapsed)
     finally:
         # WHEN THE CALLER NAMED A DATA FOLDER, ITS TRIAL LOG MUST BE UNCHANGED
         if before_stamp_tuple is not None:

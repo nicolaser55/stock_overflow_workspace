@@ -353,10 +353,13 @@ The system should get more efficient over time (decided). Rules:
   job finishes; an unreadable flag counts as set (built, A3). Agents check it before each step (stage-1 build).
 
 ### 10.3 GitHub (decided 2026-10-27; re-enabled before any agent credential exists)
-- one free machine account for agents, Write role, not a code owner, not on any bypass list; a fine-grained token for
-  this repository only, stored only for so_code;
-- ruleset on `main`: pull request required, 0 approvals, code-owner review on core paths (Nicolas), required checks
-  `tests` and `protected-paths`, no deletion, no force push, Admin bypass for pull requests only;
+- one free machine account for agents, Write role, not a code owner, not on any bypass list. As set up on 2026-11-18:
+  `nicolaser55-agent`, used by the Cursor agent as so_agent; a classic token with `repo` and `read:org` only (GitHub's
+  fine-grained tokens cannot reach a repository the account only collaborates on), no `workflow` scope, stored only in
+  so_agent's gh keyring;
+- ruleset on `main`: pull request required, 1 approval since 2026-11-18 (was 0; stale approvals dismissed, approval of
+  the most recent push), code-owner review on core paths (Nicolas), the four required checks, no deletion, no force
+  push, repository admin as bypass (Nicolas's own pull requests; `scripts/nico_merge.ps1` uses it only after the checks);
 - second ruleset: non-admins may create and update only `agent/**` branches;
 - no secrets in GitHub Actions (a Write account can run any workflow on its branch).
 

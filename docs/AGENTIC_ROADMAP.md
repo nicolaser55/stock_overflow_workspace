@@ -348,6 +348,14 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
     "Family:" line against section 4, no DRAFT, tests); two Claude reviews per experiment.
 - [x] **The lower-tier rule** ("candidate for a small live test") written and decided before the next experiment runs
   (`docs/STAGE1_RESEARCH_PLAN.md` section 1.1, point 4; decided 2026-11-17).
+- [ ] **The agent's own GitHub identity** (2026-11-18, before exp15): the Cursor agent (Windows account so_agent,
+  clone `D:\stock_overflow\agent_workspace`) pushes and opens pull requests as `nicolaser55-agent` (write access;
+  classic token with `repo` and `read:org`, no `workflow`); nicolaser55's Git Credential Manager login removed from
+  so_agent. `main` requires 1 approval (dismiss stale approvals; approval of the most recent push), with the repository
+  admin as bypass; `scripts/nico_merge.ps1` approves agent PRs as nicolaser55 after a typed confirmation and merges
+  Nicolas's own PRs with `--admin` after the required checks. Also `tests/run_all_tests.py --jobs N --experiment expNN`
+  (review B8) and the selection pull request before the agent starts. **Done when** the ruleset is set and the first
+  agent PR of exp15 is approved and merged through the script.
 - [ ] **One judge pull request before the agents** (review 2026-11-17, proposal B9), with one equivalence check on
   exp04 and exp05:
   - the runner rejects a job whose commit is older than the deployed judge when its design folder differs (today such
