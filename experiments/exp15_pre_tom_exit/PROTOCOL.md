@@ -3,7 +3,7 @@
 DRAFT (step 1, not preregistered)
 
 *Version 1.0 (2026-11-18). Experiment name `exp15_pre_tom_exit`. Config: `experiments/exp15_pre_tom_exit/config.py` + `so/config.py`.
-Agreed draft for Claude / Nicolas review before step 2 (config, design, tests). After the first development
+Review 1 (Claude, 2026-11-18) applied in step 2; protocol still DRAFT (not preregistered). After the first development
 run, any rule change is a new `PROTOCOL_VERSION` of this same experiment (same name, same folder; never a renamed copy),
 with every candidate renamed (for example `v1.1|<name>`) and a change-log row labelled `bug-fix` or `data-dependent`
 (section 11). The folder name must equal `EXPERIMENT_NAME`.*
@@ -73,62 +73,66 @@ bug-fix. Never called a pass. C2’s post-2013 decay evidence weakens point (c)�
 
 ## 3. Data
 
-- **Instrument:** SPY via point-in-time `SPY_1MIN` (session scaffolding via `TSDAY` if RuleDesign needs it).
+- **Instrument:** SPY via point-in-time `SPY_1MIN` only. `decide` reads the decision session date from the view; no TSDAY.
 - **Period:** development view through the embargo before the registered holdout (boundary from `so.core.holdout`,
-  never hard-coded here). Scored candidate periods are the validation quarters of section 5 (2015–2024 under the
+  never hard-coded here). Scored candidate periods are the validation quarters of section 5 (2015-2024 under the
   proposed fold length).
 - **Adjustments / cleaning:** shared pipeline only; no new cleaning.
-- **No new data source.** The exchange calendar is **rule-coded inside the design** (scheduled NYSE holidays published
-  in advance); not a registered market-data source. See `RESEARCH_BRIEF.md` §6.
+- **No new data source.** The exchange calendar is **rule-coded inside the design** (`calendar_rules.py`; scheduled
+  NYSE holidays published in advance); not a registered market-data source. See `RESEARCH_BRIEF.md` section 10.
 
 ## 3.1 Data sources
 
 | Source | Convention | Availability | Revision | Role |
 |---|---|---|---|---|
-| `SPY_1MIN` | bar start | label + 1 minute | not revised (stored IBKR bars) | feature (session dates / bars in the view for RuleDesign) |
-| `TSDAY` | end of decision bar | end of decision bar | not revised | feature (session row / RuleDesign history scaffolding) |
+| `SPY_1MIN` | bar start | label + 1 minute | not revised (stored IBKR bars) | feature (session date on the view; prices unused by decide) |
 
 `DATA_SOURCE_LIST` on `design.py` must match this table (step 2). `SPY_DIVIDENDS` and `TBILL_3M` are applied by the
-runner’s total-return layer; `decide` does not read them.
+runner's total-return layer; `decide` does not read them. `TSDAY` is omitted: the calendar rule uses only the
+decision date, and the fractional engine runs with `SPY_1MIN` alone (same pattern as exp14).
 
 ## 4. Rules / target / features / model
 
-**Engine:** `trailing_stop` without a stop (`RuleDesign`). `DEAD_BAND` unused for flatten/re-entry flags.
-`INITIAL_WEIGHT = 1.0`. **No fitted model.** State between calls lives on the `Design` object (candidate, calendar
-helper, current cash-spell bookkeeping). Implemented in step 2 in `Design.decide` / RuleDesign subclass methods in
-`design.py` (template placeholders until then).
+**Engine:** `fractional`, target weight in **{0, 1}** (same pattern as exp05). `DEAD_BAND = 0.0`.
+`INITIAL_WEIGHT = 1.0`. **No fitted model.** Implemented in `Design.decide` in `design.py`. A scheduled 0/1 weight is
+a fractional target, so the runner's random-timing baseline relocates cash spells uniformly while keeping their
+lengths (`so/runner/baselines.py`) — the information test that the calendar dates matter.
 
 **Day numbering (Etula et al., fixed from the literature, never from our data):**
-- Day **0 = T** = last **trading** day of the calendar month (NYSE sessions).
-- Negative indices count trading days before T (T−1, T−2, …).
-- Positive indices count trading days after T into the next month (T+1, …).
+- Day **0 = T** = last **design-calendar** session of the calendar month.
+- Negative indices count design-calendar days before T (T-1, T-2, ...).
+- Positive indices count design-calendar days after T into the next month (T+1, ...).
 
-**Cash window (candidate parameters):** inclusive trading-day indices relative to T, for example Etula’s selling
-pressure **T−8..T−4** (`w84`) or a narrower core **T−5..T−4** (`w54`). Settlement handling is a second dimension
-(`fix` vs `shift`); see section 5.1 and `RESEARCH_BRIEF.md` §3.
+**Cash window (candidate parameters):** inclusive design-calendar indices relative to T: Etula's selling pressure
+**T-8..T-4** (`w84`) or narrower core **T-5..T-4** (`w54`). Settlement handling is a second dimension (`fixed` vs
+`shift`); see section 5.1. Review 1: keep T-5..T-4 as the core; grid of four as proposed. Friday-T amplification and
+Graziani stay parked / related-only.
 
-**Settlement eras inside our span (SEC; clocks fixed before any data):**
-- **T+3:** development start through **2017-09-04**.
-- **T+2:** **2017-09-05** through **2024-05-27** (SEC compliance date for T+2).
-- **T+1:** from **2024-05-28** (SEC compliance date for T+1).
+**Settlement eras (SEC; era of a month = era in force on that month's day T):**
+- **T+3:** day T on or before **2017-09-04**.
+- **T+2:** day T from **2017-09-05** through **2024-05-27**.
+- **T+1:** day T on or after **2024-05-28**.
 
-Under `shift`, the inclusive window moves **one trading day later** for each one-day shortening of the settlement
-cycle (mechanism: cash needed on the morning of T requires a sale by the close of T−s where s is the settlement lag).
-Under `fix`, the Etula T−8..T−4 (or core) indices stay as written in every era.
+Under `shift`, the inclusive window moves **one trading day later** per one-day shortening of settlement
+(`w84|shift`: T-8..T-4 / T-7..T-3 / T-6..T-2; `w54|shift`: T-5..T-4 / T-4..T-3 / T-3..T-2). Under `fixed`, the
+base indices never move. Review 1 confirmed this mapping.
 
-**Fills (`docs/RUNNER_DESIGN.md`):** daily decision at the end of the **15:58** bar; fill at the **15:59** open.
-To be out for the session returns of trading days **a..b** inclusive: **sell** at the 15:59 fill of the session
-**before** day a; **buy** at the 15:59 fill of day **b**. Invested otherwise (weight 1).
+**Decision timing (Review 1):** the decision at the **15:58** bar of session s sets the weight held from the
+**15:59** fill of s to the **15:59** fill of the next session. So **weight(s) = 0** exactly when the **next**
+design-calendar session after s lies in the candidate's cash window for that next session's month; otherwise
+**weight(s) = 1**. The decision may read **only** the date of the decision bar (no prices or volumes). With these
+windows the cash spell never crosses past T into the next month.
 
-**Calendar:** rule-coded scheduled NYSE holidays inside the design; unscheduled closures (e.g. Hurricane Sandy 2012,
-national days of mourning) are treated as trading days for day-count purposes, as a real-time trader would have done
-before the closure was known. Do **not** import `so.core.datetime_utils` / `pandas_market_calendars` for the day count
-(those calendars encode unscheduled closures in advance → small look-ahead). Preflight does not ban that import;
-discipline does. Test plan: synthetic dates around known scheduled holidays and known unscheduled closures
-(`RESEARCH_BRIEF.md` §6).
+**Calendar (Review 1: option a):** `calendar_rules.py` in this folder — scheduled NYSE holidays only (New Year's
+Day with Sunday to Monday and Saturday not observed; MLK Day; Washington's Birthday; Good Friday from Easter; Memorial
+Day; Juneteenth from 2022 with weekend observance; Independence Day; Labor Day; Thanksgiving; Christmas with weekend
+observance). **Unscheduled closures** (including 2007-01-02, 2012-10-29, 2012-10-30, 2018-12-05, and any other in the
+span) **stay in the day count** as design-calendar sessions. When a planned exit or re-entry falls on a day the
+market is closed, the position is unchanged until the **next real session's 15:59** fill. This is a **deliberate
+no-look-ahead choice** with a small mechanical cost in those months. No `pandas_market_calendars` and no
+`so.core.datetime_utils` in the design.
 
-**Early close / missing bars:** still one 15:58-mapped decision when the runner maps it; calendar day index uses the
-session date. Missing inputs → keep (NaN).
+**Sources:** `SPY_1MIN` only. Early close: still one 15:58-mapped decision when the runner maps it.
 
 ## 5. Walk-forward and selection
 
@@ -136,9 +140,9 @@ Candidate periods are the development validation quarters (`PERIOD_RULE` → `ge
 through the holdout by the runner. Embargo = `so.config.LABEL_HORIZON_SESSIONS` (`EMBARGO_TRADING_DAYS`). There is
 no rolling model and no training-window candidate.
 
-**Fold length.** `FOLD_TRAIN_WINDOW_YEARS = 10` (step 2 will set this in `config.py`; template still shows 1 until
-then). Validation quarters are then **2015–2024**: after Etula’s sample end; same scored-span convention as exp14 /
-frozen V. This **gives up 2008–2009** in the scored windows.
+**Fold length.** `FOLD_TRAIN_WINDOW_YEARS = 10` (Review 1: keep, as every other run). Validation quarters are
+**2015–2024**: after Etula’s sample end; same scored-span convention as exp14 / frozen V. This **gives up
+2008–2009** in the scored windows.
 
 **Candidates:** the 4 names in section 5.1. Selection pools the last 4 completed quarters. Tie order: candidate name
 ascending. The first period (no completed quarter) takes the first listed candidate (`w84|fix`).
@@ -199,7 +203,7 @@ shared trial log as scored. Agents read grades and status only under `store04_ex
 - Classical TOM and pre-TOM edges may have **decayed** after publication / after 2013 (Gil 2025; Han et al. 2025;
   international Aalto thesis 2014–2022). Etula’s mechanism sample ends 2013; scored years are after that.
 - Overlap with published samples (section 1); scored windows give up 2008–2009.
-- Step 1: `design.py` / full `config.py` constants are still placeholders until step 2 after review.
+- Step 2: config, design, calendar_rules and tests exist; protocol remains DRAFT until the `preregister` commit.
 
 ## 10. Holdout evaluation
 
@@ -230,6 +234,7 @@ failure fails the verdict.
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 2026-11-18 | DRAFT step 1: research brief and draft protocol (C2 pre-TOM exit). Not preregistered. |
+| 1.0 | 2026-11-18 | DRAFT step 2: Review 1 applied (calendar a, shift mapping, fractional 0/1, decision timing, folds, cost note); config, design, calendar_rules, tests. Still not preregistered. |
 
 An amended version adds a row whose first cell is its `PROTOCOL_VERSION` and whose text holds exactly one label:
 `bug-fix` (the code did not do what this protocol says; found without looking at results) or `data-dependent`

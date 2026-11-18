@@ -8,10 +8,9 @@ pages, and from `so/config.py` / `docs/RUNNER_DESIGN.md` only. No file under
 Status of idea C2 in `docs/IDEA_LIST.md`: **selected (2026-11-18): exp15_pre_tom_exit** (family C,
 idea C2, variant 1 of 5). Direction: **out on the pre-turn-of-month selling days, invested
 otherwise.** Idea V1 was deferred the same day; branch `agent/exp15-vrp-exit` is left as the
-record. Family C ledger: `docs/STAGE1_RESEARCH_PLAN.md` section 4. This is **step 1 only**:
-research brief and DRAFT protocol. `config.py` holds only `EXPERIMENT_NAME` (other constants are
-still template placeholders); `design.py` is still the template. `PROTOCOL.md` carries
-`DRAFT (step 1, not preregistered)`. Trial budget of this draft version: **4**.
+record. Family C ledger: `docs/STAGE1_RESEARCH_PLAN.md` section 4. **Step 2** (Review 1 applied):
+`config.py`, `design.py`, `calendar_rules.py` and synthetic tests exist. `PROTOCOL.md` still
+carries `DRAFT (step 1, not preregistered)` until the `preregister` commit. Trial budget: **4**.
 
 ---
 
@@ -169,20 +168,20 @@ Criteria (`docs/STAGE1_RESEARCH_PLAN.md` §1.1 point 9): weight **replicated out
 
 ---
 
-## 10. Mechanics on our runner
+## 10. Mechanics on our runner (Review 1 applied)
 
 ### Decision time and fill (`docs/RUNNER_DESIGN.md`)
-- **Daily** engine; proposed `trailing_stop` without a stop (`RuleDesign`: invested by default; exit / re-entry).
-- Decision at end of **15:58** bar; fill at **15:59** open.
-- To be out for the session returns of trading days **a..b** inclusive: sell at the **15:59** fill of the session **before** a; buy at the **15:59** fill of day **b**.
+- **Daily** engine; **`fractional`**, targets in **{0, 1}** (Review 1; same family as exp05).
+- Decision at end of **15:58** bar; fill at **15:59** open. The weight decided on session s is held from the 15:59
+  fill of s to the 15:59 fill of the next session.
+- **weight(s) = 0** iff the **next design-calendar session** after s lies in the candidate’s cash window for that
+  next session’s month; else **1**. Equivalent to selling at 15:59 of the session before the first cash day and
+  buying at 15:59 of the last cash day when every window day is a live market session.
 
-### Calendar: two options
-
-**(a) Rule-coded NYSE holiday calendar inside the design.** Scheduled holidays are published well in advance. Unscheduled closures (Hurricane Sandy 2012, national days of mourning, etc.) are **treated as trading days** in the day count, matching what a trader would have assumed in real time before the closure was announced.
-
-**(b) `so.core.datetime_utils`** (wraps `pandas_market_calendars` NYSE). `so.runner.preflight` does **not** ban `so.core.datetime_utils` (banned set is `so.runner`, `so.core.point_in_time`, `so.core.holdout`, I/O, etc.). That calendar **already knows** historical unscheduled closures, so counting “trading days to month end” with it embeds a **small look-ahead** relative to a 2005–2024 real-time trader.
-
-**Recommendation: (a).** Implement a frozen list / rule of scheduled NYSE holidays in the experiment package; document that unscheduled closures stay in the day count. **Test (synthetic only):** assert day indices around a known scheduled holiday month; assert that a known unscheduled-closure date is still counted as a session in the design’s calendar even though `pandas_market_calendars` would omit it.
+### Calendar (Review 1: option a, implemented in `calendar_rules.py`)
+Scheduled NYSE holiday rules only. Unscheduled closures stay in the day count. Planned exit/re-entry on a closed
+market day waits for the next real session’s 15:59 (deliberate no-look-ahead; small mechanical cost). No
+`pandas_market_calendars` / `so.core.datetime_utils` in the design.
 
 ---
 
@@ -197,7 +196,7 @@ Criteria (`docs/STAGE1_RESEARCH_PLAN.md` §1.1 point 9): weight **replicated out
 - Fees: **$0.005**/share/side, **$1** minimum/side, 1% cap → about **$0.01**/share when the floor does not bind → **≈ $0.03**/share round trip.
 - Lower tier also requires beating buy-and-hold at **$0.02** slippage (`COST_SENSITIVITY_SLIPPAGE_LIST`) and cash at T-bill **minus 0.5%** (`CASH_RATE_SENSITIVITY_SPREAD = 0.005`).
 
-**Inference:** twelve round trips/year can bear dollar costs **if** the skipped sessions lose more than T-bill cash by more than ~$0.03/share each month on average. Etula’s mild −0.03%/day on five days is order **−15 bp** per month gross in-sample — in the same ballpark as costs at plausible SPY prices, with **no** allowance for decay. Costs are therefore a first-order risk even before the fade evidence.
+**Inference (Review 1 correction, 2026-11-18):** the round-trip cost is **small next to the in-sample effect**, not “the same ballpark.” At Claude’s stated price levels (not from our data): **$0.03/share ≈ 2.5 bp** of a ~$120 SPY (2005) and **≈ 0.5 bp** of a ~$550 SPY (2024), so about **6–30 bp a year** at 12 round trips, against Etula’s in-sample ~−0.03%/day × 5 days ≈ **−15 bp a month (~1.8% a year)**, with cash earning T-bill interest while out. **The binding risk is decay of the effect, not costs.**
 
 `docs/RESULTS_LOG.md` (allowed): exp14 failed after costs on a higher-turnover intraday skip — reinforces preferring rare trading, not evidence about TOM days.
 
@@ -222,19 +221,19 @@ Not a full cross-product. Dimensions: **window edges** (Etula −8..−4 vs narr
 
 ---
 
-## 13. Open questions for the review
+## 13. Review 1 decisions (Claude, 2026-11-18) — closed
 
-1. **Calendar:** confirm recommendation **(a)** rule-coded scheduled holidays (vs allowing `datetime_utils` with an explicit look-ahead waiver)?
-2. **Shift rule:** is “+1 trading day later per shorter settlement step” the right pre-registered mapping, or should T+1 use a different width?
-3. **Core window:** is T−5..T−4 the right narrow alternative, or prefer T−6..T−4 / T−4 alone?
-4. **Engine:** confirm `trailing_stop` + `RuleDesign` vs `fractional` weights in {0,1}.
-5. **Sources list:** is `TSDAY` required beside `SPY_1MIN` for RuleDesign, or bars alone?
-6. **Folds:** keep 10-year folds (scored 2015–2024, cleaner vs Etula) or shorten to keep crisis years in scored quarters?
-7. **Friday T amplification** (Etula): park for a later variant, or add a 5th candidate now?
-8. **Graziani:** stay related-only for this experiment (recommended)?
+1. **Calendar (a)** rule-coded scheduled holidays; unscheduled stay in the count; closed-day fills wait for the next real session.
+2. **Shift mapping confirmed** (+1 trading day per shorter settlement; era from month’s T).
+3. **Core window** T−5..T−4; grid of four as proposed.
+4. **Engine fractional {0,1}**; `SPY_1MIN` only (TSDAY dropped: decide reads the date only; engine needs no TSDAY).
+5. **Decision timing:** weight(s)=0 iff the next design-calendar session is in the window.
+6. **Folds:** 10-year (scored 2015–2024).
+7. **Friday-T** parked; **Graziani** related only.
+8. **Costs:** binding risk is decay, not round-trip costs (section 11 corrected).
 
 ---
 
 ## 14. Bottom line
 
-Etula et al. give a clear, settlement-timed **pre-TOM selling** window (T−8..T−4 under T+3) that fits a rare long-only exit. Classical TOM papers motivate staying **invested** through T−3..T+3. Post-2013 decay evidence (Gil; Han et al.; Aalto international) makes a **fail** the expected outcome on our scored years. Settlement must be fixed per SEC era in advance; day counts should use a **scheduled-holiday** calendar without unscheduled-closure look-ahead. A 4-candidate grid (width × fixed/shift) is the proposed pre-registered test. No SPY or rate series was read to write this brief.
+Etula et al. give a clear, settlement-timed **pre-TOM selling** window (T−8..T−4 under T+3) that fits a rare long-only exit. Classical TOM papers motivate staying **invested** through T−3..T+3. Post-2013 decay evidence (Gil; Han et al.; Aalto international) makes a **fail** the expected outcome on our scored years. Settlement is fixed per SEC era in advance; day counts use a **scheduled-holiday** calendar without unscheduled-closure look-ahead. A 4-candidate grid (width × fixed/shift) is the pre-registered test. No SPY or rate series was read to write this brief.
