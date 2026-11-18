@@ -1,9 +1,7 @@
 # exp15_pre_tom_exit: Protocol
 
-DRAFT (step 1, not preregistered)
-
 *Version 1.0 (2026-11-18). Experiment name `exp15_pre_tom_exit`. Config: `experiments/exp15_pre_tom_exit/config.py` + `so/config.py`.
-Review 1 (Claude, 2026-11-18) applied in step 2; protocol still DRAFT (not preregistered). After the first development
+Agreed with Nicolas on 2026-11-18 (Claude reviews 1 and 2), before any of this experiment's data was explored. After the first development
 run, any rule change is a new `PROTOCOL_VERSION` of this same experiment (same name, same folder; never a renamed copy),
 with every candidate renamed (for example `v1.1|<name>`) and a change-log row labelled `bug-fix` or `data-dependent`
 (section 11). The folder name must equal `EXPERIMENT_NAME`.*
@@ -205,7 +203,7 @@ shared trial log as scored. Agents read grades and status only under `store04_ex
 - Classical TOM and pre-TOM edges may have **decayed** after publication / after 2013 (Gil 2025; Han et al. 2025;
   international Aalto thesis 2014–2022). Etula’s mechanism sample ends 2013; scored years are after that.
 - Overlap with published samples (section 1); scored windows give up 2008–2009.
-- Step 2: config, design, calendar_rules and tests exist; protocol remains DRAFT until the `preregister` commit.
+- Step 2: config, design, calendar_rules and tests exist; preregistered on 2026-11-18.
 
 ## 10. Holdout evaluation
 
@@ -235,8 +233,7 @@ failure fails the verdict.
 ## 11. Change log
 | Version | Date | Change |
 |---|---|---|
-| 1.0 | 2026-11-18 | DRAFT step 1: research brief and draft protocol (C2 pre-TOM exit). Not preregistered. |
-| 1.0 | 2026-11-18 | DRAFT step 2: Review 1 applied (calendar a, shift mapping, fractional 0/1, decision timing, folds, cost note); config, design, calendar_rules, tests. Still not preregistered. |
+| 1.0 | 2026-11-18 | Preregistered: C2 pre-TOM exit, four candidates (w84\|fixed, w84\|shift, w54\|fixed, w54\|shift); steps 1-2 and Claude reviews 1-2 (calendar a, settlement shift by day T, fractional 0/1, one-session lead, closed-day rule, 10-year folds). |
 
 An amended version adds a row whose first cell is its `PROTOCOL_VERSION` and whose text holds exactly one label:
 `bug-fix` (the code did not do what this protocol says; found without looking at results) or `data-dependent`
