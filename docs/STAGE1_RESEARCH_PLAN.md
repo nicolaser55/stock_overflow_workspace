@@ -230,7 +230,7 @@ experiments below are protocol 1.0 and keep their assignment; they are not relab
 | **V** Volatility and risk state | 2 | 1 | exp05 (realized-volatility scaling); exp12 + exp13 (VIX-based re-entry; exp08, the pre-reset VIX signal gate, belongs to the same idea) | none recommended: V1 deferred 2026-11-18 (post-publication dismissal), V2, V3 weak |
 | **L** Learned models | 2 | 1 | exp01 (minute take-profit model), exp02 (trailing stop + model re-entry) | none proposed |
 | **X** Anchors and highs | 1 | 2 | exp03 (sell near the all-time high) | X1 |
-| **C** Calendar and event windows | 1 | 2 | exp15 (C2 pre-turn-of-month exit; variant 1 of 5; selected 2026-11-18, in preparation) | C3-C5 weak (screen 2026-11-18); C1 deferred 2026-11-17 |
+| **C** Calendar and event windows | 1 | 2 | exp15 (C2 pre-turn-of-month exit; variant 1 of 5, 4 candidates; run 2026-11-18: fail, behind buy-and-hold even at zero slippage, random timing at the median) | C3-C5 weak (screen 2026-11-18); C1 deferred 2026-11-17 |
 | **I** Intraday | 1 | 2 | exp14 (I1 last-half-hour exit on weak days; variant 1 of 5, 6 candidates; run 2026-11-16: fail, the gain disappears after costs) | I2, I3 |
 | **R** Short-term reversal | 0 | 3 | — | R1, R2 |
 | **M** Macro and valuation | 0 | 3 | — | M1, M2 (T3 could move here as a macro idea) |

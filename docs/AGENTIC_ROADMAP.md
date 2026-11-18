@@ -308,7 +308,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   lines, and the live V as information only). N 260, V frozen, all nine FAIL with their failed parts unchanged. These
   nine runs are the reference baseline from now on (`docs/STAGE1_RESEARCH_PLAN.md` section 2). PR #45 (docs) closed as
   superseded; its R4d record and open items are carried here and into section 2.
-- [ ] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
+- [x] Then, before any agent (decided 2026-11-04): **a few hand-designed experiments** from the stage-1 idea list,
   pre-registered and queued by Nicolas and Claude under the same rules, counted in N and in the family budgets. They
   check in practice that the queue, the grades, the technical status and the reports work before agents rely on them;
   then the agents carry on the work.
@@ -321,6 +321,16 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   row (the `## ... data sources` heading was missing); fixed as a pre-run fix of the same version 1.0 (PR #51). The
   queue, the grade, the technical status, the report and the emails all worked. Lesson: run
   `get_protocol_missing_list` on the protocol before the `preregister` commit.
+  **Second experiment, result (2026-11-18):** exp15 v1.0 (C2 pre-turn-of-month exit, family C, variant 1 of 5, 4
+  candidates) ran on judge edaa1c6 (PRs #57-#59): **fail** (return, consistency, baselines, multiple testing;
+  look-ahead pass; N 270); behind buy-and-hold even at zero slippage, random timing at the median. First experiment
+  prepared end to end by the agent under its own GitHub identity, approved and merged through `nico_merge.ps1`,
+  checked by `check_experiment_ready.py`, deployed by `deploy_runner.ps1 -ExpectCommit` and queued by
+  `nico_queue.ps1`; one clean run, no crash.
+  **Decision (Nicolas, 2026-11-18): the hand-designed phase ends here** (two experiments, no amendment). Reasons: the
+  pipeline is proven end to end; the 2026-11-18 idea screen found no remaining idea that clearly passes the criteria,
+  so a third hand-designed run would most likely be another expected fail spending N. Next: the judge pull request
+  before the agents (B9, below), then R5.
   **Scope and stopping rule (decided by Nicolas on 2026-11-14, before any of them ran):** two or three experiments from
   the open slots of section 4 (`docs/STAGE1_RESEARCH_PLAN.md`; recommended C1-C3, I1-I2), each at most one amendment
   (protocol 1.0 plus one version); then the agents start, whatever the results. A design that shows only the 90% flag
@@ -348,7 +358,7 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
     "Family:" line against section 4, no DRAFT, tests); two Claude reviews per experiment.
 - [x] **The lower-tier rule** ("candidate for a small live test") written and decided before the next experiment runs
   (`docs/STAGE1_RESEARCH_PLAN.md` section 1.1, point 4; decided 2026-11-17).
-- [ ] **The agent's own GitHub identity** (2026-11-18, before exp15): the Cursor agent (Windows account so_agent,
+- [x] **The agent's own GitHub identity** (2026-11-18, before exp15): the Cursor agent (Windows account so_agent,
   clone `D:\stock_overflow\agent_workspace`) pushes and opens pull requests as `nicolaser55-agent` (write access;
   classic token with `repo` and `read:org`, no `workflow`); nicolaser55's Git Credential Manager login removed from
   so_agent. `main` requires 1 approval (dismiss stale approvals; approval of the most recent push), with the repository
@@ -356,6 +366,9 @@ Built 2026-11-03 (branch `core/r4-grades-only`); decisions of Nicolas on 2026-11
   Nicolas's own PRs with `--admin` after the required checks. Also `tests/run_all_tests.py --jobs N --experiment expNN`
   (review B8) and the selection pull request before the agent starts. **Done when** the ruleset is set and the first
   agent PR of exp15 is approved and merged through the script.
+  **Done (2026-11-18):** agent PRs #58 and #59 (exp15) approved as nicolaser55 and merged through `nico_merge.ps1`;
+  every agent commit authored and committed by `nicolaser55-agent`; ruleset checked before this tick (required
+  approvals 1, stale approvals dismissed, approval of the most recent push, repository admin bypass).
 - [ ] **One judge pull request before the agents** (review 2026-11-17, proposal B9), with one equivalence check on
   exp04 and exp05:
   - the runner rejects a job whose commit is older than the deployed judge when its design folder differs (today such
