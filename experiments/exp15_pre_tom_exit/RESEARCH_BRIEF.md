@@ -208,9 +208,9 @@ Not a full cross-product. Dimensions: **window edges** (Etula −8..−4 vs narr
 
 | # | Name | Window | Settlement | Why |
 |---|---|---|---|---|
-| 1 | `w84\|fix` | T−8..T−4 | fixed | Etula headline selling-pressure window |
+| 1 | `w84\|fixed` | T−8..T−4 | fixed | Etula headline selling-pressure window |
 | 2 | `w84\|shift` | width 5, shifted per era | shift | Mechanism-consistent settlement update |
-| 3 | `w54\|fix` | T−5..T−4 | fixed | Narrower core; fewer days out / fewer cost days |
+| 3 | `w54\|fixed` | T−5..T−4 | fixed | Narrower core; fewer days out / fewer cost days |
 | 4 | `w54\|shift` | width 2, shifted per era | shift | Narrow core + settlement update |
 
 **Not in this version:** classical in-only −1..+3; out on T+4..+10; Graziani month-scale reversal; Friday-month-end interaction (Etula’s amplification); international confirmation search.

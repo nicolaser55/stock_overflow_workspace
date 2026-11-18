@@ -916,7 +916,42 @@ def test_exp15_settlement_eras():
     passed("exp15 settlement eras on both sides of 2017-09-05 and 2024-05-28; candidate windows per era")
 
 
-# FUNCTION: WEIGHT PATH WITH ONE-SESSION LEAD AND CLOSED-DAY → NEXT SESSION
+# FUNCTION: DROP EVERY MINUTE BAR OF ONE CALENDAR DAY (SYNTHETIC UNSCHEDULED CLOSURE)
+def drop_exp15_session_bars(ohlcv_pdf_in, day_str_in):
+    """
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic OHLCV
+        day_str_in (str): YYYY-MM-DD to remove
+
+    Returns:
+        pd.DataFrame: Frame without that day's bars
+    """
+    # KEEP EVERY BAR WHOSE NEW YORK DATE IS NOT THE CLOSED DAY
+    stamp = ohlcv_pdf_in["timestamp"].dt.tz_convert("America/New_York")
+    mask_arr = stamp.dt.date == pd.Timestamp(day_str_in).date()
+    assert int(mask_arr.sum()) > 0, day_str_in
+    return ohlcv_pdf_in.loc[~mask_arr].reset_index(drop=True)
+
+
+# FUNCTION: TARGET WEIGHT BY LIVE SESSION DATE FROM A RUNNER RESULT
+def get_exp15_weight_by_day_dict(result_dict_in):
+    """
+    Args:
+        result_dict_in (dict): run_daily_dict output
+
+    Returns:
+        dict[date, float]: Finite target weights keyed by session date
+    """
+    # SKIP A TERMINAL NaN IF THE RUNNER LEAVES ONE
+    out_dict = {}
+    for session_date, weight_float in zip(result_dict_in["decision_session_list"], result_dict_in["target_weight_arr"]):
+        if not np.isfinite(weight_float):
+            continue
+        out_dict[pd.Timestamp(session_date).date()] = float(weight_float)
+    return out_dict
+
+
+# FUNCTION: WEIGHT PATH WITH ONE-SESSION LEAD
 def test_exp15_weight_path():
     """
     Returns:
@@ -932,17 +967,13 @@ def test_exp15_weight_path():
     assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 24))) == 1.0
     assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 25))) == 1.0
     assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 19))) == 1.0
-    # CLOSED-DAY MECHANICS: SANDY 2012-10-29/30 ARE DESIGN SESSIONS (T-2/T-1), NOT IN Etula T-8..T-4
+    # SANDY 2012-10-29/30 ARE DESIGN SESSIONS (T-2/T-1), NOT IN Etula T-8..T-4
     sandy_design = exp15_design.get_candidate_design("w84|fixed")
     assert exp15_cal.get_next_design_session_date(date_cls(2012, 10, 26)) == date_cls(2012, 10, 29)
     assert date_cls(2012, 10, 29) not in exp15_cal.get_cash_window_date_set(2012, 10, "w84|fixed")
     assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 26))) == 1.0
-    # IF THE NEXT DESIGN SESSION WERE A CASH DAY AND THE MARKET WERE CLOSED THAT DAY, WEIGHT ON THE PRIOR
-    # LIVE SESSION WOULD BE 0 AND WOULD STAY UNTIL THE NEXT LIVE SESSION'S 15:59 (NO LOOK-AHEAD)
-    assert (0.0 if date_cls(2012, 10, 29) in {date_cls(2012, 10, 29)} else 1.0) == 0.0
     assert exp15_cal.get_next_design_session_date(date_cls(2012, 10, 30)) == date_cls(2012, 10, 31)
     assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 31))) == 1.0
-    # A LIVE CASH DAY IN THIS MONTH: T-4 = 2012-10-25; DECISION ON 2012-10-24 IS 0
     assert date_cls(2012, 10, 25) in exp15_cal.get_cash_window_date_set(2012, 10, "w84|fixed")
     assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 24))) == 0.0
     # A SHORT SYNTHETIC STREAM: WEIGHTS MATCH THE LEAD RULE ON LIVE SESSIONS
@@ -951,20 +982,49 @@ def test_exp15_weight_path():
     date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
     result_dict = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), ohlcv_array_dict, date1, date2,
                                  initial_weight_in=1.0, dead_band_in=0.0)
-    session_list = [pd.Timestamp(day).date() for day in result_dict["decision_session_list"]]
-    weight_arr = np.asarray(result_dict["target_weight_arr"], dtype=float)
-    assert len(session_list) == len(weight_arr)
-    finite_count = 0
-    for session_day, weight_float in zip(session_list, weight_arr):
-        # THE RUNNER MAY LEAVE A TERMINAL NaN ON THE LAST SESSION OF A SHORT STREAM
-        if not np.isfinite(weight_float):
-            continue
+    weight_by_day_dict = get_exp15_weight_by_day_dict(result_dict)
+    assert len(weight_by_day_dict) >= 10
+    for session_day, weight_float in weight_by_day_dict.items():
         expected_float = 0.0 if exp15_cal.is_next_session_in_cash_window_bool(session_day, "w54|fixed") else 1.0
         assert float(weight_float) == expected_float, (session_day, weight_float, expected_float)
-        finite_count += 1
-    assert finite_count >= 10
-    assert (weight_arr == 0.0).any() and (weight_arr == 1.0).any()
-    passed("exp15 weight path: one-session lead, cash only for window sessions, closed-day waits for next session")
+    assert 0.0 in weight_by_day_dict.values() and 1.0 in weight_by_day_dict.values()
+    passed("exp15 weight path: one-session lead, cash only for window sessions")
+
+
+# FUNCTION: UNSCHEDULED CLOSURE INSIDE/BEFORE THE WINDOW SHIFTS THE LIVE EXIT OR RE-ENTRY BY ONE SESSION
+def test_exp15_closed_day_in_window():
+    """
+    Returns:
+        None
+    """
+    # JUNE 2015 w54|fixed: CASH DAYS 2015-06-23 AND 2015-06-24 ON THE DESIGN CALENDAR
+    assert exp15_cal.get_cash_window_date_set(2015, 6, "w54|fixed") == {date_cls(2015, 6, 23), date_cls(2015, 6, 24)}
+    assert exp15_cal.get_next_design_session_date(date_cls(2015, 6, 19)) == date_cls(2015, 6, 22)
+    assert exp15_cal.get_next_design_session_date(date_cls(2015, 6, 23)) == date_cls(2015, 6, 24)
+    base_pdf = get_synthetic_ohlcv_pdf("2015-06-15", "2015-06-30", start_price_in=200.0, minute_vol_in=0.0, seed_in=15)
+    # CASE 1: CLOSED DAY = SESSION BEFORE THE WINDOW (2015-06-22 MISSING)
+    before_pdf = drop_exp15_session_bars(base_pdf, "2015-06-22")
+    before_dict = get_ohlcv_array_dict(before_pdf)
+    assert date_cls(2015, 6, 22) not in [pd.Timestamp(day).date() for day in before_dict["session_date_list"]]
+    before_result = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), before_dict,
+                                   before_dict["session_date_list"][0], before_dict["session_date_list"][-1],
+                                   initial_weight_in=1.0, dead_band_in=0.0)
+    before_weight_dict = get_exp15_weight_by_day_dict(before_result)
+    assert before_weight_dict[date_cls(2015, 6, 19)] == 1.0
+    assert before_weight_dict[date_cls(2015, 6, 23)] == 0.0
+    # CONSEQUENCE: 2015-06-23'S RETURN IS HELD INVESTED (LATE EXIT BY ONE SESSION)
+    # CASE 2: CLOSED DAY = LAST WINDOW DAY (2015-06-24 MISSING)
+    last_pdf = drop_exp15_session_bars(base_pdf, "2015-06-24")
+    last_dict = get_ohlcv_array_dict(last_pdf)
+    assert date_cls(2015, 6, 24) not in [pd.Timestamp(day).date() for day in last_dict["session_date_list"]]
+    last_result = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), last_dict,
+                                 last_dict["session_date_list"][0], last_dict["session_date_list"][-1],
+                                 initial_weight_in=1.0, dead_band_in=0.0)
+    last_weight_dict = get_exp15_weight_by_day_dict(last_result)
+    assert last_weight_dict[date_cls(2015, 6, 23)] == 0.0
+    assert last_weight_dict[date_cls(2015, 6, 25)] == 1.0
+    # CONSEQUENCE: 2015-06-25'S RETURN IS SPENT IN CASH (LATE RE-ENTRY BY ONE SESSION)
+    passed("exp15 closed day in window: missing pre-window day late exit; missing last window day late re-entry")
 
 
 # RUN THE SUITE
@@ -985,6 +1045,7 @@ if __name__ == "__main__":
         test_exp15_day_t_and_offsets()
         test_exp15_settlement_eras()
         test_exp15_weight_path()
+        test_exp15_closed_day_in_window()
         print("Generating synthetic data...", flush=True)
         synthetic_ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2021-01-04", "2023-12-29", minute_vol_in=0.0007, seed_in=23))
         synthetic_daily_pdf = get_daily_feature_pdf(synthetic_ohlcv_array_dict)

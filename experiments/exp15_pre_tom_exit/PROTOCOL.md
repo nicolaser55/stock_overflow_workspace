@@ -129,8 +129,10 @@ Day; Juneteenth from 2022 with weekend observance; Independence Day; Labor Day; 
 observance). **Unscheduled closures** (including 2007-01-02, 2012-10-29, 2012-10-30, 2018-12-05, and any other in the
 span) **stay in the day count** as design-calendar sessions. When a planned exit or re-entry falls on a day the
 market is closed, the position is unchanged until the **next real session's 15:59** fill. This is a **deliberate
-no-look-ahead choice** with a small mechanical cost in those months. No `pandas_market_calendars` and no
-`so.core.datetime_utils` in the design.
+no-look-ahead choice** with a small mechanical cost in those months. If the session before the cash window is closed,
+the prior live decision keeps weight 1 through the first window day (late exit by one session). If the last window
+day is closed, weight 0 is held through the next live session (late re-entry by one session). No
+`pandas_market_calendars` and no `so.core.datetime_utils` in the design.
 
 **Sources:** `SPY_1MIN` only. Early close: still one 15:58-mapped decision when the runner maps it.
 
@@ -145,7 +147,7 @@ no rolling model and no training-window candidate.
 2008–2009** in the scored windows.
 
 **Candidates:** the 4 names in section 5.1. Selection pools the last 4 completed quarters. Tie order: candidate name
-ascending. The first period (no completed quarter) takes the first listed candidate (`w84|fix`).
+ascending. The first period (no completed quarter) takes the first listed candidate (`w84|fixed`).
 
 Period score = period return − buy-and-hold (continuous slice). Prior-only path as usual.
 
@@ -153,9 +155,9 @@ Period score = period return − buy-and-hold (continuous slice). Prior-only pat
 
 | # | Candidate | Window (vs T) | Settlement |
 |---|---|---|---|
-| 1 | `w84\|fix` | T−8..T−4 (Etula selling pressure) | fixed in every era |
+| 1 | `w84\|fixed` | T−8..T−4 (Etula selling pressure) | fixed in every era |
 | 2 | `w84\|shift` | same width; shifted +1 trading day per shorter settlement step | T+3: −8..−4; T+2: −7..−3; T+1: −6..−2 |
-| 3 | `w54\|fix` | T−5..T−4 (narrower core near peak selling) | fixed |
+| 3 | `w54\|fixed` | T−5..T−4 (narrower core near peak selling) | fixed |
 | 4 | `w54\|shift` | width 2; shifted as above | T+3: −5..−4; T+2: −4..−3; T+1: −3..−2 |
 
 **Trial budget:** 4 candidates (= 4 designs in N) in this version. At most two further versions of this experiment.
