@@ -17,8 +17,10 @@ not what we observed. Where a source was not checked, the entry says so.*
 - **Status changes:** "selected" in Nicolas's selection pull request, before the agent starts (2026-11-18); "used"
   (with its experiment and result) or "dropped" in the records pull request after the run. Earlier rule: in the pull request
   that brings the experiment's tests, together with the ledger row in section 4 of the plan.
-- **Suggested order** among eligible ideas: I1 (used, exp14) → V1 (selected, exp15) → C2 → I2 → X1 → C3 → R1 → M2 →
-  R2 → M1 → I3; C1 deferred (2026-11-17). Re-checked against the two criteria below when the next idea is picked.
+- **Suggested order** among eligible ideas: I1 (used, exp14) → C2 (selected, exp15) → R1 → I2 → M2 → X1 → C3 → R2 → M1
+  → I3; C1 and V1 deferred (2026-11-17, 2026-11-18). A literature screen of every remaining idea (2026-11-18) found
+  none that clearly passes the two criteria below: the published edges are mostly in being invested at good times,
+  which buy-and-hold already captures, not in being out at bad times. Re-checked when the next idea is picked.
 - **Choosing among eligible ideas (decided by Nicolas on 2026-11-17):** prefer ideas that trade rarely and stay
   invested most of the time (costs removed exp14's small gross gain), and ideas whose effect was replicated out of
   sample (other periods, other markets) over a single large reported effect. Re-check the suggested order against
@@ -100,7 +102,15 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 - *Caveats:* post-publication evidence not checked by me; one regime (one central bank's communication practice).
 
 **C2. Turn of the month** · key `C:turn_of_month` · **Promise: medium**
-- *Status (2026-10-29):* **eligible**
+- *Status (2026-11-18):* **selected: exp15_pre_tom_exit** (family C, idea C2, variant 1 of 5). The selected direction
+  is the only one that can add return for a long-only overlay: **out on the pre-turn-of-month selling days**, back in
+  for the turn of the month. Mechanism: institutions sell around days -8 to -4 to raise cash for month-end payments,
+  timed by the settlement convention (T+3 in their sample), so prices are weak then and rebound from day -3 (Etula,
+  Rinne, Suominen & Vaittinen, *Review of Financial Studies* 2020, 1995-2013). Known weaknesses (screen 2026-11-18):
+  the classical turn-of-month window has largely faded in the last decade; settlement moved from T+3 to T+2 (2017) and
+  T+1 (2024) inside our span, so the window must be fixed per settlement era in advance; counting trading days to the
+  month end needs an exchange calendar. Chosen as the least-weak idea and as a deliberate test of the agent pipeline;
+  a fail is expected. (Was: eligible, 2026-10-29.)
 - *Mechanism:* returns concentrate in the last trading day and first three of the next month (Lakonishok & Smidt
   1988; McConnell & Xu, *Financial Analysts Journal* 2008, who call it "a puzzle in search of an answer"); flows from
   month-end payments are the usual story. A related older finding: returns were positive only in the first half of
@@ -187,8 +197,12 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 #### Volatility and risk state (V)
 
 **V1. Variance risk premium exit** · key `V:variance_risk_premium` · **Promise: medium**
-- *Status (2026-11-17):* **selected: exp15_vrp_exit** (family V, idea V1, variant 1 of 5; the last V slot). (Was:
-  eligible, recommended for the last V slot, 2026-10-29.)
+- *Status (2026-11-18):* **deferred** (kept for later; not run, no design counted). The step-1 brief (agent branch
+  `agent/exp15-vrp-exit`, commit `29ac47d`, not merged) found the post-publication evaluation negative: Goyal, Welch &
+  Zafirov (*Review of Financial Studies* 2024) dismiss the variance risk premium as a predictor through 2021 (in-sample
+  t falls to 0.72, the sign flips in the second half, timing strategies 2.6-7.0% a year below all-equity), and Pyun
+  (2016) finds the plain premium weak out of sample. Their samples cover almost all of our development span. (Was:
+  selected for exp15 on 2026-11-17; eligible, recommended for the last V slot, 2026-10-29.)
 - *Mechanism:* implied minus realized variance (VIX² vs recent realized variance) predicts aggregate returns, strongest
   at the quarterly horizon; high premium → high returns, low → low (Bollerslev, Tauchen & Zhou, *RFS* 2009; post-1990
   data).
