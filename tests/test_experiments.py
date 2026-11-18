@@ -1,5 +1,5 @@
 """
-Workspace Tests: the experiment designs on the runner (exp01 minute; exp02-exp07, exp12-exp14 daily) and their shared helpers
+Workspace Tests: the experiment designs on the runner (exp01 minute; exp02-exp07, exp12-exp15 daily) and their shared helpers
 
 Run from the workspace root:   python tests/test_experiments.py   (or python tests/run_all_tests.py)
 Synthetic data only (about 3 years of minute bars, synthetic VIX and VIX3M daily closes). The data root is a temporary
@@ -16,6 +16,8 @@ What is verified:
     5. A development run of exp12 (6 candidates, VIX sources) and of exp02 (model) passes the runner's look-ahead check.
     6. exp14: fh and rod signal arithmetic, the exact -x edge, the 15:30 sell and 15:58 buy-back, an early
        close, missing bars, and a change after 15:30 that must not move the 15:30 decision.
+    7. exp15: scheduled holiday rules, unscheduled closures counted as sessions, day T / offsets, settlement eras,
+       the 0/1 weight path with one-session lead, and every candidate on the runner.
 
 One experiment only (python tests/run_all_tests.py --experiment expNN, which sets SO_TEST_EXPERIMENT=expNN): its own
 test_expNN_* functions, every candidate of its design (from DESIGN_LIST) on the runner, and the runner's look-ahead
@@ -79,13 +81,18 @@ from experiments.exp13_e1m1_robustness import design as exp13_design
 from experiments.exp14_last_half_hour_exit import config as exp14_config
 from experiments.exp14_last_half_hour_exit import design as exp14_design
 from experiments.exp14_last_half_hour_exit.design import get_signal_return_float, get_weak_day_bool
+from experiments.exp15_pre_tom_exit import config as exp15_config
+from experiments.exp15_pre_tom_exit import design as exp15_design
+from experiments.exp15_pre_tom_exit import calendar_rules as exp15_cal
+from datetime import date as date_cls
+from types import SimpleNamespace
 
 # KEEP THE REAL REGISTRY PATH AND POINT THIS SUITE AT A TEMPORARY FILE
 REAL_WINDOWS_PATH_STR = paths.HOLDOUT_WINDOWS_FILE_PATH_STR
 paths.HOLDOUT_WINDOWS_FILE_PATH_STR = os.path.join(TEMP_ROOT_STR, "holdout_windows.csv")
 # EVERY DAILY DESIGN
 DESIGN_LIST = [exp02_design, exp03_design, exp04_design, exp05_design, exp06_design, exp07_design, exp12_design,
-               exp13_design, exp14_design]
+               exp13_design, exp14_design, exp15_design]
 
 
 # FUNCTION: PRINT A PASSED TEST
@@ -779,6 +786,247 @@ def test_exp14_no_lookahead():
     passed("exp14 no look-ahead: a change after 15:30 does not change the 15:30 decision; a change of the 15:30 close does")
 
 
+# FUNCTION: A MINIMAL VIEW THAT CARRIES ONLY A SESSION DATE (EXP15 READS NOTHING ELSE)
+def get_exp15_date_view(day_in):
+    """
+    Args:
+        day_in: date or date-like
+
+    Returns:
+        SimpleNamespace: Fake DecisionView with session_date only
+    """
+    # THE DESIGN READS ONLY session_date
+    return SimpleNamespace(session_date=pd.Timestamp(day_in).date())
+
+
+# FUNCTION: SCHEDULED HOLIDAY RULES (GOOD FRIDAY, JUNETEENTH, CHRISTMAS, NEW YEAR)
+def test_exp15_holidays():
+    """
+    Returns:
+        None
+    """
+    # INTERFACE AND THE FOUR NAMES
+    check_design_file(exp15_design.__file__)
+    assert exp15_design.EXPERIMENT_NAME == "exp15_pre_tom_exit" and exp15_design.PROTOCOL_VERSION == "1.0"
+    assert exp15_design.ENGINE_NAME == "fractional" and exp15_design.DATA_SOURCE_LIST == ["SPY_1MIN"]
+    assert exp15_design.CANDIDATE_LIST == ["w84|fixed", "w84|shift", "w54|fixed", "w54|shift"]
+    assert exp15_config.FOLD_TRAIN_WINDOW_YEARS == 10 and exp15_design.PERIOD_RULE["train_years"] == [10]
+    # GOOD FRIDAY 2016-03-25 CLOSED; EASTER SUNDAY IS 2016-03-27
+    assert exp15_cal.get_easter_sunday_date(2016) == date_cls(2016, 3, 27)
+    assert exp15_cal.is_scheduled_holiday_bool(date_cls(2016, 3, 25))
+    assert not exp15_cal.is_design_session_bool(date_cls(2016, 3, 25))
+    # JUNETEENTH FROM 2022: 2022-06-19 WAS SUNDAY → OBSERVED MONDAY 2022-06-20; NONE BEFORE 2022
+    assert exp15_cal.is_scheduled_holiday_bool(date_cls(2022, 6, 20))
+    assert not exp15_cal.is_design_session_bool(date_cls(2022, 6, 20))
+    assert not exp15_cal.is_scheduled_holiday_bool(date_cls(2021, 6, 18))
+    assert not exp15_cal.is_scheduled_holiday_bool(date_cls(2021, 6, 19))
+    assert not exp15_cal.is_scheduled_holiday_bool(date_cls(2021, 6, 21))
+    # CHRISTMAS 2021 WAS SATURDAY → OBSERVED FRIDAY 2021-12-24
+    assert exp15_cal.is_scheduled_holiday_bool(date_cls(2021, 12, 24))
+    assert not exp15_cal.is_design_session_bool(date_cls(2021, 12, 24))
+    # NEW YEAR 2022 WAS SATURDAY → NOT OBSERVED ON 2021-12-31
+    assert not exp15_cal.is_scheduled_holiday_bool(date_cls(2021, 12, 31))
+    assert exp15_cal.is_design_session_bool(date_cls(2021, 12, 31))
+    passed("exp15 holidays: Good Friday 2016-03-25; Juneteenth 2022-06-20 observed and none before 2022; "
+           "Christmas 2021-12-24; New Year 2022 Saturday not observed on 2021-12-31")
+
+
+# FUNCTION: UNSCHEDULED CLOSURES STAY IN THE DESIGN-CALENDAR DAY COUNT
+def test_exp15_unscheduled_closures():
+    """
+    Returns:
+        None
+    """
+    # SANDY 2012-10-29 AND 2012-10-30 ARE WEEKDAYS AND NOT SCHEDULED HOLIDAYS
+    for day in (date_cls(2012, 10, 29), date_cls(2012, 10, 30), date_cls(2007, 1, 2), date_cls(2018, 12, 5)):
+        assert day in exp15_config.UNSCHEDULED_CLOSURE_DATE_TUPLE
+        assert not exp15_cal.is_scheduled_holiday_bool(day)
+        assert exp15_cal.is_design_session_bool(day)
+    # OCTOBER 2012 DAY T AND OFFSETS STILL COUNT THOSE DAYS
+    t_date = exp15_cal.get_month_t_date(2012, 10)
+    assert t_date == date_cls(2012, 10, 31)
+    assert exp15_cal.get_offset_from_t_date(t_date, -1) == date_cls(2012, 10, 30)
+    assert exp15_cal.get_offset_from_t_date(t_date, -2) == date_cls(2012, 10, 29)
+    assert exp15_cal.get_offset_from_t_date(t_date, -3) == date_cls(2012, 10, 26)
+    passed("exp15 unscheduled closures 2012-10-29/30 (and listed others) count as design sessions")
+
+
+# FUNCTION: DAY T AND OFFSETS, INCLUDING A HOLIDAY INSIDE THE WINDOW
+def test_exp15_day_t_and_offsets():
+    """
+    Returns:
+        None
+    """
+    # NOVEMBER 2016: THANKSGIVING 2016-11-24 IS A SCHEDULED HOLIDAY INSIDE THE PRE-TOM REGION
+    t_date = exp15_cal.get_month_t_date(2016, 11)
+    assert t_date == date_cls(2016, 11, 30)
+    assert exp15_cal.is_scheduled_holiday_bool(date_cls(2016, 11, 24))
+    assert not exp15_cal.is_design_session_bool(date_cls(2016, 11, 24))
+    # T-1 .. T-8 SKIP THANKSGIVING
+    assert exp15_cal.get_offset_from_t_date(t_date, -1) == date_cls(2016, 11, 29)
+    assert exp15_cal.get_offset_from_t_date(t_date, -2) == date_cls(2016, 11, 28)
+    assert exp15_cal.get_offset_from_t_date(t_date, -3) == date_cls(2016, 11, 25)
+    assert exp15_cal.get_offset_from_t_date(t_date, -4) == date_cls(2016, 11, 23)
+    assert exp15_cal.get_offset_from_t_date(t_date, -5) == date_cls(2016, 11, 22)
+    window_set = exp15_cal.get_cash_window_date_set(2016, 11, "w84|fixed")
+    assert date_cls(2016, 11, 24) not in window_set
+    assert date_cls(2016, 11, 23) in window_set and date_cls(2016, 11, 18) in window_set
+    # A QUIET MONTH: JUNE 2015, T = 2015-06-30
+    assert exp15_cal.get_month_t_date(2015, 6) == date_cls(2015, 6, 30)
+    assert exp15_cal.get_offset_from_t_date(date_cls(2015, 6, 30), -4) == date_cls(2015, 6, 24)
+    passed("exp15 day T and offsets; Thanksgiving 2016 skipped inside the window")
+
+
+# FUNCTION: SETTLEMENT ERA ON BOTH SIDES OF THE SEC DATES, AND EACH CANDIDATE WINDOW
+def test_exp15_settlement_eras():
+    """
+    Returns:
+        None
+    """
+    # ERA FROM DAY T
+    assert exp15_cal.get_settlement_era_str(date_cls(2017, 9, 4)) == "t3"
+    assert exp15_cal.get_settlement_era_str(date_cls(2017, 9, 5)) == "t2"
+    assert exp15_cal.get_settlement_era_str(date_cls(2024, 5, 27)) == "t2"
+    assert exp15_cal.get_settlement_era_str(date_cls(2024, 5, 28)) == "t1"
+    # AUGUST 2017 T IS BEFORE T+2; SEPTEMBER 2017 T IS ON OR AFTER 2017-09-05
+    assert exp15_cal.get_month_t_date(2017, 8) == date_cls(2017, 8, 31)
+    assert exp15_cal.get_settlement_era_str(exp15_cal.get_month_t_date(2017, 8)) == "t3"
+    assert exp15_cal.get_month_t_date(2017, 9) == date_cls(2017, 9, 29)
+    assert exp15_cal.get_settlement_era_str(exp15_cal.get_month_t_date(2017, 9)) == "t2"
+    assert exp15_cal.get_settlement_era_str(exp15_cal.get_month_t_date(2024, 5)) == "t1"
+    # OFFSET PAIRS PER CANDIDATE AND ERA
+    assert exp15_cal.get_window_offset_tuple("w84|fixed", "t3") == (-8, -4)
+    assert exp15_cal.get_window_offset_tuple("w84|fixed", "t2") == (-8, -4)
+    assert exp15_cal.get_window_offset_tuple("w84|fixed", "t1") == (-8, -4)
+    assert exp15_cal.get_window_offset_tuple("w84|shift", "t3") == (-8, -4)
+    assert exp15_cal.get_window_offset_tuple("w84|shift", "t2") == (-7, -3)
+    assert exp15_cal.get_window_offset_tuple("w84|shift", "t1") == (-6, -2)
+    assert exp15_cal.get_window_offset_tuple("w54|fixed", "t1") == (-5, -4)
+    assert exp15_cal.get_window_offset_tuple("w54|shift", "t2") == (-4, -3)
+    assert exp15_cal.get_window_offset_tuple("w54|shift", "t1") == (-3, -2)
+    # FIXED WINDOW DATES DO NOT MOVE ACROSS THE 2017 BOUNDARY; SHIFT DOES
+    fixed_aug = exp15_cal.get_cash_window_date_set(2017, 8, "w84|fixed")
+    fixed_sep = exp15_cal.get_cash_window_date_set(2017, 9, "w84|fixed")
+    shift_aug = exp15_cal.get_cash_window_date_set(2017, 8, "w84|shift")
+    shift_sep = exp15_cal.get_cash_window_date_set(2017, 9, "w84|shift")
+    assert fixed_aug == shift_aug
+    assert fixed_sep != shift_sep
+    assert exp15_cal.get_offset_from_t_date(date_cls(2017, 9, 29), -3) in shift_sep
+    assert exp15_cal.get_offset_from_t_date(date_cls(2017, 9, 29), -3) not in fixed_sep
+    passed("exp15 settlement eras on both sides of 2017-09-05 and 2024-05-28; candidate windows per era")
+
+
+# FUNCTION: DROP EVERY MINUTE BAR OF ONE CALENDAR DAY (SYNTHETIC UNSCHEDULED CLOSURE)
+def drop_exp15_session_bars(ohlcv_pdf_in, day_str_in):
+    """
+    Args:
+        ohlcv_pdf_in (pd.DataFrame): Synthetic OHLCV
+        day_str_in (str): YYYY-MM-DD to remove
+
+    Returns:
+        pd.DataFrame: Frame without that day's bars
+    """
+    # KEEP EVERY BAR WHOSE NEW YORK DATE IS NOT THE CLOSED DAY
+    stamp = ohlcv_pdf_in["timestamp"].dt.tz_convert("America/New_York")
+    mask_arr = stamp.dt.date == pd.Timestamp(day_str_in).date()
+    assert int(mask_arr.sum()) > 0, day_str_in
+    return ohlcv_pdf_in.loc[~mask_arr].reset_index(drop=True)
+
+
+# FUNCTION: TARGET WEIGHT BY LIVE SESSION DATE FROM A RUNNER RESULT
+def get_exp15_weight_by_day_dict(result_dict_in):
+    """
+    Args:
+        result_dict_in (dict): run_daily_dict output
+
+    Returns:
+        dict[date, float]: Finite target weights keyed by session date
+    """
+    # SKIP A TERMINAL NaN IF THE RUNNER LEAVES ONE
+    out_dict = {}
+    for session_date, weight_float in zip(result_dict_in["decision_session_list"], result_dict_in["target_weight_arr"]):
+        if not np.isfinite(weight_float):
+            continue
+        out_dict[pd.Timestamp(session_date).date()] = float(weight_float)
+    return out_dict
+
+
+# FUNCTION: WEIGHT PATH WITH ONE-SESSION LEAD
+def test_exp15_weight_path():
+    """
+    Returns:
+        None
+    """
+    # JUNE 2015 UNDER T+3: T=2015-06-30; w54|fixed CASH DAYS = 2015-06-23 AND 2015-06-24
+    design_obj = exp15_design.get_candidate_design("w54|fixed")
+    cash_set = exp15_cal.get_cash_window_date_set(2015, 6, "w54|fixed")
+    assert cash_set == {date_cls(2015, 6, 23), date_cls(2015, 6, 24)}
+    # DECISION ON THE SESSION BEFORE A CASH DAY IS 0; ON THE LAST CASH DAY IS 1 (NEXT DAY OUT OF WINDOW)
+    assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 22))) == 0.0
+    assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 23))) == 0.0
+    assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 24))) == 1.0
+    assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 25))) == 1.0
+    assert design_obj.decide(get_exp15_date_view(date_cls(2015, 6, 19))) == 1.0
+    # SANDY 2012-10-29/30 ARE DESIGN SESSIONS (T-2/T-1), NOT IN Etula T-8..T-4
+    sandy_design = exp15_design.get_candidate_design("w84|fixed")
+    assert exp15_cal.get_next_design_session_date(date_cls(2012, 10, 26)) == date_cls(2012, 10, 29)
+    assert date_cls(2012, 10, 29) not in exp15_cal.get_cash_window_date_set(2012, 10, "w84|fixed")
+    assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 26))) == 1.0
+    assert exp15_cal.get_next_design_session_date(date_cls(2012, 10, 30)) == date_cls(2012, 10, 31)
+    assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 31))) == 1.0
+    assert date_cls(2012, 10, 25) in exp15_cal.get_cash_window_date_set(2012, 10, "w84|fixed")
+    assert sandy_design.decide(get_exp15_date_view(date_cls(2012, 10, 24))) == 0.0
+    # A SHORT SYNTHETIC STREAM: WEIGHTS MATCH THE LEAD RULE ON LIVE SESSIONS
+    ohlcv_pdf = get_synthetic_ohlcv_pdf("2015-06-15", "2015-06-30", start_price_in=200.0, minute_vol_in=0.0, seed_in=15)
+    ohlcv_array_dict = get_ohlcv_array_dict(ohlcv_pdf)
+    date1, date2 = ohlcv_array_dict["session_date_list"][0], ohlcv_array_dict["session_date_list"][-1]
+    result_dict = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), ohlcv_array_dict, date1, date2,
+                                 initial_weight_in=1.0, dead_band_in=0.0)
+    weight_by_day_dict = get_exp15_weight_by_day_dict(result_dict)
+    assert len(weight_by_day_dict) >= 10
+    for session_day, weight_float in weight_by_day_dict.items():
+        expected_float = 0.0 if exp15_cal.is_next_session_in_cash_window_bool(session_day, "w54|fixed") else 1.0
+        assert float(weight_float) == expected_float, (session_day, weight_float, expected_float)
+    assert 0.0 in weight_by_day_dict.values() and 1.0 in weight_by_day_dict.values()
+    passed("exp15 weight path: one-session lead, cash only for window sessions")
+
+
+# FUNCTION: UNSCHEDULED CLOSURE INSIDE/BEFORE THE WINDOW SHIFTS THE LIVE EXIT OR RE-ENTRY BY ONE SESSION
+def test_exp15_closed_day_in_window():
+    """
+    Returns:
+        None
+    """
+    # JUNE 2015 w54|fixed: CASH DAYS 2015-06-23 AND 2015-06-24 ON THE DESIGN CALENDAR
+    assert exp15_cal.get_cash_window_date_set(2015, 6, "w54|fixed") == {date_cls(2015, 6, 23), date_cls(2015, 6, 24)}
+    assert exp15_cal.get_next_design_session_date(date_cls(2015, 6, 19)) == date_cls(2015, 6, 22)
+    assert exp15_cal.get_next_design_session_date(date_cls(2015, 6, 23)) == date_cls(2015, 6, 24)
+    base_pdf = get_synthetic_ohlcv_pdf("2015-06-15", "2015-06-30", start_price_in=200.0, minute_vol_in=0.0, seed_in=15)
+    # CASE 1: CLOSED DAY = SESSION BEFORE THE WINDOW (2015-06-22 MISSING)
+    before_pdf = drop_exp15_session_bars(base_pdf, "2015-06-22")
+    before_dict = get_ohlcv_array_dict(before_pdf)
+    assert date_cls(2015, 6, 22) not in [pd.Timestamp(day).date() for day in before_dict["session_date_list"]]
+    before_result = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), before_dict,
+                                   before_dict["session_date_list"][0], before_dict["session_date_list"][-1],
+                                   initial_weight_in=1.0, dead_band_in=0.0)
+    before_weight_dict = get_exp15_weight_by_day_dict(before_result)
+    assert before_weight_dict[date_cls(2015, 6, 19)] == 1.0
+    assert before_weight_dict[date_cls(2015, 6, 23)] == 0.0
+    # CONSEQUENCE: 2015-06-23'S RETURN IS HELD INVESTED (LATE EXIT BY ONE SESSION)
+    # CASE 2: CLOSED DAY = LAST WINDOW DAY (2015-06-24 MISSING)
+    last_pdf = drop_exp15_session_bars(base_pdf, "2015-06-24")
+    last_dict = get_ohlcv_array_dict(last_pdf)
+    assert date_cls(2015, 6, 24) not in [pd.Timestamp(day).date() for day in last_dict["session_date_list"]]
+    last_result = run_daily_dict(exp15_design.get_candidate_design("w54|fixed"), last_dict,
+                                 last_dict["session_date_list"][0], last_dict["session_date_list"][-1],
+                                 initial_weight_in=1.0, dead_band_in=0.0)
+    last_weight_dict = get_exp15_weight_by_day_dict(last_result)
+    assert last_weight_dict[date_cls(2015, 6, 23)] == 0.0
+    assert last_weight_dict[date_cls(2015, 6, 25)] == 1.0
+    # CONSEQUENCE: 2015-06-25'S RETURN IS SPENT IN CASH (LATE RE-ENTRY BY ONE SESSION)
+    passed("exp15 closed day in window: missing pre-window day late exit; missing last window day late re-entry")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     try:
@@ -792,6 +1040,12 @@ if __name__ == "__main__":
         test_exp14_early_close()
         test_exp14_missing_bars()
         test_exp14_no_lookahead()
+        test_exp15_holidays()
+        test_exp15_unscheduled_closures()
+        test_exp15_day_t_and_offsets()
+        test_exp15_settlement_eras()
+        test_exp15_weight_path()
+        test_exp15_closed_day_in_window()
         print("Generating synthetic data...", flush=True)
         synthetic_ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2021-01-04", "2023-12-29", minute_vol_in=0.0007, seed_in=23))
         synthetic_daily_pdf = get_daily_feature_pdf(synthetic_ohlcv_array_dict)
