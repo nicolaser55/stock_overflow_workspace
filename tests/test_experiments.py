@@ -16,6 +16,11 @@ What is verified:
     5. A development run of exp12 (6 candidates, VIX sources) and of exp02 (model) passes the runner's look-ahead check.
     6. exp14: fh and rod signal arithmetic, the exact -x edge, the 15:30 sell and 15:58 buy-back, an early
        close, missing bars, and a change after 15:30 that must not move the 15:30 decision.
+
+One experiment only (python tests/run_all_tests.py --experiment expNN, which sets SO_TEST_EXPERIMENT=expNN): its own
+test_expNN_* functions, every candidate of its design (from DESIGN_LIST) on the runner, and the runner's look-ahead
+check on that design. A new experiment registers here: its design in DESIGN_LIST, its tests named test_expNN_*, and
+the calls in the full run below.
 """
 
 import os
@@ -162,15 +167,19 @@ def run_candidate_dict(design_module_in, candidate_in, ohlcv_array_dict_in, cont
 
 
 # FUNCTION: EVERY CANDIDATE OF EVERY DESIGN RUNS
-def test_every_candidate_runs(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_in, date2_in):
+def test_every_candidate_runs(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_in, date2_in, design_list_in=None):
     """
+    Args:
+        design_list_in (list | None): Designs to run (None = DESIGN_LIST)
+
     Returns:
         dict: (module name, candidate) -> result dict
     """
     # PREFLIGHT, THEN ONE STREAM PER CANDIDATE
+    design_list = list(DESIGN_LIST if design_list_in is None else design_list_in)
     result_by_key_dict = {}
     candidate_count = 0
-    for design_module in DESIGN_LIST:
+    for design_module in design_list:
         check_design_file(design_module.__file__)
         context = get_context(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, design_module)
         assert len(design_module.CANDIDATE_LIST) == len(set(design_module.CANDIDATE_LIST)) > 0
@@ -181,7 +190,7 @@ def test_every_candidate_runs(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_
             result_by_key_dict[(design_module.EXPERIMENT_NAME, candidate)] = result_dict
             candidate_count += 1
     trade_count = sum(len(result_dict["trade_pdf"]) for result_dict in result_by_key_dict.values())
-    passed(f"{len(DESIGN_LIST)} designs pass the preflight; {candidate_count} candidate streams finish ({trade_count} trades)")
+    passed(f"{len(design_list)} designs pass the preflight; {candidate_count} candidate streams finish ({trade_count} trades)")
     return result_by_key_dict
 
 
@@ -289,8 +298,11 @@ def test_tsday_columns(daily_pdf_in):
 
 
 # FUNCTION: THE RUNNER'S LOOK-AHEAD CHECK PASSES FOR exp12 AND exp02
-def test_lookahead(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_in):
+def test_lookahead(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_in, design_list_in=None):
     """
+    Args:
+        design_list_in (list | None): Designs to check (None = exp12 and exp02)
+
     Returns:
         None
     """
@@ -307,7 +319,8 @@ def test_lookahead(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_i
     period_pdf = pd.DataFrame(row_list)
     log_folder_str = os.path.join(paths.LOCAL_EXPERIMENTZONE_PATH_STR, "experiments_test")
     os.makedirs(log_folder_str, exist_ok=True)
-    for design_module in (exp12_design, exp02_design):
+    design_list = [exp12_design, exp02_design] if design_list_in is None else list(design_list_in)
+    for design_module in design_list:
         context = get_context(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, design_module)
         result_dict = run_development_dict(design_module, ohlcv_array_dict_in, data_context_in=context,
                                            run_id_str_in=f"look_{design_module.EXPERIMENT_NAME}", n_jobs_int_in=1,
@@ -317,7 +330,43 @@ def test_lookahead(ohlcv_array_dict_in, daily_pdf_in, vix_frame_dict_in, date1_i
                                            check_clean_tree_bool_in=False, check_view_bool_in=False,
                                            baseline_seed_count_int_in=2)
         assert result_dict["lookahead_dict"]["status_str"] == LOOK_AHEAD_PASS_STR, (design_module.EXPERIMENT_NAME, result_dict["lookahead_dict"].get("first_fail_dict"))
-    passed("look-ahead check passes for exp12 (VIX sources, 6 candidates) and exp02 (weekly model, 18 candidates)")
+    if design_list_in is None:
+        passed("look-ahead check passes for exp12 (VIX sources, 6 candidates) and exp02 (weekly model, 18 candidates)")
+    else:
+        passed(f"look-ahead check passes for {', '.join(module.EXPERIMENT_NAME for module in design_list)}")
+
+
+# FUNCTION: ONE EXPERIMENT ONLY (tests/run_all_tests.py --experiment expNN SETS SO_TEST_EXPERIMENT)
+def run_one_experiment(experiment_str_in):
+    """
+    Runs the experiment's own test_<expNN>_* functions (in file order), every candidate of its design on the runner,
+    and the runner's look-ahead check on it. A new experiment registers by adding its design to DESIGN_LIST and naming
+    its tests test_<expNN>_*.
+
+    Args:
+        experiment_str_in (str): e.g. exp15
+
+    Returns:
+        None
+    """
+    # THE EXPERIMENT'S OWN TESTS AND DESIGNS
+    prefix_str = f"test_{experiment_str_in}_"
+    own_test_list = sorted([value for name_str, value in globals().items() if name_str.startswith(prefix_str) and callable(value)],
+                           key=lambda value: value.__code__.co_firstlineno)
+    design_list = [module for module in DESIGN_LIST if str(module.EXPERIMENT_NAME).startswith(experiment_str_in + "_")]
+    assert own_test_list or design_list, (f"no {prefix_str}* test and no design of {experiment_str_in} in DESIGN_LIST: "
+                                          f"register the experiment in this suite first")
+    print(f"{experiment_str_in} only: {len(own_test_list)} own tests, {len(design_list)} design(s)", flush=True)
+    for test_func in own_test_list:
+        test_func()
+    if design_list:
+        print("Generating synthetic data...", flush=True)
+        ohlcv_array_dict = get_ohlcv_array_dict(get_synthetic_ohlcv_pdf("2021-01-04", "2023-12-29", minute_vol_in=0.0007, seed_in=23))
+        daily_pdf = get_daily_feature_pdf(ohlcv_array_dict)
+        vix_dict = get_vix_frame_dict(ohlcv_array_dict["session_date_list"])
+        date1, date2 = ohlcv_array_dict["session_date_list"][350], ohlcv_array_dict["session_date_list"][-1]
+        test_every_candidate_runs(ohlcv_array_dict, daily_pdf, vix_dict, date1, date2, design_list_in=design_list)
+        test_lookahead(ohlcv_array_dict, daily_pdf, vix_dict, date1, design_list_in=design_list)
 
 
 
@@ -733,6 +782,11 @@ def test_exp14_no_lookahead():
 # RUN THE SUITE
 if __name__ == "__main__":
     try:
+        only_experiment_str = os.environ.get("SO_TEST_EXPERIMENT", "").strip()
+        if only_experiment_str:
+            run_one_experiment(only_experiment_str)
+            print(f"\nAll {only_experiment_str} tests passed ✅")
+            raise SystemExit(0)
         test_exp14_signal_and_threshold()
         test_exp14_sell_and_buy_back()
         test_exp14_early_close()

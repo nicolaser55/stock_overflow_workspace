@@ -40,14 +40,22 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   or results another way.
 - Kill switch: if the file `<data root>\control\STOP` exists, start nothing new (no run, no search, no screening) and
   report that you stopped. Only Nicolas creates or removes it.
-- Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. Nicolas merges.
+- Branch: work on `agent/<topic>`; never commit to `main`, never force-push, never rewrite history. You push and open
+  pull requests as the GitHub account `nicolaser55-agent` (write access; its token has no `workflow` scope, so a push
+  that changes `.github/workflows/` is refused). Never approve or merge a pull request: `main` requires Nicolas's
+  approval (`scripts\nico_merge.ps1`), and the approval is his consent to run the code. Commits carry the author
+  `nicolaser55-agent`; do not change the clone's `user.name`, `user.email` or credential settings.
 - Protected files (`protected_paths.txt`): the guards, the runner, the rules, the records, the guard tests, the
   environment, the design documents (`docs/AGENTIC_DESIGN.md`, `docs/AGENTIC_ROADMAP.md`, `docs/RUNNER_DESIGN.md`) and the pipeline notebooks. Do not change them. If one must change, write the proposal (what, why, the test) for Nicolas instead.
   `docs/RESULTS_LOG.md` only grows, and only from the run index (`scripts/append_results_log.py`); never write a row.
 - Python: `venv-main\Scripts\python.exe` of Nicolas's workspace. Never install, upgrade or remove a package.
-- Tests: `tests\run_all_tests.py --fast` after every code change; the full suite before you ask for a merge. Never
-  commit failing tests. New experiment tests go in `tests/test_experiments.py` (synthetic data only);
-  `tests/run_all_tests.py` is protected, so a new suite file needs Nicolas to list it.
+- Tests: `tests\run_all_tests.py --fast` after every code change; for an experiment pull request that changes nothing
+  under `so/`, `tests\run_all_tests.py --experiment expNN` before you ask for a merge (the fast set plus that
+  experiment: its `test_expNN_*` functions, every candidate on the runner and the look-ahead check); the full suite
+  when `so/` changes. `--jobs 4` runs suites in parallel. Never commit failing tests. New experiment tests go in
+  `tests/test_experiments.py` (synthetic data only): the design in `DESIGN_LIST`, the tests named `test_expNN_*`, and
+  their calls in the full run at the end of the file. `tests/run_all_tests.py` is protected, so a new suite file needs
+  Nicolas to list it.
 - Design code runs behind a guard (`so/runner/guard.py`): it may not open, list or write anything under the data
   root, start a subprocess, or change any `so.*` module or `so.config` value (also at import). Read data through the
   view only; keep experiment constants in the experiment's `config.py`.
@@ -71,7 +79,9 @@ rate). The verdict passes only a total return strictly above buy-and-hold's; its
   `PROTOCOL.md` (question, rules, the complete candidate list, selection rule, stopping rule, trial budget, the
   "Derived from:" line and the "Family:" line) with `config.py` and `design.py`. Tests live under `tests/`, outside
   `experiments/`, and a queued job may change nothing outside `experiments/`, so the order is (`experiments/README.md`):
-  (1) a pull request with the tests and the family-ledger row, merged and deployed; (2) one commit that touches only
+  (0) Nicolas's selection pull request (the idea's status and the family-ledger row; protected files, so never in
+  your pull requests), merged before you start; (1) a pull request with the tests (and the draft folder), merged and
+  deployed; (2) one commit that touches only
   `experiments/` (the experiment folder and its registry line), with a subject starting `preregister expNN`; (3) queue
   that commit. Before asking for each review, run the checklist of `experiments/README.md` and paste its output:
   `scripts\check_experiment_ready.py experiments\<exp>` (with `--draft` before the `preregister` commit; with

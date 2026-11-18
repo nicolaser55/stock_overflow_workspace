@@ -14,16 +14,18 @@ not what we observed. Where a source was not checked, the entry says so.*
   samples with ours (point 7), and proposes the rules and the candidate grid. Then `PROTOCOL.md` with the line
   `Family: <letter>, idea <id>, variant <k> of 5` (`experiments/README.md`). No look at our data for the idea before
   the protocol is committed with `preregister`.
-- **Status changes** (selected, used with its experiment and result, dropped) go into this file in the pull request
+- **Status changes:** "selected" in Nicolas's selection pull request, before the agent starts (2026-11-18); "used"
+  (with its experiment and result) or "dropped" in the records pull request after the run. Earlier rule: in the pull request
   that brings the experiment's tests, together with the ledger row in section 4 of the plan.
-- **Suggested order** among eligible ideas: I1 → C1 → V1 → C2 → I2 → X1 → C3 → R1 → M2 → R2 → M1 → I3. The first
-  five spend little time out of the market, state a mechanism, and (except C1) need no new data.
+- **Suggested order** among eligible ideas: I1 (used, exp14) → V1 (selected, exp15) → C2 → I2 → X1 → C3 → R1 → M2 →
+  R2 → M1 → I3; C1 deferred (2026-11-17). Re-checked against the two criteria below when the next idea is picked.
 - **Choosing among eligible ideas (decided by Nicolas on 2026-11-17):** prefer ideas that trade rarely and stay
   invested most of the time (costs removed exp14's small gross gain), and ideas whose effect was replicated out of
   sample (other periods, other markets) over a single large reported effect. Re-check the suggested order against
   these two criteria when the next idea is picked. About 3-5 candidates per version.
 - **This file is protected** (`protected_paths.txt`): an agent proposes a change in its report; Nicolas merges it.
-- **Statuses:** eligible · selected (an experiment is being prepared) · used (expNN, result) · parked (family closed)
+- **Statuses:** eligible · selected (an experiment is being prepared) · used (expNN, result) · deferred (kept for
+  later; the evidence or the data is not there now) · parked (family closed)
   · drop candidate (weak; keep only if a slot is spare) · needs data (eligible once Nicolas supplies and registers it).
 
 ## 1. What the constraints imply
@@ -81,7 +83,12 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 #### Calendar and event windows (C)
 
 **C1. FOMC-cycle even weeks** · key `C:fomc_cycle_week_parity` · **Promise: high-medium**
-- *Status (2026-10-29):* **eligible, needs data 5.2**
+- *Status (2026-11-17):* **deferred** (kept for later, not dropped). An independent check finds the even-week effect
+  significant in 1994-2003 but not in 2004-2013, 2014-2023 or 2017-2023, and not robust to two outlier days (Uppal,
+  Imperial College working paper, March 2025, "Does the FOMC Cycle Still Drive Stock Returns?"; a Stockholm School of
+  Economics thesis, Holst & von der Esch, finds the same for 2017-2022): almost exactly our development span. It also
+  needs data 5.2 registered as a new source (a judge change). Revisit if new evidence appears or when 5.2 is registered
+  for C3. (Was: eligible, needs data 5.2, 2026-10-29.)
 - *Mechanism:* the equity premium since 1994 was earned almost entirely in even weeks counted from the last FOMC
   meeting (weeks 0, 2, 4, 6); the authors link it to Fed information flow (Cieslak, Morse & Vissing-Jorgensen,
   *Journal of Finance*; SSRN 2015, revised 2019).
@@ -180,7 +187,8 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 #### Volatility and risk state (V)
 
 **V1. Variance risk premium exit** · key `V:variance_risk_premium` · **Promise: medium**
-- *Status (2026-10-29):* **eligible (recommended for the last V slot)**
+- *Status (2026-11-17):* **selected: exp15_vrp_exit** (family V, idea V1, variant 1 of 5; the last V slot). (Was:
+  eligible, recommended for the last V slot, 2026-10-29.)
 - *Mechanism:* implied minus realized variance (VIX² vs recent realized variance) predicts aggregate returns, strongest
   at the quarterly horizon; high premium → high returns, low → low (Bollerslev, Tauchen & Zhou, *RFS* 2009; post-1990
   data).

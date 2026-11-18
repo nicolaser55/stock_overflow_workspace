@@ -48,7 +48,10 @@ Results: `docs/RESULTS_LOG.md` (one row per run). All rows below are protocol 1.
 4. Write `design.py`. Declare every source in `DATA_SOURCE_LIST` (registered in `so.core.point_in_time`).
 5. Tests and the registry line first, in their own pull request: tests (synthetic data: rule mechanics, no look-ahead
    of new features, the design on a short runner loop) in `tests/test_experiments.py` or a new suite listed in
-   `tests/run_all_tests.py`, and its row in the family ledger (`docs/STAGE1_RESEARCH_PLAN.md` section 4). Nicolas merges it
+   `tests/run_all_tests.py` (named `test_expNN_*`, the design added to `DESIGN_LIST`). The family-ledger row
+   (`docs/STAGE1_RESEARCH_PLAN.md` section 4) and the idea's status come earlier, in Nicolas's selection pull request,
+   before the agent starts (protected files never go in the agent's pull requests). The agent opens the pull request
+   as `nicolaser55-agent`; Nicolas runs `tests\run_all_tests.py --experiment expNN`, approves and merges it
    (`scripts\nico_merge.ps1 -Pr <n>`) and deploys (as so_runner:
    `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_runner.ps1 -ExpectCommit <merge commit>`): a queued
    job may change nothing outside `experiments/`, and a job based on `main` commits that are not deployed is rejected.
@@ -83,7 +86,8 @@ Paste the output of each item into the review request. Run `git fetch origin` fi
 3. The "Family:" line against the HAND line of section 4: the idea is eligible in that family, and the variant is the
    next free one for the idea (versions already used, across experiments).
 4. No DRAFT left in `PROTOCOL.md` (for the `preregister` commit).
-5. `tests\run_all_tests.py --fast` and the experiment's own tests (`tests\run_all_tests.py --suite test_experiments.py`).
+5. `tests\run_all_tests.py --experiment expNN` (the fast set plus the experiment's own tests, its candidates on the
+   runner and the look-ahead check; add `--jobs 4` to run suites in parallel).
 
 Reviews (decided 2026-11-17): two Claude reviews per experiment, (1) the brief and the draft protocol, (2) the design,
 the config and the tests. The third is not a review: after the `preregister` commit, the agent pastes
