@@ -17,7 +17,7 @@ not what we observed. Where a source was not checked, the entry says so.*
 - **Status changes:** "selected" in Nicolas's selection pull request, before the agent starts (2026-11-18); "used"
   (with its experiment and result) or "dropped" in the records pull request after the run. Earlier rule: in the pull request
   that brings the experiment's tests, together with the ledger row in section 4 of the plan.
-- **Suggested order** among eligible ideas: I1 (used, exp14) → C2 (selected, exp15) → R1 → I2 → M2 → X1 → C3 → R2 → M1
+- **Suggested order** among eligible ideas: I1 (used, exp14) → C2 (used, exp15) → R1 → I2 → M2 → X1 → C3 → R2 → M1
   → I3; C1 and V1 deferred (2026-11-17, 2026-11-18). A literature screen of every remaining idea (2026-11-18) found
   none that clearly passes the two criteria below: the published edges are mostly in being invested at good times,
   which buy-and-hold already captures, not in being out at bad times. Re-checked when the next idea is picked.
@@ -102,15 +102,16 @@ Format: **dedup key** = family + mechanism. "Time out" = rough share of days not
 - *Caveats:* post-publication evidence not checked by me; one regime (one central bank's communication practice).
 
 **C2. Turn of the month** · key `C:turn_of_month` · **Promise: medium**
-- *Status (2026-11-18):* **selected: exp15_pre_tom_exit** (family C, idea C2, variant 1 of 5). The selected direction
-  is the only one that can add return for a long-only overlay: **out on the pre-turn-of-month selling days**, back in
-  for the turn of the month. Mechanism: institutions sell around days -8 to -4 to raise cash for month-end payments,
-  timed by the settlement convention (T+3 in their sample), so prices are weak then and rebound from day -3 (Etula,
-  Rinne, Suominen & Vaittinen, *Review of Financial Studies* 2020, 1995-2013). Known weaknesses (screen 2026-11-18):
-  the classical turn-of-month window has largely faded in the last decade; settlement moved from T+3 to T+2 (2017) and
-  T+1 (2024) inside our span, so the window must be fixed per settlement era in advance; counting trading days to the
-  month end needs an exchange calendar. Chosen as the least-weak idea and as a deliberate test of the agent pipeline;
-  a fail is expected. (Was: eligible, 2026-10-29.)
+- *Status:* **used (2026-11-18): exp15 v1.0, fail** (run `exp15_pre_tom_exit_20261118170138683759`, judge
+  edaa1c6): +203.68% vs buy-and-hold +256.72% over 2015-2024, still behind at zero slippage (+206.48% vs +256.64%),
+  so the shortfall is the equity return given up on the days out, not costs; above constant exposure (+201.35%) but
+  above only 54 of 100 random-timing draws (the median: the window dates carried no information); failed return,
+  consistency, baselines and multiple testing; look-ahead pass. Variant 1 of 5 spent; **no further variant
+  recommended** (a change chosen now would be `data-dependent`, and the random-timing count leaves nothing to refine).
+  Direction run: out on the pre-turn-of-month selling days (T-8..T-4 or T-5..T-4, fixed or shifted one session per
+  shorter settlement cycle), invested otherwise; mechanism Etula, Rinne, Suominen & Vaittinen (*Review of Financial
+  Studies* 2020, 1995-2013). Prediction (fail on the return part) met; the expected direction (those days below cash)
+  was not. (Was: selected 2026-11-18; eligible 2026-10-29.)
 - *Mechanism:* returns concentrate in the last trading day and first three of the next month (Lakonishok & Smidt
   1988; McConnell & Xu, *Financial Analysts Journal* 2008, who call it "a puzzle in search of an answer"); flows from
   month-end payments are the usual story. A related older finding: returns were positive only in the first half of
