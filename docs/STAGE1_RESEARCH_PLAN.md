@@ -227,10 +227,10 @@ experiments below are protocol 1.0 and keep their assignment; they are not relab
 | Family | Ideas used | Slots left | Experiments | Eligible new ideas (`docs/IDEA_LIST.md`) |
 |---|---|---|---|---|
 | **T** Trend / time-series momentum | 3 | **0 (closed)** | exp04 (200-day exit), exp06 (trend or near-high exit + buy-stop re-entry), exp07 (warning lights) | none; T1-T4 parked |
-| **V** Volatility and risk state | 3 | **0 (closed once exp15 runs)** | exp05 (realized-volatility scaling); exp12 + exp13 (VIX-based re-entry; exp08, the pre-reset VIX signal gate, belongs to the same idea); exp15 (V1 variance risk premium exit; variant 1 of 5; selected 2026-11-17, in preparation) | none; V2, V3 parked when exp15 runs |
+| **V** Volatility and risk state | 2 | 1 | exp05 (realized-volatility scaling); exp12 + exp13 (VIX-based re-entry; exp08, the pre-reset VIX signal gate, belongs to the same idea) | none recommended: V1 deferred 2026-11-18 (post-publication dismissal), V2, V3 weak |
 | **L** Learned models | 2 | 1 | exp01 (minute take-profit model), exp02 (trailing stop + model re-entry) | none proposed |
 | **X** Anchors and highs | 1 | 2 | exp03 (sell near the all-time high) | X1 |
-| **C** Calendar and event windows | 0 | 3 | — | C2-C5 (choose 3; recommended C2, C3); C1 deferred 2026-11-17 (`docs/IDEA_LIST.md`) |
+| **C** Calendar and event windows | 1 | 2 | exp15 (C2 pre-turn-of-month exit; variant 1 of 5; selected 2026-11-18, in preparation) | C3-C5 weak (screen 2026-11-18); C1 deferred 2026-11-17 |
 | **I** Intraday | 1 | 2 | exp14 (I1 last-half-hour exit on weak days; variant 1 of 5, 6 candidates; run 2026-11-16: fail, the gain disappears after costs) | I2, I3 |
 | **R** Short-term reversal | 0 | 3 | — | R1, R2 |
 | **M** Macro and valuation | 0 | 3 | — | M1, M2 (T3 could move here as a macro idea) |
