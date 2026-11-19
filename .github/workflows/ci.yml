@@ -7,6 +7,9 @@
 #   windows-tests     the same fast test set on Windows (nicodesktop runs Windows; roadmap R7, 2026-11-08)
 #   windows-setup     both setup scripts on a throwaway Windows machine: throwaway accounts, a fake tree, the queue task
 #                     started once, the access check as so_agent and as so_runner (.github/ci/windows_setup_check.ps1)
+#   linux-setup       vm/setup_vm.sh twice on a throwaway Ubuntu 26.04 machine (it must be idempotent), each run ending
+#                     with vm/check_vm_access.sh (every account tries every path, port and host), then real SSH logins
+#                     and forwards as so_agent (step 3 of the Linux VM migration, 2026-11-19; not a required check yet)
 name: ci
 
 on:
@@ -77,6 +80,44 @@ jobs:
           python-version: "3.12"
       - name: Both setup scripts and the access checks on a throwaway machine
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .github\ci\windows_setup_check.ps1; exit $LASTEXITCODE
+
+  linux-setup:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: The account the VM already has (nico) and a throwaway key for so_agent
+        run: |
+          sudo useradd --create-home --shell /bin/bash nico
+          ssh-keygen -q -t ed25519 -N '' -C ci_so_agent -f "$RUNNER_TEMP/agent_key"
+      - name: vm/setup_vm.sh, first run (ends with vm/check_vm_access.sh)
+        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid
+      - name: vm/setup_vm.sh, second run (nothing may break when it runs again)
+        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid
+      - name: Real SSH logins and forwards as so_agent
+        run: |
+          set +e -uo pipefail
+          opts=(-F /dev/null -i "$RUNNER_TEMP/agent_key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10
+                -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+          fail=0
+          check() { if [ "$1" = "$2" ]; then echo "OK    $3"; else echo "FAIL  $3 (got $1, expected $2)"; fail=1; fi; }
+          check "$(ssh "${opts[@]}" so_agent@127.0.0.1 whoami)" so_agent "so_agent logs in with its key"
+          ssh "${opts[@]}" nico@127.0.0.1 true 2>/dev/null; check $? 255 "nico refuses so_agent's key"
+          ssh "${opts[@]}" so_runner@127.0.0.1 true 2>/dev/null; check $? 255 "so_runner cannot log in (not in AllowUsers)"
+          ssh "${opts[@]}" -o ExitOnForwardFailure=yes -N -L 127.0.0.1:18022:127.0.0.1:22 so_agent@127.0.0.1 & pid=$!
+          sleep 4
+          banner="$(timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/18022; head -c 4 <&3' 2>/dev/null)"
+          check "$banner" SSH- "a local forward to the VM's loopback works (Cursor Remote-SSH)"
+          kill "$pid" 2>/dev/null
+          timeout 15 ssh "${opts[@]}" -W 1.1.1.1:443 so_agent@127.0.0.1 </dev/null >/dev/null 2>&1; check $? 255 "a forward to another host is refused"
+          timeout 15 ssh "${opts[@]}" -o ExitOnForwardFailure=yes -N -R 127.0.0.1:18023:127.0.0.1:22 so_agent@127.0.0.1 2>/dev/null
+          check $? 255 "a remote forward is refused"
+          timeout 15 ssh "${opts[@]}" -o ExitOnForwardFailure=yes -N -D 127.0.0.1:18024 so_agent@127.0.0.1 & pid=$!
+          sleep 4
+          code="$(curl -s -o /dev/null -m 8 -w '%{http_code}' --socks5-hostname 127.0.0.1:18024 https://example.com/ 2>/dev/null)"
+          check "${code:-000}" 000 "a dynamic forward cannot reach the internet"
+          kill "$pid" 2>/dev/null
+          exit $fail
 
   protected-paths:
     if: github.event_name == 'pull_request'

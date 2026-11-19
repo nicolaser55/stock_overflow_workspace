@@ -1,0 +1,27 @@
+# vm/: setting up so-vm (the Linux VM on nicodesktop)
+
+Step 3 of `claude/DESIGN_2026-11-18_linux_vm.md` (project docs), with the decisions of 2026-11-19. Every file here is
+protected (`protected_paths.txt`: `vm/**`) and kept with LF line endings (`vm/.gitattributes`). Nothing here is part of
+the judge hash (`so/runner/judge_identity.py` hashes protected `.py` files under `so/` and `scripts/` only).
+
+| File | Installed as | Purpose |
+|---|---|---|
+| `setup_vm.sh` | (run from a clone) | Idempotent setup: accounts, folders and ACLs, sshd, Python, proxies, mail relay, egress rules, git, Claude Code, runner service. Ends with the check |
+| `check_vm_access.sh` | (run from a clone) | Every account tries every path, port and host; exits 1 on any FAIL |
+| `versions.env` | | Pinned versions and hashes: uv, CPython 3.12.0, Claude Code, the agent's git identity |
+| `nftables/so_egress.nft` | `/etc/nftables.d/so_egress.nft` | Outbound rules per account (table `inet so_egress`); reload, never restart |
+| `ssh/00-so-hardening.conf`, `ssh/99-so-agent.conf` | `/etc/ssh/sshd_config.d/` | Key-only sshd for nico and so_agent; so_agent may only forward to the VM's loopback (Cursor Remote-SSH) |
+| `proxy/*.conf`, `proxy/*.allow`, `systemd/so-proxy@.service` | `/etc/so/proxy/`, `/etc/systemd/system/` | tinyproxy allow-lists: planner (Anthropic hosts, 3129), git (GitHub, 3130) |
+| `postfix/main.cf` | `/etc/postfix/main.cf` | Local mail relay: loopback only, one recipient, relays to Gmail with the mailbot login |
+| `so_git_helper.py`, `sudoers/so-git-helper` | `/usr/local/lib/so/so-git-helper`, `/etc/sudoers.d/` | The agent's only way to GitHub: `so-git fetch-main`, `so-git push agent/<name>`, `so-git pr agent/<name> "<title>"` |
+| `claude/managed-settings.json` | `/etc/claude-code/managed-settings.json` | The planner's Claude Code: no shell, no web, no connectors, proxy, no updates |
+| `dbus/so-no-resolve.conf`, `systemd/dropins/*` | `/etc/dbus-1/system.d/`, unit drop-ins | No name lookups and no tailscaled socket for the service accounts |
+| `systemd/so-queue-runner.service` | `/etc/systemd/system/` | The judge on the VM: installed, **not enabled** until the switch |
+| `needrestart/so.conf`, `apt/no-snapd.pref` | `/etc/needrestart/conf.d/`, `/etc/apt/preferences.d/` | Never auto-restart the runner; snapd and hwctl stay removed |
+
+Accounts: `so_runner` (the judge; design code runs as its child), `so_agent` (Cursor coder, SSH key only),
+`so_planner` (Claude Code, `sudo -iu so_planner`), `so_git` (push helper, no login). Python packages:
+`requirements/venv_main_lock_linux.txt` (what must be installed) and `requirements/venv_main_hashes_linux.txt` (the
+same versions with hashes, used for the install).
+
+The install and test steps are in the project runbook `claude/RUNBOOK_2026-11-19_step3_setup_vm.md`.

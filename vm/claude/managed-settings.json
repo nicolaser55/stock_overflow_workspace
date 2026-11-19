@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/so_planner/planner/brief/**)",
+      "Read(//home/so_planner/planner/plans/**)",
+      "Read(//srv/so/data/store04_experiments/visible/grades/**)",
+      "Read(//srv/so/data/store04_experiments/visible/state.json)",
+      "Write(//home/so_planner/planner/plans/**)",
+      "Edit(//home/so_planner/planner/plans/**)"
+    ],
+    "deny": [
+      "Bash",
+      "PowerShell",
+      "Monitor",
+      "WebSearch",
+      "WebFetch",
+      "NotebookEdit",
+      "Write(//home/so_planner/.claude/**)",
+      "Edit(//home/so_planner/.claude/**)",
+      "Write(//home/so_planner/planner/.claude/**)",
+      "Edit(//home/so_planner/planner/.claude/**)",
+      "Write(//home/so_planner/planner/brief/**)",
+      "Edit(//home/so_planner/planner/brief/**)"
+    ],
+    "disableBypassPermissionsMode": "disable",
+    "defaultMode": "default"
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "allowManagedHooksOnly": true,
+  "allowManagedMcpServersOnly": true,
+  "allowedMcpServers": [],
+  "disableClaudeAiConnectors": true,
+  "enableArtifact": false,
+  "env": {
+    "HTTPS_PROXY": "http://127.0.0.1:3129",
+    "HTTP_PROXY": "http://127.0.0.1:3129",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_UPDATES": "1",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+    "CLAUDE_CODE_DISABLE_ARTIFACT": "1"
+  }
+}

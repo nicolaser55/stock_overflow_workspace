@@ -1,0 +1,50 @@
+# /etc/postfix/main.cf (vm/postfix/main.cf, 2026-11-19): the local mail relay of so-vm.
+# so_runner hands the runner's emails to 127.0.0.1:25 with no login (scripts/run_queue.py send_email_dict: STARTTLS,
+# then no login because SO_SMTP_USER is not set). Postfix accepts mail only from loopback and only for the one address
+# in /etc/postfix/so_recipient_access, and relays it to [smtp.gmail.com]:587 with the mailbot login in
+# /etc/postfix/sasl_passwd (root only). nftables lets only the postfix user out, and only to TCP 587.
+# vm/setup_vm.sh writes this file and sets relayhost; it never stores the password in the repository.
+compatibility_level = 3.6
+myhostname = so-vm.localdomain
+myorigin = $myhostname
+mydestination =
+local_transport = error:local delivery is disabled on so-vm
+alias_maps =
+alias_database =
+inet_interfaces = loopback-only
+inet_protocols = ipv4
+mynetworks = 127.0.0.0/8
+mailbox_size_limit = 0
+recipient_delimiter = +
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+notify_classes =
+
+# Who may hand in mail: over SMTP only loopback; the sendmail command only root (so design code running as so_runner
+# cannot mail anyone through it)
+authorized_submit_users = root
+authorized_mailq_users = root, nico
+smtpd_client_restrictions = permit_mynetworks, reject
+smtpd_relay_restrictions = check_recipient_access hash:/etc/postfix/so_recipient_access, reject
+smtpd_recipient_restrictions = check_recipient_access hash:/etc/postfix/so_recipient_access, reject
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+message_size_limit = 1048576
+
+# STARTTLS on loopback (the runner always calls starttls(); the snakeoil certificate is enough for loopback)
+smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
+smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+
+# Relay to Gmail: TLS required and the certificate verified
+relayhost = __RELAYHOST__
+smtp_sasl_auth_enable = __SASL_ENABLE__
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_sasl_tls_security_options = noanonymous
+smtp_tls_security_level = __SMTP_TLS_LEVEL__
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
+smtp_tls_mandatory_protocols = >=TLSv1.2
+smtp_tls_protocols = >=TLSv1.2
