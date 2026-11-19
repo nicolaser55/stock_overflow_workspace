@@ -118,6 +118,14 @@ jobs:
           check "${code:-000}" 000 "a dynamic forward cannot reach the internet"
           kill "$pid" 2>/dev/null
           exit $fail
+      - name: On failure, the logs of the services the setup started
+        if: failure()
+        run: |
+          sudo systemctl status 'so-proxy@*' postfix ssh --no-pager -l || true
+          sudo journalctl -u 'so-proxy@*' -u postfix --no-pager -n 80 || true
+          sudo ss -ltnp || true
+          sudo nft list ruleset | head -120 || true
+          sudo tail -20 /var/log/so/git-helper.log || true
 
   protected-paths:
     if: github.event_name == 'pull_request'

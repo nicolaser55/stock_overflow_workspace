@@ -317,10 +317,23 @@ for name_str in planner git; do
 done
 install -m 644 -o root -g root "$VM_DIR/systemd/so-proxy@.service" /etc/systemd/system/so-proxy@.service
 systemctl daemon-reload
+# wait_port <port> <unit>: the unit must be listening on 127.0.0.1:<port> within 15 s, or the setup stops with its log
+wait_port() {
+    local port_str="$1" unit_str="$2"
+    for _ in $(seq 1 30); do
+        ss -Hltn "sport = :$port_str" 2>/dev/null | grep -q "127.0.0.1:$port_str" && return 0
+        sleep 0.5
+    done
+    systemctl status "$unit_str" --no-pager -l 2>&1 | sed 's/^/      /' | head -20
+    journalctl -u "$unit_str" --no-pager -n 30 2>&1 | sed 's/^/      /'
+    die "$unit_str is not listening on 127.0.0.1:$port_str"
+}
 for name_str in planner git; do
     systemctl enable --quiet "so-proxy@$name_str.service"
     systemctl restart "so-proxy@$name_str.service"
 done
+wait_port 3129 so-proxy@planner.service
+wait_port 3130 so-proxy@git.service
 # Postfix: our own main.cf; the recipient list and the relay login are written here, never kept in the repository
 [ -f /etc/ssl/private/ssl-cert-snakeoil.key ] || make-ssl-cert generate-default-snakeoil
 if [ "$CI_MODE" -eq 1 ]; then relay_host=""; sasl_enable=no; tls_level=may
@@ -344,6 +357,7 @@ postmap /etc/postfix/sasl_passwd && chmod 600 /etc/postfix/sasl_passwd.db
 postfix check
 systemctl enable --quiet postfix.service
 systemctl restart postfix.service
+wait_port 25 postfix.service
 info "proxies so-proxy@planner (3129) and so-proxy@git (3130) running; postfix relay ${relay_host:-none (CI)} for $MAIL_TO"
 
 # -------------------------------------------------------------------------------------------------------------------
