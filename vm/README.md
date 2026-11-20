@@ -12,6 +12,7 @@ the judge hash (`so/runner/judge_identity.py` hashes protected `.py` files under
 | `nftables/so_egress.nft` | `/etc/nftables.d/so_egress.nft` | Outbound rules per account (table `inet so_egress`); reload, never restart |
 | `ssh/00-so-hardening.conf`, `ssh/99-so-agent.conf` | `/etc/ssh/sshd_config.d/` | Key-only sshd for nico and so_agent; so_agent may only forward to the VM's loopback (Cursor Remote-SSH) |
 | `proxy/*.conf`, `proxy/*.allow`, `systemd/so-proxy@.service` | `/etc/so/proxy/`, `/etc/systemd/system/` | tinyproxy allow-lists: planner (Anthropic hosts, 3129), git (GitHub, 3130) |
+| `apparmor/tinyproxy.local` | `/etc/apparmor.d/local/tinyproxy` | Lets Ubuntu's AppArmor profile for tinyproxy read the two proxies' config and allow-list files |
 | `postfix/main.cf` | `/etc/postfix/main.cf` | Local mail relay: loopback only, one recipient, relays to Gmail with the mailbot login |
 | `so_git_helper.py`, `sudoers/so-git-helper` | `/usr/local/lib/so/so-git-helper`, `/etc/sudoers.d/` | The agent's only way to GitHub: `so-git fetch-main`, `so-git push agent/<name>`, `so-git pr agent/<name> "<title>"` |
 | `claude/managed-settings.json` | `/etc/claude-code/managed-settings.json` | The planner's Claude Code: no shell, no web, no connectors, proxy, no updates |

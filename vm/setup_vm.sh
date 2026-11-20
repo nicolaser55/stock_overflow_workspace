@@ -316,6 +316,15 @@ for name_str in planner git; do
     install -m 644 -o root -g root "$VM_DIR/proxy/$name_str.allow" "/etc/so/proxy/$name_str.allow"
 done
 install -m 644 -o root -g root "$VM_DIR/systemd/so-proxy@.service" /etc/systemd/system/so-proxy@.service
+# Ubuntu's AppArmor profile for tinyproxy reads only /etc/tinyproxy/tinyproxy.conf: allow our two files, then reload it
+if [ -f /etc/apparmor.d/tinyproxy ]; then
+    install -d -m 755 /etc/apparmor.d/local
+    install -m 644 -o root -g root "$VM_DIR/apparmor/tinyproxy.local" /etc/apparmor.d/local/tinyproxy
+    if [ -d /sys/kernel/security/apparmor ] && command -v apparmor_parser >/dev/null; then
+        apparmor_parser -r /etc/apparmor.d/tinyproxy || die "AppArmor did not accept the tinyproxy profile with vm/apparmor/tinyproxy.local"
+    fi
+    info "AppArmor: tinyproxy may read /etc/so/proxy/*.conf and *.allow"
+fi
 systemctl daemon-reload
 # wait_port <port> <unit>: the unit must be listening on 127.0.0.1:<port> within 15 s, or the setup stops with its log
 wait_port() {
@@ -324,8 +333,9 @@ wait_port() {
         ss -Hltn "sport = :$port_str" 2>/dev/null | grep -q "127.0.0.1:$port_str" && return 0
         sleep 0.5
     done
-    systemctl status "$unit_str" --no-pager -l 2>&1 | sed 's/^/      /' | head -20
-    journalctl -u "$unit_str" --no-pager -n 30 2>&1 | sed 's/^/      /'
+    # (systemctl status exits non-zero for a failed unit; that must not end the script before the journal is shown)
+    { systemctl status "$unit_str" --no-pager -l 2>&1 || true; } | sed 's/^/      /' | head -20 || true
+    { journalctl -u "$unit_str" --no-pager -n 30 2>&1 || true; } | sed 's/^/      /' || true
     die "$unit_str is not listening on 127.0.0.1:$port_str"
 }
 for name_str in planner git; do
