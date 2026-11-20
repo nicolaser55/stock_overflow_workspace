@@ -463,23 +463,25 @@ as_user so_agent git -C "$AGENT_WS" remote set-url --push origin "$INBOX"
 as_user so_agent git -C "$AGENT_WS" config user.name "$AGENT_GIT_NAME"
 as_user so_agent git -C "$AGENT_WS" config user.email "$AGENT_GIT_EMAIL"
 as_user so_agent git -C "$AGENT_WS" config push.default current
-info "mirror main $main_commit; runner clone at $(git -C "$RUNNER_WS" rev-parse --short HEAD) (refs/deployed not set);" \
-     "agent clone at $(git -C "$AGENT_WS" rev-parse --short HEAD)"
+# (git refuses to read a clone owned by another account, root included, so ask as the owner)
+info "mirror main $main_commit; runner clone at $(as_user so_runner git -C "$RUNNER_WS" rev-parse --short HEAD) (refs/deployed not set);" \
+     "agent clone at $(as_user so_agent git -C "$AGENT_WS" rev-parse --short HEAD)"
 [ -s /etc/so/git/agent_token ] && info "agent token present" || info "agent token not installed yet (/etc/so/git/agent_token)"
 
 # -------------------------------------------------------------------------------------------------------------------
 step "11. Claude Code $CLAUDE_CODE_VERSION for so_planner"
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://downloads.claude.ai/keys/claude-code.asc -o /etc/apt/keyrings/claude-code.asc.new
-key_fpr="$(gpg --show-keys --with-colons /etc/apt/keyrings/claude-code.asc.new 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')"
+# (no early exit in awk: with pipefail, a writer cut off by SIGPIPE would end the script with code 141)
+key_fpr="$(gpg --show-keys --with-colons /etc/apt/keyrings/claude-code.asc.new 2>/dev/null | awk -F: '/^fpr:/ && !n++ {print $10}')"
 [ "$key_fpr" = "$CLAUDE_CODE_KEY_FINGERPRINT" ] || die "Claude Code signing key fingerprint $key_fpr, expected $CLAUDE_CODE_KEY_FINGERPRINT"
 mv /etc/apt/keyrings/claude-code.asc.new /etc/apt/keyrings/claude-code.asc && chmod 644 /etc/apt/keyrings/claude-code.asc
 echo "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/stable stable main" > /etc/apt/sources.list.d/claude-code.list
 apt-get update -qq
 installed_claude="$(dpkg-query -W -f='${Version}' claude-code 2>/dev/null || true)"
 case "$installed_claude" in "$CLAUDE_CODE_VERSION"|"$CLAUDE_CODE_VERSION"-*) ;; *)
-    apt_version="$(apt-cache madison claude-code | awk -v v="$CLAUDE_CODE_VERSION" '$3 == v || index($3, v"-") == 1 {print $3; exit}')"
-    [ -n "$apt_version" ] || die "claude-code $CLAUDE_CODE_VERSION is not in the repository; available: $(apt-cache madison claude-code | awk '{print $3}' | head -5 | paste -sd' ')"
+    apt_version="$(apt-cache madison claude-code | awk -v v="$CLAUDE_CODE_VERSION" '($3 == v || index($3, v"-") == 1) && !n++ {print $3}')"
+    [ -n "$apt_version" ] || die "claude-code $CLAUDE_CODE_VERSION is not in the repository; available: $(apt-cache madison claude-code | awk 'NR <= 5 {print $3}' | paste -sd' ')"
     apt-mark unhold claude-code >/dev/null 2>&1 || true
     apt-get install -y -qq --allow-downgrades "claude-code=$apt_version" >/dev/null ;;
 esac
@@ -495,7 +497,7 @@ for dir_str in /home/so_planner/.claude "$PLANNER_DIR/.claude"; do
             || { echo '{}' > "$dir_str/$file_str"; chown root:root "$dir_str/$file_str"; chmod 644 "$dir_str/$file_str"; }
     done
 done
-info "$(claude --version 2>/dev/null | head -1) (held); managed settings in /etc/claude-code/managed-settings.json"
+info "$(claude --version 2>/dev/null | awk 'NR == 1') (held); managed settings in /etc/claude-code/managed-settings.json"
 
 # -------------------------------------------------------------------------------------------------------------------
 step "12. needrestart, the runner service (not enabled), runner.env"
