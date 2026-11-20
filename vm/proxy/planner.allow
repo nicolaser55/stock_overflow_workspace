@@ -1,0 +1,6 @@
+# so_planner (Claude Code): the four hosts Claude Code needs for model traffic and sign-in (decided 2026-11-18).
+# One anchored POSIX basic regular expression per line, matched against the host name.
+^api\.anthropic\.com$
+^claude\.ai$
+^claude\.com$
+^platform\.claude\.com$

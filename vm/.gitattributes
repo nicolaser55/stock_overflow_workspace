@@ -1,0 +1,2 @@
+# Every file in vm/ is used on Linux; keep LF line endings even in clones with core.autocrlf true
+* text eol=lf

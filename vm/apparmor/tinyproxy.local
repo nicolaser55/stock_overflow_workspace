@@ -1,0 +1,5 @@
+# /etc/apparmor.d/local/tinyproxy (vm/apparmor/tinyproxy.local, 2026-11-19): Ubuntu's AppArmor profile for
+# /usr/bin/tinyproxy reads only /etc/tinyproxy/tinyproxy.conf; the two Stock Overflow proxies (so-proxy@planner,
+# so-proxy@git) also need their own config and allow-list files. Read only; the rest of the profile is unchanged.
+/etc/so/proxy/*.conf r,
+/etc/so/proxy/*.allow r,

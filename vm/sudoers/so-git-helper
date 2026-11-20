@@ -1,0 +1,3 @@
+# /etc/sudoers.d/so-git-helper (vm/sudoers/so-git-helper, 2026-11-19): so_agent may run the push helper as so_git,
+# and nothing else as anyone. The helper checks its own arguments (vm/so_git_helper.py).
+so_agent ALL=(so_git) NOPASSWD: /usr/local/lib/so/so-git-helper

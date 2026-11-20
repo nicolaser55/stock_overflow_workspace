@@ -1,0 +1,21 @@
+# /etc/systemd/system/so-proxy@.service (vm/systemd/so-proxy@.service, 2026-11-19)
+# One tinyproxy per allow-list: so-proxy@planner (127.0.0.1:3129), so-proxy@git (127.0.0.1:3130).
+[Unit]
+Description=Stock Overflow allow-list proxy (%i)
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tinyproxy
+Group=tinyproxy
+ExecStart=/usr/bin/tinyproxy -d -c /etc/so/proxy/%i.conf
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

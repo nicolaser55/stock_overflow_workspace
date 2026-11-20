@@ -94,6 +94,10 @@ tests/synthetic_data.py
 # CI and review rules
 .github/**
 
+# The Linux VM: setup script, access check, push helper, firewall, proxy, mail relay and planner settings
+# (step 3 of the Linux VM migration, 2026-11-19; requirements/venv_main_*_linux.txt are covered by requirements/**)
+vm/**
+
 # Environment
 requirements/**
 pyproject.toml

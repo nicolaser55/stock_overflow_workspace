@@ -1,0 +1,4 @@
+# so_git (the push helper): git over HTTPS and the pull-request API. Nothing else on GitHub.
+# One anchored POSIX basic regular expression per line, matched against the host name.
+^github\.com$
+^api\.github\.com$

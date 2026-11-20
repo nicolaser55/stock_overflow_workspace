@@ -1,0 +1,5 @@
+# /etc/apt/preferences.d/no-snapd.pref (vm/apt/no-snapd.pref, 2026-11-19): snapd and hwctl were removed from so-vm
+# (nothing here uses snaps; snap refreshes run as root outside the per-account rules). Never install them again.
+Package: snapd hwctl
+Pin: release *
+Pin-Priority: -1

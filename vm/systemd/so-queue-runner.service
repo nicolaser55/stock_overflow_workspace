@@ -1,0 +1,27 @@
+# /etc/systemd/system/so-queue-runner.service (vm/systemd/so-queue-runner.service, 2026-11-19)
+# The judge on the VM: scripts/run_queue.py watch as so_runner from the runner clone. Installed by vm/setup_vm.sh but
+# NOT enabled: the Windows runner stays the judge until the switch (design section 8). needrestart never restarts it
+# (/etc/needrestart/conf.d/so.conf), so a package update cannot cut a run.
+[Unit]
+Description=Stock Overflow queue runner (judge)
+After=network-online.target postfix.service nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=so_runner
+Group=so_runner
+WorkingDirectory=/srv/so/runner_workspace
+EnvironmentFile=/etc/so/runner.env
+ExecStart=/opt/so/venvs/main/bin/python -u scripts/run_queue.py watch
+Restart=always
+RestartSec=30
+UMask=0027
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+KillMode=control-group
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
