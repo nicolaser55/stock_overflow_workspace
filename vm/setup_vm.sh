@@ -115,15 +115,23 @@ if [ "$CI_MODE" -eq 1 ]; then
     info "skipped in CI"
 else
     if dpkg-query -W -f='${Status}' snapd 2>/dev/null | grep -q "install ok installed"; then
-        # Stop unless the only packages that need snapd are hwctl and the server metapackages
-        other_list="$(apt-cache rdepends --installed snapd 2>/dev/null | sed '1,2d' | sed 's/^[ |]*//' | sort -u \
-            | grep -vxE 'snapd|hwctl|ubuntu-server|ubuntu-server-minimal' || true)"
-        [ -z "$other_list" ] || die "these installed packages need snapd: $other_list (send this output to Claude)"
+        # Ask apt what a purge would really remove (rdepends also lists Breaks and Suggests, e.g. apparmor's
+        # "Breaks: snapd (<< ...)", which are no dependency). Stop unless it is only snapd, hwctl and the server
+        # metapackages.
+        purge_list="snapd"
+        dpkg-query -W -f='${Status}' hwctl 2>/dev/null | grep -q "install ok installed" && purge_list="snapd hwctl"
+        # shellcheck disable=SC2086
+        simulated_str="$(apt-get -s purge $purge_list 2>&1)" || die "apt-get -s purge $purge_list failed: $simulated_str"
+        removed_list="$(printf '%s\n' "$simulated_str" | awk '$1 == "Purg" || $1 == "Remv" {print $2}' | sort -u)"
+        other_list="$(printf '%s\n' "$removed_list" | grep -vxE 'snapd|hwctl|ubuntu-server|ubuntu-server-minimal|' || true)"
+        [ -z "$other_list" ] || die "removing snapd would also remove: $(echo $other_list) (send this output to Claude)"
+        info "apt would remove: $(echo $removed_list)"
         info "installed snaps:"; snap list 2>/dev/null | sed 's/^/      /' || true
         for snap_str in $(snap list 2>/dev/null | awk 'NR>1 {print $1}' | grep -vxE 'snapd|core[0-9]*|bare' || true); do
             snap remove --purge "$snap_str" || true
         done
-        apt-get purge -y -qq snapd hwctl >/dev/null 2>&1 || apt-get purge -y -qq snapd >/dev/null
+        # shellcheck disable=SC2086
+        apt-get purge -y -qq $purge_list >/dev/null
         rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd
     fi
     install -m 644 -o root -g root "$VM_DIR/apt/no-snapd.pref" /etc/apt/preferences.d/no-snapd.pref
