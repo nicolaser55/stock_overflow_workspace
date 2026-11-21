@@ -9,7 +9,8 @@
 #                     started once, the access check as so_agent and as so_runner (.github/ci/windows_setup_check.ps1)
 #   linux-setup       vm/setup_vm.sh twice on a throwaway Ubuntu 26.04 machine (it must be idempotent), each run ending
 #                     with vm/check_vm_access.sh (every account tries every path, port and host), then real SSH logins
-#                     and forwards as so_agent (step 3 of the Linux VM migration, 2026-11-19; not a required check yet)
+#                     and forwards as so_agent (step 3 of the Linux VM migration, 2026-11-19; not a required check yet),
+#                     then a data copy as in step 4 (vm/set_data_permissions.sh, vm/data_manifest.py; 2026-11-21)
 name: ci
 
 on:
@@ -118,6 +119,54 @@ jobs:
           check "${code:-000}" 000 "a dynamic forward cannot reach the internet"
           kill "$pid" 2>/dev/null
           exit $fail
+      - name: A data copy as in step 4 (tar as nico, permissions, manifests, access check)
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/src"; mkdir -p "$src/holdout"
+          # A Windows-like archive: folders 0777, files 0666, libarchive's creationtime keyword (bsdtar writes it)
+          python3 - "$src/data.tar" "$src/quarantine.tar" <<'PY'
+          import io, sys, tarfile
+          def build(out_str, name_list):
+              with tarfile.open(out_str, "w", format=tarfile.PAX_FORMAT) as tar:
+                  seen = set()
+                  for name_str in name_list:
+                      part_list = name_str.split("/")
+                      for i in range(1, len(part_list) + (1 if name_str.endswith("/") else 0)):
+                          dir_str = "/".join(part_list[:i])
+                          if dir_str and dir_str not in seen:
+                              seen.add(dir_str)
+                              info = tarfile.TarInfo(dir_str); info.type = tarfile.DIRTYPE; info.mode = 0o777
+                              info.pax_headers = {"LIBARCHIVE.creationtime": "1700000000"}; tar.addfile(info)
+                      if not name_str.endswith("/"):
+                          data = name_str.encode(); info = tarfile.TarInfo(name_str); info.size = len(data); info.mode = 0o666
+                          info.pax_headers = {"LIBARCHIVE.creationtime": "1700000000"}; tar.addfile(info, io.BytesIO(data))
+          build(sys.argv[1], ["data/store01_rawzone/ibkr_spy_1min/a.parquet", "data/store02_workzone/step01/b.parquet",
+                              "data/store03_goldzone/step05/c.parquet", "data/store04_experiments/trial_log.csv",
+                              "data/store04_experiments/exp02_stop_reentry/step03/d.parquet",
+                              "data/store04_experiments/judge/v_reference.json", "data/store04_experiments/visible/state.json",
+                              "data/store04_experiments/visible/grades/g.json", "data/store04_experiments/visible/status/s.json",
+                              "data/store04_experiments/queue/logs/runner_watch.log", "data/store04_experiments/runs/r1/report.json",
+                              "data/control/STOP", "data/an_empty_folder/"])
+          build(sys.argv[2], ["quarantine/store01_rawzone/ibkr_spy_1min/z.parquet"])
+          PY
+          for tree in data quarantine; do
+            sudo tar -xf "$src/$tree.tar" -C "$src" --warning=no-unknown-keyword
+            sudo runuser -u nico -- tar -xf - -C /srv/so --no-overwrite-dir --no-same-owner --no-same-permissions \
+              --warning=no-unknown-keyword < "$src/$tree.tar"
+          done
+          # The worst case too: the archive's modes applied (store04 becomes 0777); the permission step must repair it
+          sudo runuser -u nico -- tar -xpf - -C /srv/so --warning=no-unknown-keyword < "$src/data.tar"
+          sudo bash vm/set_data_permissions.sh --ci
+          sudo python3 -I vm/data_manifest.py make "$src" data quarantine holdout --out "$RUNNER_TEMP/m_src.txt"
+          sudo python3 -I vm/data_manifest.py make /srv/so data quarantine holdout --out "$RUNNER_TEMP/m_vm.txt"
+          python3 -I vm/data_manifest.py compare "$RUNNER_TEMP/m_src.txt" "$RUNNER_TEMP/m_vm.txt"
+          sudo bash vm/check_vm_access.sh --ci --mail-to ci@example.invalid --agent-key "$RUNNER_TEMP/agent_key.pub" | tail -3
+          # A changed byte must be found
+          echo x | sudo tee -a /srv/so/data/control/STOP >/dev/null
+          sudo python3 -I vm/data_manifest.py make /srv/so data quarantine holdout --out "$RUNNER_TEMP/m_vm2.txt"
+          if python3 -I vm/data_manifest.py compare "$RUNNER_TEMP/m_src.txt" "$RUNNER_TEMP/m_vm2.txt"; then
+            echo "FAIL  compare did not find the changed file"; exit 1
+          fi
       - name: On failure, the logs of the services the setup started
         if: failure()
         run: |

@@ -16,7 +16,8 @@
 #    4. Accounts: so_runner, so_agent, so_planner (login shells, no password), so_git (system, no shell); groups
 #       so_data (nico, so_runner), so_grade_readers (so_planner), so_status_readers (so_agent), so_git_readers
 #       (nico, so_runner, so_agent), so_inbox (so_agent, so_git). so_agent is in no grades group (decided 2026-11-19). umask 027 for all of them.
-#    5. Folders, owners, modes and ACLs (design section 3, with the decisions of 2026-11-19).
+#    5. Folders, owners, modes and ACLs (design section 3, with the decisions of 2026-11-19); the data folders from
+#       vm/data_acl.conf, applied to everything below them too (vm/data_acl.sh, 2026-11-21).
 #    6. sshd: AllowUsers nico so_agent, the so_agent Match block, so_agent's key.
 #    7. Python: uv (pinned, hash-checked) installs CPython 3.12.0 into /opt/so/python; the venv /opt/so/venvs/main gets
 #       requirements/venv_main_hashes_linux.txt with --require-hashes --no-deps.
@@ -192,42 +193,16 @@ set_acl() {
     [ -z "$access_str" ] || setfacl -m "$access_str" "$path_str"
     [ -z "$default_str" ] || setfacl -d -m "$default_str" "$path_str"
 }
-# apply_to_files <path> <access entries for files>: existing files below (empty now; used again after the data copy)
-apply_to_files() {
-    find "$1" -mindepth 1 -type f -exec setfacl -m "$2" {} + 2>/dev/null || true
-}
 install -d -m 755 -o root -g root /srv/so /srv/so/git /opt/so /opt/so/venvs /etc/so /var/log/so
 
-# The data root: nico and the runner read; so_agent and so_planner may only pass through to their grants
-set_acl $DATA nico:so_data 2750 "g:so_data:r-x,u:so_agent:--x,u:so_planner:--x" "u::rwx,g::r-x,g:so_data:r-x,o::---"
-for zone_str in store01_rawzone store02_workzone store03_goldzone; do
-    set_acl "$DATA/$zone_str" nico:so_data 2750 "g:so_data:r-x" "u::rwx,g::r-x,g:so_data:r-x,o::---"
-    apply_to_files "$DATA/$zone_str" "g:so_data:r--"
-done
-# The experiment zone: nico and the runner read and write (as the Windows runner modifies store04 only)
-set_acl $ZONE4 nico:so_data 2770 "g:so_data:rwx,u:so_agent:--x,u:so_planner:--x" "u::rwx,g::rwx,g:so_data:rwx,o::---"
-# judge/ (V reference, reset marker): written only by Nicolas's freeze_v_reference.py and reset_records.py
-set_acl $ZONE4/judge nico:so_data 2750 "g:so_data:r-x" "u::rwx,g::r-x,g:so_data:r-x,o::---"
-apply_to_files $ZONE4/judge "g:so_data:r--"
-# The queue: nico queues, the runner runs; nobody else (so_agent has no access to queue/pending, decided 2026-11-18)
-for sub_str in queue queue/pending queue/running queue/rejected queue/done queue/failed queue/outbox queue/logs runs; do
-    set_acl "$ZONE4/$sub_str" nico:so_data 2770 "g:so_data:rwx" "u::rwx,g::rwx,g:so_data:rwx,o::---"
-done
-# visible/ (state.json): both reader groups; grades/ only the planner's group; status/ only the coder's group
-set_acl $ZONE4/visible nico:so_data 2770 "g:so_data:rwx,g:so_grade_readers:r-x,g:so_status_readers:r-x" \
-    "u::rwx,g::rwx,g:so_data:rwx,g:so_grade_readers:r--,g:so_status_readers:r--,o::---"
-set_acl $ZONE4/visible/grades nico:so_data 2770 "g:so_data:rwx,g:so_grade_readers:r-x" \
-    "u::rwx,g::rwx,g:so_data:rwx,g:so_grade_readers:r--,o::---"
-set_acl $ZONE4/visible/status nico:so_data 2770 "g:so_data:rwx,g:so_status_readers:r-x" \
-    "u::rwx,g::rwx,g:so_data:rwx,g:so_status_readers:r--,o::---"
-apply_to_files $ZONE4/visible/grades "g:so_grade_readers:r--"
-apply_to_files $ZONE4/visible/status "g:so_status_readers:r--"
-# control/ (STOP): written by nico only; read by the runner, the coder and the planner
-set_acl $DATA/control nico:so_data 2750 "g:so_data:r-x,u:so_agent:r-x,u:so_planner:r-x" \
-    "u::rwx,g::r-x,g:so_data:r--,u:so_agent:r--,u:so_planner:r--,o::---"
-# Quarantine and holdout: nico only
-set_acl /srv/so/quarantine nico:nico 700 "" ""
-set_acl /srv/so/holdout nico:nico 700 "" ""
+# The data folders (data root, zones, judge, queue, visible, control, quarantine, holdout) and everything below them:
+# vm/data_acl.conf, applied by vm/data_acl.sh (the same code vm/set_data_permissions.sh runs after a data copy)
+# shellcheck source=vm/data_acl.sh
+. "$VM_DIR/data_acl.sh"
+so_data_acl_apply || die "data folder permissions not set (see above)"
+acl_check_str="$(python3 -I "$VM_DIR/check_data_permissions.py")" \
+    || { printf '%s\n' "$acl_check_str"; die "data folder permissions differ from vm/data_acl.conf"; }
+info "data folders: ${acl_check_str##*$'\n'}"
 # The runner's clone: the runner's own; nico reads
 set_acl $RUNNER_WS so_runner:so_runner 750 "u:nico:r-x" "u::rwx,g::r-x,u:nico:r-x,o::---"
 # The agent: its home and clone are its own; nico passes through and reads the clone
