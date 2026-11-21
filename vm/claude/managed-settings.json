@@ -5,7 +5,6 @@
       "Read(//home/so_planner/planner/plans/**)",
       "Read(//srv/so/data/store04_experiments/visible/grades/**)",
       "Read(//srv/so/data/store04_experiments/visible/state.json)",
-      "Write(//home/so_planner/planner/plans/**)",
       "Edit(//home/so_planner/planner/plans/**)"
     ],
     "deny": [
@@ -15,11 +14,8 @@
       "WebSearch",
       "WebFetch",
       "NotebookEdit",
-      "Write(//home/so_planner/.claude/**)",
       "Edit(//home/so_planner/.claude/**)",
-      "Write(//home/so_planner/planner/.claude/**)",
       "Edit(//home/so_planner/planner/.claude/**)",
-      "Write(//home/so_planner/planner/brief/**)",
       "Edit(//home/so_planner/planner/brief/**)"
     ],
     "disableBypassPermissionsMode": "disable",

@@ -101,7 +101,22 @@ https() {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
-section "Probe files (removed at the end)"
+section "Probe files (removed at the end, also when the check is interrupted)"
+# The folders that get a probe; the trap removes probes (and the write-test files) from all of them on any exit
+PROBE_DIR_LIST=($DATA $DATA/store01_rawzone $DATA/store02_workzone $DATA/store03_goldzone $ZONE4 $ZONE4/judge
+    $ZONE4/queue/pending $ZONE4/runs $ZONE4/visible $ZONE4/visible/grades $ZONE4/visible/status $DATA/control
+    /srv/so/quarantine /srv/so/holdout $PLANNER_DIR/brief $PLANNER_DIR/plans /home/nico)
+tmp_clone=""
+cleanup_probes() {
+    local dir_str
+    for dir_str in "${PROBE_DIR_LIST[@]}"; do
+        [ -d "$dir_str" ] && find "$dir_str" -maxdepth 1 -type f \( -name "$PROBE" -o -name '.so_access_write.*' \) -delete 2>/dev/null
+    done
+    case "$tmp_clone" in /home/so_agent/.so_access_clone.*) rm -rf -- "$tmp_clone" ;; esac
+    return 0
+}
+trap cleanup_probes EXIT
+trap 'echo "interrupted: probes removed" >&2; exit 130' INT TERM HUP
 probe_dir_list=()
 add_probe() { make_probe "$1" "$2" && probe_dir_list+=("$2"); }
 add_probe nico $DATA
@@ -210,6 +225,14 @@ autocrlf_str="$(as_user so_runner git -C $RUNNER_WS config core.autocrlf || true
 [ "$autocrlf_str" = "true" ] && ok "runner clone core.autocrlf true" || fail "runner clone core.autocrlf is '${autocrlf_str}', expected true"
 [ -z "$(git config --system core.autocrlf || true)" ] && ok "no system-wide core.autocrlf" || fail "/etc/gitconfig sets core.autocrlf"
 [ "$(as_user so_agent git -C $AGENT_WS remote get-url --push origin)" = "$INBOX" ] && ok "agent clone pushes to the inbox" || fail "agent clone push URL is not the inbox"
+# The agent clone's origin/main (open item 1, 2026-11-21): it exists and is the mirror's main or an older commit of it
+agent_main_str="$(as_user so_agent git -C $AGENT_WS rev-parse --verify -q refs/remotes/origin/main 2>/dev/null || true)"
+mirror_main_str="$(as_user so_git git --git-dir=$MIRROR rev-parse --verify -q refs/heads/main 2>/dev/null || true)"
+if [ -z "$agent_main_str" ]; then fail "agent clone has no origin/main"
+elif [ "$agent_main_str" = "$mirror_main_str" ]; then ok "agent clone origin/main = mirror main (${agent_main_str:0:7})"
+elif as_user so_git git --git-dir=$MIRROR merge-base --is-ancestor "$agent_main_str" refs/heads/main 2>/dev/null; then
+    ok "agent clone origin/main ${agent_main_str:0:7} is behind the mirror's main ${mirror_main_str:0:7} (the agent fetches with git fetch)"
+else fail "agent clone origin/main ${agent_main_str:0:7} is not on the mirror's main ${mirror_main_str:0:7}"; fi
 sudo_list_str="$(runuser -u so_agent -- sudo -n -l 2>&1 || true)"
 if printf '%s' "$sudo_list_str" | grep -q "/usr/local/lib/so/so-git-helper" && ! printf '%s' "$sudo_list_str" | grep -qE '\(ALL|\(root|NOPASSWD: ALL'; then
     ok "so_agent sudo: only the push helper as so_git"
@@ -229,7 +252,7 @@ done
 helper delete agent/x >/dev/null 2>&1; [ $? -eq 3 ] && ok "helper has no delete command" || fail "helper accepted a delete command"
 # A branch that touches a protected file is refused; a clean one gets as far as the token
 test_branch="agent/so-access-check-$$"
-tmp_clone="$(as_user so_agent mktemp -d /home/so_agent/.so_access_clone.XXXXXX)"
+tmp_clone="$(as_user so_agent mktemp -d /home/so_agent/.so_access_clone.XXXXXX)"   # removed by cleanup_probes too
 if as_user so_agent git clone --quiet "$MIRROR" "$tmp_clone/c" 2>/dev/null; then
     as_user so_agent sh -c 'cd "$1/c" && git checkout --quiet -b "$2" && echo "x" >> protected_paths.txt \
         && git -c user.name=check -c user.email=check@localhost commit --quiet -am "access check: protected change" \
@@ -429,6 +452,6 @@ if [ "$CI_MODE" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------------------------------
-for dir_str in "${probe_dir_list[@]}"; do find "$dir_str" -maxdepth 1 -type f -name .so_access_probe -delete; done
+cleanup_probes
 printf '\n%d OK, %d FAIL\n' "$ok_count" "$fail_count"
 [ "$fail_count" -eq 0 ]

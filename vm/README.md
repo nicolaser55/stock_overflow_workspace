@@ -8,6 +8,11 @@ the judge hash (`so/runner/judge_identity.py` hashes protected `.py` files under
 |---|---|---|
 | `setup_vm.sh` | (run from a clone) | Idempotent setup: accounts, folders and ACLs, sshd, Python, proxies, mail relay, egress rules, git, Claude Code, runner service. Ends with the check |
 | `check_vm_access.sh` | (run from a clone) | Every account tries every path, port and host; exits 1 on any FAIL |
+| `data_acl.conf`, `data_acl.sh` | (sourced) | Owners, modes and ACLs of the data folders and of everything below them; one table for the setup, the permission step and its check |
+| `set_data_permissions.sh` | (run from a clone) | After a data copy (step 4, and the store04 copy at the switch): applies `data_acl.conf` to every item, checks it, tries the accounts' access |
+| `check_data_permissions.py` | (run from a clone) | Owner, group, mode bits and ACL of every item under the data folders against `data_acl.conf` (metadata only) |
+| `data_manifest.py` | (run from a clone, Windows and VM) | SHA-256 manifests of the data trees (`scan`, `make`, `compare`), standard library only |
+| `check_hashes.py` | (run from a clone, Windows and VM) | Step 5: judge hash, design folder and helper hashes against the trial log and `registered_versions.csv`, reset marker; same output on both systems |
 | `versions.env` | | Pinned versions and hashes: uv, CPython 3.12.0, Claude Code, the agent's git identity |
 | `nftables/so_egress.nft` | `/etc/nftables.d/so_egress.nft` | Outbound rules per account (table `inet so_egress`); reload, never restart |
 | `ssh/00-so-hardening.conf`, `ssh/99-so-agent.conf` | `/etc/ssh/sshd_config.d/` | Key-only sshd for nico and so_agent; so_agent may only forward to the VM's loopback (Cursor Remote-SSH) |
@@ -25,4 +30,5 @@ Accounts: `so_runner` (the judge; design code runs as its child), `so_agent` (Cu
 `requirements/venv_main_lock_linux.txt` (what must be installed) and `requirements/venv_main_hashes_linux.txt` (the
 same versions with hashes, used for the install).
 
-The install and test steps are in the project runbook `claude/RUNBOOK_2026-11-19_step3_setup_vm.md`.
+The install and test steps are in the project runbooks `claude/RUNBOOK_2026-11-19_step3_setup_vm.md` (setup) and
+`claude/RUNBOOK_2026-11-21_step4_5_data_copy.md` (data copy, manifests, hash checks).
