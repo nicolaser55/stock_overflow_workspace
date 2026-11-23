@@ -10,7 +10,8 @@
 #   linux-setup       vm/setup_vm.sh twice on a throwaway Ubuntu 26.04 machine (it must be idempotent), each run ending
 #                     with vm/check_vm_access.sh (every account tries every path, port and host), then real SSH logins
 #                     and forwards as so_agent (step 3 of the Linux VM migration, 2026-11-19; not a required check yet),
-#                     then a data copy as in step 4 (vm/set_data_permissions.sh, vm/data_manifest.py; 2026-11-21)
+#                     then a data copy as in step 4 (vm/set_data_permissions.sh, vm/data_manifest.py; 2026-11-21),
+#                     and the host status feed: so_host's forced command over a real SSH login (2026-11-23)
 name: ci
 
 on:
@@ -87,14 +88,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: The account the VM already has (nico) and a throwaway key for so_agent
+      - name: The account the VM already has (nico) and throwaway keys for so_agent and so_host
         run: |
           sudo useradd --create-home --shell /bin/bash nico
           ssh-keygen -q -t ed25519 -N '' -C ci_so_agent -f "$RUNNER_TEMP/agent_key"
+          ssh-keygen -q -t ed25519 -N '' -C ci_so_host -f "$RUNNER_TEMP/status_key"
       - name: vm/setup_vm.sh, first run (ends with vm/check_vm_access.sh)
-        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid
-      - name: vm/setup_vm.sh, second run (nothing may break when it runs again)
-        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid
+        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid --status-key "$RUNNER_TEMP/status_key.pub" --status-from 127.0.0.1
+      - name: vm/setup_vm.sh, second run (nothing may break when it runs again; the status key is kept without --status-key)
+        run: sudo bash vm/setup_vm.sh --ci --agent-key "$RUNNER_TEMP/agent_key.pub" --mail-to ci@example.invalid --status-from 127.0.0.1
       - name: Real SSH logins and forwards as so_agent
         run: |
           set +e -uo pipefail
@@ -118,6 +120,23 @@ jobs:
           code="$(curl -s -o /dev/null -m 8 -w '%{http_code}' --socks5-hostname 127.0.0.1:18024 https://example.com/ 2>/dev/null)"
           check "${code:-000}" 000 "a dynamic forward cannot reach the internet"
           kill "$pid" 2>/dev/null
+          # so_host (2026-11-23): its key only runs the receiver; nothing else, from no other account
+          hopts=(-F /dev/null -i "$RUNNER_TEMP/status_key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10
+                 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+          k1='SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired'
+          k2='SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'
+          good='{"schema":"so-host-status/1","host":"ci","written_utc":"2026-01-01T00:00:00Z","restart_pending":{"'"$k1"'":true,"'"$k2"'":false},"pause":{"PauseUpdatesExpiryTime":null,"PauseFeatureUpdatesEndTime":null,"PauseQualityUpdatesEndTime":null},"errors":[]}'
+          out="$(printf '%s' "$good" | ssh "${hopts[@]}" so_host@127.0.0.1)"
+          check "${out%% *}" ok "so_host's key delivers a status object"
+          check "$(sudo stat -c '%U:%G %a' /srv/so/data/control/host_status/host_status.json)" "so_host:so_data 640" "the status file is so_host's, mode 0640"
+          check "$(sudo runuser -u so_runner -- python3 -I -c 'import json; print(json.load(open("/srv/so/data/control/host_status/host_status.json"))["host"])')" ci "so_runner reads the status file"
+          out="$(ssh "${hopts[@]}" so_host@127.0.0.1 'cat /etc/passwd' </dev/null)"
+          check "${out%%:*}" refused "a command asked by the client is ignored (the receiver runs and refuses empty input)"
+          timeout 15 ssh "${hopts[@]}" -o ExitOnForwardFailure=yes -N -L 127.0.0.1:18025:127.0.0.1:22 so_host@127.0.0.1 2>/dev/null
+          check $? 255 "so_host cannot forward"
+          ssh "${hopts[@]}" so_agent@127.0.0.1 true 2>/dev/null; check $? 255 "the status key does not log in as so_agent"
+          ssh "${hopts[@]}" nico@127.0.0.1 true 2>/dev/null; check $? 255 "the status key does not log in as nico"
+          ssh "${opts[@]}" so_host@127.0.0.1 true </dev/null 2>/dev/null; check $? 255 "so_agent's key does not log in as so_host"
           exit $fail
       - name: A data copy as in step 4 (tar as nico, permissions, manifests, access check)
         run: |
@@ -160,7 +179,7 @@ jobs:
           sudo python3 -I vm/data_manifest.py make "$src" data quarantine holdout --out "$RUNNER_TEMP/m_src.txt"
           sudo python3 -I vm/data_manifest.py make /srv/so data quarantine holdout --out "$RUNNER_TEMP/m_vm.txt"
           python3 -I vm/data_manifest.py compare "$RUNNER_TEMP/m_src.txt" "$RUNNER_TEMP/m_vm.txt"
-          sudo bash vm/check_vm_access.sh --ci --mail-to ci@example.invalid --agent-key "$RUNNER_TEMP/agent_key.pub" | tail -3
+          sudo bash vm/check_vm_access.sh --ci --mail-to ci@example.invalid --agent-key "$RUNNER_TEMP/agent_key.pub" --status-from 127.0.0.1 | tail -3
           # A changed byte must be found
           echo x | sudo tee -a /srv/so/data/control/STOP >/dev/null
           sudo python3 -I vm/data_manifest.py make /srv/so data quarantine holdout --out "$RUNNER_TEMP/m_vm2.txt"

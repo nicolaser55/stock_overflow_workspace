@@ -15,7 +15,8 @@ the judge hash (`so/runner/judge_identity.py` hashes protected `.py` files under
 | `check_hashes.py` | (run from a clone, Windows and VM) | Step 5: judge hash, design folder and helper hashes against the trial log and `registered_versions.csv`, reset marker; same output on both systems |
 | `versions.env` | | Pinned versions and hashes: uv, CPython 3.12.0, Claude Code, the agent's git identity |
 | `nftables/so_egress.nft` | `/etc/nftables.d/so_egress.nft` | Outbound rules per account (table `inet so_egress`); reload, never restart |
-| `ssh/00-so-hardening.conf`, `ssh/99-so-agent.conf` | `/etc/ssh/sshd_config.d/` | Key-only sshd for nico and so_agent; so_agent may only forward to the VM's loopback (Cursor Remote-SSH) |
+| `ssh/00-so-hardening.conf`, `ssh/99-so-agent.conf` | `/etc/ssh/sshd_config.d/` | Key-only sshd for nico, so_agent and so_host; so_agent may only forward to the VM's loopback (Cursor Remote-SSH) |
+| `ssh/98-so-host.conf`, `host_status_receive.py` | `/etc/ssh/sshd_config.d/`, `/usr/local/lib/so/so-host-status` | The host status feed (2026-11-23): so_host's key (`/etc/so/ssh/so_host_authorized_keys`, root-owned, `from=` nicodesktop, `restrict`) may only run the receiver, which checks one JSON object and writes `/srv/so/data/control/host_status/host_status.json` for the update guard |
 | `proxy/*.conf`, `proxy/*.allow`, `systemd/so-proxy@.service` | `/etc/so/proxy/`, `/etc/systemd/system/` | tinyproxy allow-lists: planner (Anthropic hosts, 3129), git (GitHub, 3130) |
 | `apparmor/tinyproxy.local` | `/etc/apparmor.d/local/tinyproxy` | Lets Ubuntu's AppArmor profile for tinyproxy read the two proxies' config and allow-list files |
 | `postfix/main.cf` | `/etc/postfix/main.cf` | Local mail relay: loopback only, one recipient, relays to Gmail with the mailbot login |
@@ -26,9 +27,21 @@ the judge hash (`so/runner/judge_identity.py` hashes protected `.py` files under
 | `needrestart/so.conf`, `apt/no-snapd.pref` | `/etc/needrestart/conf.d/`, `/etc/apt/preferences.d/` | Never auto-restart the runner; snapd and hwctl stay removed |
 
 Accounts: `so_runner` (the judge; design code runs as its child), `so_agent` (Cursor coder, SSH key only),
-`so_planner` (Claude Code, `sudo -iu so_planner`), `so_git` (push helper, no login). Python packages:
+`so_planner` (Claude Code, `sudo -iu so_planner`), `so_git` (push helper, no login), `so_host` (system; receives the
+host's Windows Update facts from nicodesktop's task "SO VM status", `stock_overflow_infra/vm_status/`; no network, no
+data access except writing `control/host_status/`). Python packages:
 `requirements/venv_main_lock_linux.txt` (what must be installed) and `requirements/venv_main_hashes_linux.txt` (the
 same versions with hashes, used for the install).
 
 The install and test steps are in the project runbooks `claude/RUNBOOK_2026-11-19_step3_setup_vm.md` (setup) and
 `claude/RUNBOOK_2026-11-21_step4_5_data_copy.md` (data copy, manifests, hash checks).
+
+## Notes
+
+- **Host status feed.** The writer is nicodesktop's scheduled task "SO VM status" (SYSTEM, every 5 minutes; in the
+  infra repository, `vm_status/`). The file `control/host_status/host_status.json` exists only on the VM: a manifest
+  comparison with Windows must leave `control/host_status` out. The update guard on Linux (judge PR) reads it and fails
+  closed when it is missing, malformed or older than 15 minutes by the VM's own clock (`received_utc`).
+- **Postfix warning (accepted, 2026-11-23).** At a start, Postfix copies `/etc/resolv.conf` into its chroot and then
+  warns "not owned by root: /var/spool/postfix/etc/resolv.conf" (the copy keeps the owner of systemd-resolved's stub).
+  Harmless: the file is only read, the relay works (test mail of 2026-11-21). Left as it is.

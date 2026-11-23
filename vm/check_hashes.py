@@ -62,10 +62,13 @@ def main():
     from so.runner.preregistration import (check_reset_marker_dict, get_design_helper_dict, get_logged_helper_dict,
                                            get_logged_version_dict, get_merged_set_dict, get_registered_version_tuple,
                                            get_registered_versions_path_str)
+    # The clone belongs to so_runner and nico runs this: git refuses another account's clone ("dubious ownership") unless
+    # it is named as safe, here for this one command only (2026-11-23, step-5 bug 3; forward slashes, as git prints it)
+    git_list = ["git", "-c", f"safe.directory={workspace_str.replace(os.sep, '/')}", "-C", workspace_str]
     try:
-        commit_str = subprocess.run(["git", "-C", workspace_str, "log", "--oneline", "-1"], check=True,
+        commit_str = subprocess.run(git_list + ["log", "--oneline", "-1"], check=True,
                                     stdout=subprocess.PIPE, text=True).stdout.strip()
-        status_str = subprocess.run(["git", "-C", workspace_str, "status", "--porcelain"], check=True,
+        status_str = subprocess.run(git_list + ["status", "--porcelain"], check=True,
                                     stdout=subprocess.PIPE, text=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as error:
         commit_str, status_str = f"unknown ({type(error).__name__})", "unknown"
