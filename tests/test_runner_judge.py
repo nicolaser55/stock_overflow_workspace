@@ -45,7 +45,9 @@ def write_bytes(root_str_in, rel_str_in, content_bytes_in):
 def test_workspace_judge():
     file_list = get_judge_file_list()
     for rel_str in ["so/runner/verdict.py", "so/runner/run.py", "so/runner/judge_identity.py", "so/core/multiple_testing.py",
-                    "so/core/trial_log.py", "scripts/run_queue.py", "scripts/run_development.py"]:
+                    "so/core/trial_log.py", "scripts/run_queue.py", "scripts/run_development.py",
+                    "requirements/venv_main_lock.txt", "requirements/venv_main_lock_linux.txt",
+                    "requirements/venv_main_hashes_linux.txt"]:
         assert rel_str in file_list, rel_str
     for rel_str in ["so/features/rule_design.py", "tests/test_runner_judge.py"]:
         assert rel_str not in file_list, rel_str
@@ -118,10 +120,23 @@ def test_judge_extras():
         legacy_str = get_judge_hash_dict(root_str)["judge_hash"]
         assert legacy_str != disk_dict["judge_hash"]
         write_bytes(root_str, "requirements/venv_main_lock.txt", b"numpy==2.1.4\n")
-        assert get_judge_hash_dict(root_str)["judge_hash"] not in (legacy_str, disk_dict["judge_hash"])
+        lock_str = get_judge_hash_dict(root_str)["judge_hash"]
+        assert lock_str not in (legacy_str, disk_dict["judge_hash"])
+        # THE LINUX LOCK AND ITS HASH FILE (JUDGE PR FOR so-vm, 2026-11-23): BOTH IN THE JUDGE, EACH CHANGES THE HASH
+        write_bytes(root_str, "requirements/venv_main_lock_linux.txt", b"numpy==2.1.4\n")
+        linux_str = get_judge_hash_dict(root_str)["judge_hash"]
+        assert linux_str != lock_str
+        write_bytes(root_str, "requirements/venv_main_hashes_linux.txt", b"numpy==2.1.4 --hash=sha256:aa\n")
+        hashes_str = get_judge_hash_dict(root_str)["judge_hash"]
+        assert hashes_str != linux_str
+        write_bytes(root_str, "requirements/venv_main_hashes_linux.txt", b"numpy==2.1.4 --hash=sha256:bb\n")
+        assert get_judge_hash_dict(root_str)["judge_hash"] not in (hashes_str, linux_str)
+        assert get_judge_file_list(root_str) == ["records/legacy/old.csv", "requirements/venv_main_hashes_linux.txt",
+                                                 "requirements/venv_main_lock.txt", "requirements/venv_main_lock_linux.txt",
+                                                 "so/runner/verdict.py"], get_judge_file_list(root_str)
     finally:
         shutil.rmtree(root_str, ignore_errors=True)
-    passed("judge includes records/legacy/*.csv and the package lock, not other records or requirement files")
+    passed("judge includes records/legacy/*.csv, both package locks and the Linux hash file, not other records or requirement files")
 
 
 if __name__ == "__main__":

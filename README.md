@@ -39,6 +39,8 @@ python setup_venv.py --name venv-main --requirements venv_main_requirements.txt 
 
 `requirements/venv_main_lock.txt` is `pip freeze` of that venv. A development run refuses to start when an installed
 version differs from the lock (`scripts/check_environment.py`). Only Nicolas changes packages, then writes a new lock.
+On Linux (so-vm) the lock is `requirements/venv_main_lock_linux.txt`, installed with the hashes in
+`requirements/venv_main_hashes_linux.txt` (`vm/setup_vm.sh`); all three files are part of the judge hash.
 
 Environment variables: `SO_DATA_PATH` (the data root, required). Nicolas only: `SO_QUARANTINE_PATH`,
 `SO_HOLDOUT_PATH`, `SO_HOLDOUT_EVALUATION_TOKEN` (holdout). Optional, for queue emails: `SO_SMTP_HOST`,

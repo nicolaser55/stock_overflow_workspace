@@ -371,7 +371,13 @@ def test_environment_lock():
     assert difference_list == ["light-gbm: locked 4.6.0, not installed", "numpy: locked 2.1.3, installed 2.2.0"], difference_list
     assert check_environment_list(lock_path, {"pandas": "2.3.3", "numpy": "2.1.3", "light-gbm": "4.6.0"}) == []
     assert check_environment_list(lock_path.parent / "missing.txt", {}) is None
-    passed("package lock (missing and different versions reported, extras ignored)")
+    # ONE LOCK PER OPERATING SYSTEM (2026-11-23): WINDOWS ITS OWN, EVERY OTHER PLATFORM THE LINUX ONE; BOTH EXIST
+    import check_environment
+    assert check_environment.get_lock_path("win32").name == "venv_main_lock.txt"
+    assert check_environment.get_lock_path("linux").name == "venv_main_lock_linux.txt"
+    assert check_environment.LOCK_PATH == check_environment.get_lock_path(sys.platform)
+    assert check_environment.WINDOWS_LOCK_PATH.is_file() and check_environment.LINUX_LOCK_PATH.is_file()
+    passed("package lock (missing and different versions reported, extras ignored; the Windows lock on Windows, the Linux lock elsewhere)")
 
 
 # FUNCTION: TEST THAT HOLDOUT RESULTS STAY OUT OF THE REPOSITORY
@@ -1303,7 +1309,12 @@ def test_queue_windows_update_guard():
     assert garbled_dict["safe_bool"] is False and "cannot read" in garbled_dict["reason_str"]
     no_zone_dict = run_queue.get_update_guard_dict(FakeRegistryReader(dict(paused_dict, PauseUpdatesExpiryTime="2026-11-30T13:59:06")), now_utc)
     assert no_zone_dict["safe_bool"] is False
-    assert run_queue.get_update_guard_dict(platform_str_in="linux")["safe_bool"] is True
+    # OFF WINDOWS (2026-11-23): LINUX READS THE HOST STATUS FILE (test_queue_host_status_guard), ANY OTHER PLATFORM IS NOT SAFE
+    missing_status_str = os.path.join(tempfile.mkdtemp(prefix="so_status_", dir=os.environ["SO_DATA_PATH"]), "host_status.json")
+    linux_dict = run_queue.get_update_guard_dict(platform_str_in="linux", status_path_str_in=missing_status_str)
+    assert linux_dict["safe_bool"] is False and "missing" in linux_dict["reason_str"], linux_dict
+    other_dict = run_queue.get_update_guard_dict(platform_str_in="darwin")
+    assert other_dict["safe_bool"] is False and "darwin" in other_dict["reason_str"], other_dict
     # A GUARD THAT CRASHES IS NOT SAFE
     def crashing_guard_func():
         raise RuntimeError("boom")
@@ -1354,7 +1365,175 @@ def test_queue_windows_update_guard():
     result_list = run_fake_queue_list(path_dict, run_func, send_func)
     assert called_list == ["waits"] and [result["status"] for result in result_list] == ["done"]
     assert run_queue.read_json(path_dict["state"])["update_guard"]["safe_bool"] is True
-    passed("Windows Update guard (pause end, pending restart, unreadable or garbled values not safe; add refuses, the runner waits, the watch emails once per reason)")
+    passed("Windows Update guard (pause end, pending restart, unreadable or garbled values not safe; Linux without the host status file and other platforms not safe; add refuses, the runner waits, the watch emails once per reason)")
+
+
+# THE RESTART KEYS AND PAUSE NAMES AS THE HOST WRITES THEM, AND A SAFE OBJECT AS THE RECEIVER STORES IT
+def get_host_status_dict(**change_dict_in):
+    """
+    Args:
+        **change_dict_in: Top-level replacements (received_utc included)
+
+    Returns:
+        dict: A host status object, paused until 2026-11-30T13:59:06Z, no restart, no error, received 2026-11-23T13:28:29Z
+    """
+    # THE FIRST GOOD RUN ON so-vm (2026-11-23), WITH THE HOST NAME AS THE WINDOWS WRITER SENDS IT
+    status_dict = {"schema": "so-host-status/1", "host": "NICODESKTOP", "written_utc": "2026-11-23T13:28:27Z",
+                   "restart_pending": {key_str: False for key_str in run_queue.UPDATE_RESTART_KEY_LIST},
+                   "pause": {name_str: "2026-11-30T13:59:06Z" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST},
+                   "errors": [], "received_utc": "2026-11-23T13:28:29Z"}
+    status_dict.update(change_dict_in)
+    return status_dict
+
+
+# FUNCTION: THE UPDATE GUARD ON LINUX READS THE HOST STATUS FILE (JUDGE PR FOR so-vm, 2026-11-23)
+def test_queue_host_status_guard():
+    """
+    On Linux the guard reads <SO_DATA_PATH>/control/host_status/host_status.json and fails closed: missing, not JSON,
+    too large, a key more or less, another host (any case of nicodesktop is accepted), a host read error, received more
+    than 15 minutes ago or more than 1 minute ahead. A fresh, exact file goes through the Windows rules: safe with 7 days
+    of pause, not safe with a pending restart, a null pause or a pause ending within 3 days.
+
+    Returns:
+        None
+    """
+    # A FOLDER AND A CLOCK 2 MINUTES AFTER THE FILE WAS RECEIVED
+    import datetime as datetime_module
+    folder_str = tempfile.mkdtemp(prefix="so_host_status_", dir=os.environ["SO_DATA_PATH"])
+    status_path_str = os.path.join(folder_str, "host_status.json")
+    now_utc = datetime_module.datetime(2026, 11, 23, 13, 30, 29, tzinfo=datetime_module.timezone.utc)
+
+    def guard_dict(content_in, now_in=now_utc):
+        with open(status_path_str, "wb") as status_file:
+            status_file.write(content_in if isinstance(content_in, bytes)
+                              else (json.dumps(content_in, sort_keys=True, indent=1) + "\n").encode("ascii"))
+        return run_queue.get_update_guard_dict(platform_str_in="linux", now_utc_in=now_in, status_path_str_in=status_path_str)
+
+    # THE DEFAULT PLACE
+    assert run_queue.get_host_status_path_str() == os.path.join(os.environ["SO_DATA_PATH"], "control", "host_status",
+                                                                "host_status.json")
+    # SAFE: 7 DAYS OF PAUSE, NO RESTART; THE HOST NAME IN ANY CASE
+    safe_dict = guard_dict(get_host_status_dict())
+    assert safe_dict["safe_bool"] is True and safe_dict["pause_end_str"] == "2026-11-30T13:59:06+00:00", safe_dict
+    assert guard_dict(get_host_status_dict(host="nicodesktop"))["safe_bool"] is True
+    # 15 MINUTES OLD IS STILL FRESH, 15 MINUTES AND 1 SECOND IS STALE; 60 SECONDS AHEAD IS ACCEPTED, 61 IS NOT
+    received_utc = datetime_module.datetime(2026, 11, 23, 13, 28, 29, tzinfo=datetime_module.timezone.utc)
+    assert guard_dict(get_host_status_dict(), received_utc + datetime_module.timedelta(minutes=15))["safe_bool"] is True
+    stale_dict = guard_dict(get_host_status_dict(), received_utc + datetime_module.timedelta(minutes=15, seconds=1))
+    assert stale_dict["safe_bool"] is False and "stale" in stale_dict["reason_str"], stale_dict
+    assert guard_dict(get_host_status_dict(), received_utc - datetime_module.timedelta(seconds=60))["safe_bool"] is True
+    ahead_dict = guard_dict(get_host_status_dict(), received_utc - datetime_module.timedelta(seconds=61))
+    assert ahead_dict["safe_bool"] is False and "future" in ahead_dict["reason_str"], ahead_dict
+    # THE WINDOWS RULES ON THE HOST'S FACTS
+    restart_dict = get_host_status_dict()
+    restart_dict["restart_pending"][run_queue.UPDATE_RESTART_KEY_LIST[1]] = True
+    restart_guard = guard_dict(restart_dict)
+    assert restart_guard["safe_bool"] is False and "RebootPending" in restart_guard["reason_str"], restart_guard
+    null_dict = get_host_status_dict()
+    null_dict["pause"]["PauseQualityUpdatesEndTime"] = None
+    null_guard = guard_dict(null_dict)
+    assert null_guard["safe_bool"] is False and "not paused" in null_guard["reason_str"], null_guard
+    # FRESH, BUT THE PAUSE ENDS IN LESS THAN 3 DAYS
+    late_guard = guard_dict(get_host_status_dict(received_utc="2026-11-27T13:58:00Z"),
+                            datetime_module.datetime(2026, 11, 27, 14, 0, tzinfo=datetime_module.timezone.utc))
+    assert late_guard["safe_bool"] is False and "pause ends 2026-11-30" in late_guard["reason_str"], late_guard
+    # REFUSED: ANOTHER HOST, A HOST ERROR, A MALFORMED OR MISSING received_utc, A KEY MORE, NOT JSON, TOO LARGE, MISSING
+    for content, reason_part_str in [
+            (get_host_status_dict(host="ci"), "from 'ci'"),
+            (get_host_status_dict(host="check"), "from 'check'"),
+            (get_host_status_dict(errors=["PauseUpdatesExpiryTime: access denied"]), "could not read"),
+            (get_host_status_dict(received_utc="2026-11-23 13:28:29"), "malformed"),
+            ({key_str: value for key_str, value in get_host_status_dict().items() if key_str != "received_utc"}, "received_utc"),
+            (get_host_status_dict(extra=1), "malformed"),
+            (get_host_status_dict(schema="so-host-status/2"), "malformed"),
+            (b"{not json", "not ASCII JSON"),
+            ("café".encode("utf-8"), "not ASCII JSON"),
+            (b" " * (run_queue.HOST_STATUS_MAX_BYTES + 1), "more than")]:
+        refused_dict = guard_dict(content)
+        assert refused_dict["safe_bool"] is False and reason_part_str in refused_dict["reason_str"], (reason_part_str, refused_dict)
+    os.remove(status_path_str)
+    missing_dict = run_queue.get_update_guard_dict(platform_str_in="linux", now_utc_in=now_utc, status_path_str_in=status_path_str)
+    assert missing_dict["safe_bool"] is False and "missing" in missing_dict["reason_str"], missing_dict
+    no_root_dict = run_queue.get_update_guard_dict(platform_str_in="linux", now_utc_in=now_utc, status_path_str_in="")
+    assert no_root_dict["safe_bool"] is False and "SO_DATA_PATH" in no_root_dict["reason_str"], no_root_dict
+    passed("update guard on Linux (host status file: fresh and exact is read with the Windows rules; missing, stale, ahead, "
+           "malformed, oversized, another host or a host error is not safe)")
+
+
+# FUNCTION: THE JUDGE'S CHECK OF THE HOST STATUS OBJECT EQUALS THE RECEIVER'S (vm/host_status_receive.py)
+def test_host_status_matches_receiver():
+    """
+    The receiver on so-vm and the guard in run_queue.py check the same object: the same restart keys, pause names,
+    schema and limits, and on a set of good and bad samples both accept or both refuse.
+
+    Returns:
+        None
+    """
+    # LOAD THE RECEIVER FROM ITS FILE (A STAND-IN syslog WHERE PYTHON HAS NONE: WINDOWS; get_checked_dict DOES NOT LOG)
+    import importlib.util
+    import types
+    stub_bool = False
+    try:
+        importlib.import_module("syslog")
+    except ImportError:
+        sys.modules["syslog"] = types.ModuleType("syslog")
+        stub_bool = True
+    try:
+        spec = importlib.util.spec_from_file_location("so_host_status_receive",
+                                                      os.path.join(WORKSPACE_PATH_STR, "vm", "host_status_receive.py"))
+        receiver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(receiver)
+    finally:
+        if stub_bool:
+            sys.modules.pop("syslog", None)
+    # THE SAME LISTS AND LIMITS
+    assert receiver.RESTART_KEY_LIST == run_queue.UPDATE_RESTART_KEY_LIST
+    assert receiver.PAUSE_VALUE_LIST == run_queue.UPDATE_PAUSE_VALUE_LIST
+    assert receiver.SCHEMA_STR == run_queue.HOST_STATUS_SCHEMA_STR and receiver.TOP_KEY_SET == run_queue.HOST_STATUS_KEY_SET
+    assert receiver.MAX_ERROR_COUNT_INT == run_queue.HOST_STATUS_MAX_ERROR_COUNT
+    assert receiver.MAX_ERROR_CHARS_INT == run_queue.HOST_STATUS_MAX_ERROR_CHARS
+    assert receiver.MAX_BYTES_INT <= run_queue.HOST_STATUS_MAX_BYTES
+    for pattern_name_str, judge_pattern in [("HOST_PATTERN", run_queue.HOST_STATUS_HOST_PATTERN),
+                                            ("UTC_PATTERN", run_queue.HOST_STATUS_UTC_PATTERN),
+                                            ("PAUSE_PATTERN", run_queue.HOST_STATUS_PAUSE_PATTERN)]:
+        assert getattr(receiver, pattern_name_str).pattern == judge_pattern.pattern, pattern_name_str
+    # THE SAME VERDICT ON EVERY SAMPLE (WHAT THE HOST SENDS: THE OBJECT WITHOUT received_utc)
+    def sent_dict(**change_dict_in):
+        status_dict = get_host_status_dict(**change_dict_in)
+        status_dict.pop("received_utc")
+        return status_dict
+    restart_key_str = run_queue.UPDATE_RESTART_KEY_LIST[0]
+    sample_list = [sent_dict(), sent_dict(host="ci"), sent_dict(errors=["x"]),
+                   sent_dict(pause={name_str: None for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}),
+                   sent_dict(pause={name_str: "2026-11-30T13:59:06.1234567+03:00" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}),
+                   sent_dict(restart_pending={key_str: True for key_str in run_queue.UPDATE_RESTART_KEY_LIST}),
+                   # REFUSED BY BOTH
+                   sent_dict(schema="so-host-status/2"), sent_dict(host="-bad"), sent_dict(host="a" * 64), sent_dict(host=1),
+                   sent_dict(written_utc="2026-11-23T13:28:27"), sent_dict(written_utc="2026-11-23T13:28:27+00:00"),
+                   sent_dict(restart_pending={restart_key_str: False}),
+                   sent_dict(restart_pending={key_str: 0 for key_str in run_queue.UPDATE_RESTART_KEY_LIST}),
+                   sent_dict(restart_pending={key_str: "false" for key_str in run_queue.UPDATE_RESTART_KEY_LIST}),
+                   sent_dict(pause={name_str: "2026-11-30T13:59:06" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}),
+                   sent_dict(pause={name_str: "soon" for name_str in run_queue.UPDATE_PAUSE_VALUE_LIST}),
+                   sent_dict(pause={"PauseUpdatesExpiryTime": None}),
+                   sent_dict(errors="x"), sent_dict(errors=[""]), sent_dict(errors=["x" * 201]), sent_dict(errors=["a\nb"]),
+                   sent_dict(errors=["x"] * 11), sent_dict(errors=[1]), sent_dict(extra=1), [], "text", None]
+    no_errors_dict = sent_dict()
+    no_errors_dict.pop("errors")
+    sample_list.append(no_errors_dict)
+    accepted_count_int = 0
+    for sample in sample_list:
+        try:
+            receiver.get_checked_dict(json.dumps(sample).encode("ascii"))
+            receiver_bool = True
+        except ValueError:
+            receiver_bool = False
+        judge_bool = run_queue.get_host_status_problem_str(sample) is None
+        assert receiver_bool == judge_bool, (sample, receiver_bool, judge_bool)
+        accepted_count_int += int(judge_bool)
+    assert accepted_count_int == 6, accepted_count_int
+    passed(f"host status object: the receiver and the judge use the same keys, names, patterns and limits, and agree on "
+           f"{len(sample_list)} samples ({accepted_count_int} accepted)")
 
 
 # FUNCTION: FREEZING THE REFERENCE V (R4d, 2026-11-12)
@@ -1590,6 +1769,128 @@ def test_check_equivalence():
            "declared change explains only its own lines)")
 
 
+# FUNCTION: THE EQUIVALENCE CHECK WITH THE TOLERANCE (2026-11-23)
+def test_check_equivalence_tolerance():
+    """
+    Exact comparison unchanged; with the tolerance only floats may differ, by at most relative 1e-9 (absolute 1e-12 near
+    zero), in report.json, scores.pkl and decisions.pkl alike. A float off by more, a NaN against a number, a changed
+    type, timestamp, integer, boolean, string, length or index still fails. The command exits 0 / 2 / 1.
+
+    Returns:
+        None
+    """
+    # TWO RUN FOLDERS: A REPORT, A DECISIONS LIST OF DICTS (AS THE RUNNER WRITES IT) AND A SCORES FRAME
+    import copy
+    import subprocess
+    import pandas as pd
+    import numpy as np
+    import check_equivalence
+    root_str = tempfile.mkdtemp(prefix="equivalence_tolerance_", dir=os.environ["SO_DATA_PATH"])
+    tolerance = check_equivalence.TOLERANCE_PAIR
+    assert tolerance == (1e-9, 1e-12)
+    report_dict = {"run_id_str": "exp_a_1", "experiment_name_str": "exp_a", "protocol_version_str": "v1",
+                   "label_str": "fail", "failed_list": ["return"], "verdict_pass_bool": False,
+                   "return_dict": {"strategy_total_return": 0.4321, "trade_count": 12, "pass_bool": False},
+                   "multiple_testing_dict": {"design_count": 270, "deflated_sharpe_probability": 0.41},
+                   "grade_dict": {"grade_str": "Not better than buy-and-hold"},
+                   "cost_sensitivity_list": [{"slippage_per_share": 0.0, "total_return": float("nan")}],
+                   "zero_float": 0.0}
+    decision_list = [{"session": pd.Timestamp("2010-01-04"), "target_weight": 1.0, "fill_price": 113.33},
+                     {"session": pd.Timestamp("2010-01-05"), "target_weight": 0.6180339887, "fill_price": 113.63}]
+    score_pdf = pd.DataFrame({"period_id": [1, 2], "sharpe": [0.5123456789, float("nan")], "label": ["a", "b"]})
+
+    def make_run_str(name_str_in, report_in=None, decision_list_in=None, score_in=None):
+        folder_str = os.path.join(root_str, name_str_in)
+        os.makedirs(os.path.join(folder_str, "candidates", "c0"), exist_ok=True)
+        pd.to_pickle(decision_list if decision_list_in is None else decision_list_in,
+                     os.path.join(folder_str, "candidates", "c0", "decisions.pkl"))
+        (score_pdf if score_in is None else score_in).to_pickle(os.path.join(folder_str, "candidates", "c0", "scores.pkl"))
+        Path(folder_str, "report.json").write_text(json.dumps(report_dict if report_in is None else report_in), encoding="utf-8")
+        return folder_str
+
+    def outcome_pair(new_str_in):
+        exact_dict = check_equivalence.get_equivalence_dict(baseline_str, new_str_in)
+        tolerant_dict = check_equivalence.get_equivalence_dict(baseline_str, new_str_in, None, tolerance)
+        return exact_dict["equivalent_bool"], tolerant_dict["equivalent_bool"]
+
+    baseline_str = make_run_str("base")
+    # IDENTICAL: BOTH EQUIVALENT
+    assert outcome_pair(make_run_str("same")) == (True, True)
+    # LAST-DIGIT FLOAT DIFFERENCES IN ALL THREE FILES: NOT EXACT, WITHIN THE TOLERANCE
+    near_report = copy.deepcopy(report_dict)
+    near_report["return_dict"]["strategy_total_return"] = 0.4321 * (1 + 3e-10)
+    near_report["multiple_testing_dict"]["deflated_sharpe_probability"] = 0.41 * (1 - 9e-10)
+    near_report["zero_float"] = 5e-13
+    near_decisions = copy.deepcopy(decision_list)
+    near_decisions[1]["target_weight"] = 0.6180339887 * (1 + 1e-12)
+    near_scores = score_pdf.copy()
+    near_scores.loc[0, "sharpe"] = 0.5123456789 * (1 + 2e-10)
+    near_str = make_run_str("near", near_report, near_decisions, near_scores)
+    assert outcome_pair(near_str) == (False, True)
+    for one_report, one_decisions, one_scores in [(near_report, None, None), (None, near_decisions, None), (None, None, near_scores)]:
+        assert outcome_pair(make_run_str(f"near_{len(os.listdir(root_str))}", one_report, one_decisions, one_scores)) == (False, True)
+    # FLOATS BEYOND THE TOLERANCE: NOT EQUIVALENT EITHER WAY
+    far_report = copy.deepcopy(report_dict)
+    far_report["return_dict"]["strategy_total_return"] = 0.4321 * (1 + 1e-6)
+    far_decisions = copy.deepcopy(decision_list)
+    far_decisions[0]["fill_price"] = 113.34
+    far_scores = score_pdf.copy()
+    far_scores.loc[0, "sharpe"] = 0.5123456789 * (1 + 2e-9)
+    zero_report = dict(copy.deepcopy(report_dict), zero_float=2e-12)
+    for name_str, args_tuple in [("far_report", (far_report, None, None)), ("far_decisions", (None, far_decisions, None)),
+                                 ("far_scores", (None, None, far_scores)), ("far_zero", (zero_report, None, None))]:
+        assert outcome_pair(make_run_str(name_str, *args_tuple)) == (False, False), name_str
+    # NON-FLOATS STAY EXACT, EVEN WHEN EVERY FLOAT MATCHES: A TIMESTAMP, AN INTEGER, A BOOLEAN, A STRING, A LENGTH, A
+    # TYPE, A NaN AGAINST A NUMBER, AN INDEX, A DTYPE
+    changed_list = []
+    report_case = copy.deepcopy(report_dict); report_case["return_dict"]["trade_count"] = 13; changed_list.append(("int", (report_case, None, None)))
+    report_case = copy.deepcopy(report_dict); report_case["return_dict"]["pass_bool"] = True; changed_list.append(("bool", (report_case, None, None)))
+    report_case = copy.deepcopy(report_dict); report_case["grade_dict"]["grade_str"] = "Could be luck"; changed_list.append(("grade", (report_case, None, None)))
+    report_case = copy.deepcopy(report_dict); report_case["failed_list"] = ["return", "consistency"]; changed_list.append(("failed", (report_case, None, None)))
+    report_case = copy.deepcopy(report_dict); report_case["return_dict"]["trade_count"] = 12.0; changed_list.append(("type", (report_case, None, None)))
+    report_case = copy.deepcopy(report_dict); report_case["cost_sensitivity_list"][0]["total_return"] = 0.1; changed_list.append(("nan", (report_case, None, None)))
+    decision_case = copy.deepcopy(decision_list); decision_case[1]["session"] = pd.Timestamp("2010-01-06"); changed_list.append(("timestamp", (None, decision_case, None)))
+    changed_list.append(("length", (None, decision_list[:1], None)))
+    decision_case = copy.deepcopy(decision_list); decision_case[0]["reason"] = "stop"; changed_list.append(("key", (None, decision_case, None)))
+    score_case = score_pdf.copy(); score_case.loc[1, "sharpe"] = 0.0; changed_list.append(("score_nan", (None, None, score_case)))
+    score_case = score_pdf.copy(); score_case["label"] = ["a", "c"]; changed_list.append(("score_label", (None, None, score_case)))
+    score_case = score_pdf.copy(); score_case.index = [0, 2]; changed_list.append(("score_index", (None, None, score_case)))
+    score_case = score_pdf.copy(); score_case["period_id"] = score_case["period_id"].astype(np.int32); changed_list.append(("score_dtype", (None, None, score_case)))
+    for name_str, args_tuple in changed_list:
+        assert outcome_pair(make_run_str(f"changed_{name_str}", *args_tuple)) == (False, False), name_str
+    # NUMPY FLOATS IN A LIST OF DICTS (THE DECISIONS' FORM) ALSO GET THE TOLERANCE; A float64 AGAINST A float OF ANOTHER
+    # VALUE DOES NOT; THE TOLERANCE NEVER FAILS WHAT THE EXACT COMPARISON PASSES (1 AND 1.0 ARE EQUAL IN BOTH)
+    numpy_base = [{"w": np.float64(0.25)}]
+    assert check_equivalence.get_frame_equal_bool(numpy_base, [{"w": np.float64(0.25 * (1 + 1e-12))}], tolerance)
+    assert not check_equivalence.get_frame_equal_bool(numpy_base, [{"w": 0.25 * (1 + 1e-12)}], tolerance)
+    assert not check_equivalence.get_frame_equal_bool(numpy_base, [{"w": np.float64(0.25 * (1 + 1e-12))}])
+    for baseline_value, new_value in [([{"w": 1.0}], [{"w": 1}]), ([{"w": np.float64(0.25)}], [{"w": 0.25}]),
+                                      (score_pdf, score_pdf.copy()), ([1.0, (2, "a")], (1.0, [2, "a"]))]:
+        assert check_equivalence.get_frame_equal_bool(baseline_value, new_value)
+        assert check_equivalence.get_frame_equal_bool(baseline_value, new_value, tolerance)
+    assert check_equivalence.get_frame_equal_bool([np.array([1.0, np.nan])], [np.array([1.0 + 1e-12, np.nan])], tolerance)
+    assert not check_equivalence.get_frame_equal_bool([np.array([1.0, np.inf])], [np.array([1.0, -np.inf])], tolerance)
+    # THE COMMAND: EXIT 0 EXACT, 2 WITHIN TOLERANCE (AND ONLY WITH --tolerance), 1 OTHERWISE; THE EXACT VERDICT FIRST
+    script_str = os.path.join(WORKSPACE_PATH_STR, "scripts", "check_equivalence.py")
+    environment_dict = dict(os.environ, PYTHONIOENCODING="utf-8")
+
+    def command(new_str_in, *flag_list_in):
+        completed = subprocess.run([sys.executable, script_str, "--baseline", baseline_str, "--new", new_str_in, *flag_list_in],
+                                   capture_output=True, text=True, env=environment_dict, timeout=300)
+        return completed.returncode, completed.stdout
+    code_int, out_str = command(make_run_str("cmd_same"), "--tolerance")
+    assert code_int == 0 and "EQUIVALENT: every scoring number" in out_str and "with the tolerance" not in out_str, out_str
+    code_int, out_str = command(near_str)
+    assert code_int == 1 and "NOT EQUIVALENT" in out_str and "with the tolerance" not in out_str, out_str
+    code_int, out_str = command(near_str, "--tolerance")
+    assert code_int == 2 and "WITHIN TOLERANCE" in out_str and "within tolerance:  return_dict.strategy_total_return" in out_str, out_str
+    assert out_str.index("NOT EQUIVALENT: a full rerun") < out_str.index("with the tolerance"), out_str
+    code_int, out_str = command(make_run_str("cmd_far", far_report), "--tolerance")
+    assert code_int == 1 and "NOT EQUIVALENT, also with the tolerance" in out_str, out_str
+    passed("equivalence check with the tolerance (floats within relative 1e-9 / absolute 1e-12 in the report, scores and "
+           "decisions; every non-float value, NaN, type, index and dtype exact; exit 0 exact, 2 within tolerance, 1 otherwise)")
+
+
 # RUN THE SUITE
 if __name__ == "__main__":
     test_queue_runs_files_and_emails()
@@ -1605,6 +1906,8 @@ if __name__ == "__main__":
     test_run_email_content()
     test_queue_kill_switch()
     test_queue_windows_update_guard()
+    test_queue_host_status_guard()
+    test_host_status_matches_receiver()
     test_freeze_v_reference()
     test_every_python_file_compiles()
     test_queue_timeout_kills_tree()
@@ -1616,4 +1919,5 @@ if __name__ == "__main__":
     test_ledger_outside_repository()
     test_watch_log()
     test_check_equivalence()
+    test_check_equivalence_tolerance()
     print("\nAll tool tests passed ✅")

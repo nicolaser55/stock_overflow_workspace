@@ -9,6 +9,11 @@ Locked Package Check
 
     python scripts/check_environment.py          # prints the differences; exit 1 when there is one
 
+The lock depends on the platform (judge PR, 2026-11-23): requirements/venv_main_lock.txt on Windows,
+requirements/venv_main_lock_linux.txt everywhere else (so-vm; the same versions minus Windows-only and unused packages,
+installed with the hashes in requirements/venv_main_hashes_linux.txt by vm/setup_vm.sh). Both locks and the Linux
+hash file are part of the judge hash (so/runner/judge_identity.py).
+
 requirements/venv_main_lock.txt is `pip freeze --exclude-editable` of venv-main, written by Nicolas. Every
 development run calls check_environment_list first and refuses to start when an installed version differs from the
 lock or a locked package is missing, so a result is never produced by a silently upgraded package. Without a lock file
@@ -16,8 +21,28 @@ the run prints a warning and goes on. Agents never install, upgrade or remove a 
 (a new lock, committed with the reason).
 """
 
-# THE LOCK FILE
-LOCK_PATH = Path(__file__).resolve().parents[1] / "requirements" / "venv_main_lock.txt"
+# THE LOCK FILES (WINDOWS, AND THE LINUX ONE OF so-vm)
+REQUIREMENTS_PATH = Path(__file__).resolve().parents[1] / "requirements"
+WINDOWS_LOCK_PATH = REQUIREMENTS_PATH / "venv_main_lock.txt"
+LINUX_LOCK_PATH = REQUIREMENTS_PATH / "venv_main_lock_linux.txt"
+
+
+# FUNCTION: THE LOCK OF A PLATFORM
+def get_lock_path(platform_str_in=None):
+    """
+    Args:
+        platform_str_in (str | None): sys.platform replacement (tests)
+
+    Returns:
+        Path: The Windows lock on Windows, the Linux lock everywhere else
+    """
+    # ONE LOCK PER OPERATING SYSTEM; THE VERSIONS ARE THE SAME
+    platform_str = sys.platform if platform_str_in is None else str(platform_str_in)
+    return WINDOWS_LOCK_PATH if platform_str == "win32" else LINUX_LOCK_PATH
+
+
+# THE LOCK OF THIS MACHINE
+LOCK_PATH = get_lock_path()
 
 
 # FUNCTION: A NORMALIZED PACKAGE NAME
@@ -92,7 +117,7 @@ def check_environment_list(lock_path_in=LOCK_PATH, installed_dict_in=None):
 # RUN
 if __name__ == "__main__":
     # ARGUMENTS
-    parser = argparse.ArgumentParser(description="Compare installed packages with requirements/venv_main_lock.txt.")
+    parser = argparse.ArgumentParser(description="Compare installed packages with the lock of this platform (requirements/venv_main_lock.txt on Windows, venv_main_lock_linux.txt elsewhere).")
     parser.parse_args()
     difference_list = check_environment_list()
     if difference_list is None:

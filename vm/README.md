@@ -40,8 +40,10 @@ The install and test steps are in the project runbooks `claude/RUNBOOK_2026-11-1
 
 - **Host status feed.** The writer is nicodesktop's scheduled task "SO VM status" (SYSTEM, every 5 minutes; in the
   infra repository, `vm_status/`). The file `control/host_status/host_status.json` exists only on the VM:
-  `data_manifest.py compare` lists what the VM holds there as INFO and does not compare it. The update guard on Linux (judge PR) reads it and fails
-  closed when it is missing, malformed or older than 15 minutes by the VM's own clock (`received_utc`).
+  `data_manifest.py compare` lists what the VM holds there as INFO and does not compare it. The update guard on Linux (`scripts/run_queue.py`, judge PR
+  2026-11-23) reads it and fails closed when it is missing, malformed, from another host than nicodesktop (any case),
+  lists a host read error, or was received more than 15 minutes ago or more than 1 minute ahead by the VM's own clock
+  (`received_utc`). The receiver's checks and the guard's are compared on shared samples (`tests/test_tools.py`).
 - **Postfix warning (accepted, 2026-11-23).** At a start, Postfix copies `/etc/resolv.conf` into its chroot and then
   warns "not owned by root: /var/spool/postfix/etc/resolv.conf" (the copy keeps the owner of systemd-resolved's stub).
   Harmless: the file is only read, the relay works (test mail of 2026-11-21). Left as it is.

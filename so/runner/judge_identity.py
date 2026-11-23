@@ -10,7 +10,11 @@ Judge Identity (design 2026-10-27, docs/AGENTIC_DESIGN.md section 4: judge versi
 The judge is what scores a run: every protected .py file under so/ and scripts/ (protected_paths.txt), plus two
 inputs that change reports without being code (roadmap R3, 2026-10-29): the tried-designs ledger in
 records/legacy/*.csv (part of the verdict's N since 2026-11-10; before that, a reported view) and the package lock requirements/venv_main_lock.txt (it fixes
-the numerics). Its identity is a content hash of those files, recorded in every report and manifest and in the run
+the numerics). The judge PR for so-vm (2026-11-23) adds the Linux lock requirements/venv_main_lock_linux.txt and its
+hash file requirements/venv_main_hashes_linux.txt: the hashes pin the exact package files, not only the versions (two
+builds of one version can bundle different maths libraries, numpy's OpenBLAS for one), and vm/setup_vm.sh refuses to
+install when the two disagree. Each machine checks its own lock (scripts/check_environment.py); the hash covers all
+three files on every machine, so the judge hash is the same on Windows and Linux. Its identity is a content hash of those files, recorded in every report and manifest and in the run
 index. Two runs with the same judge hash were scored by identical rules, whatever their commits; a different hash means
 the rules changed and the results are not directly comparable. Nothing has to be bumped by hand.
 
@@ -27,7 +31,8 @@ JUDGE_FOLDER_LIST = ["so", "scripts"]
 # THE PROTECTED-PATH LIST (ONE GLOB PER LINE; "append:" ENTRIES ARE NOT CODE)
 PROTECTED_LIST_FILE_STR = "protected_paths.txt"
 # NON-CODE INPUTS OF THE VERDICT THAT ARE PART OF THE JUDGE (REPO-RELATIVE GLOBS)
-JUDGE_EXTRA_GLOB_LIST = ["records/legacy/*.csv", "requirements/venv_main_lock.txt"]
+JUDGE_EXTRA_GLOB_LIST = ["records/legacy/*.csv", "requirements/venv_main_lock.txt", "requirements/venv_main_lock_linux.txt",
+                         "requirements/venv_main_hashes_linux.txt"]
 # FOLDERS THE EXTRA GLOBS LIVE IN (SEARCHED WITH THE JUDGE FOLDERS)
 JUDGE_EXTRA_FOLDER_LIST = ["records/legacy", "requirements"]
 
