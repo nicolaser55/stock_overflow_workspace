@@ -132,8 +132,12 @@ jobs:
           check "$(sudo runuser -u so_runner -- python3 -I -c 'import json; print(json.load(open("/srv/so/data/control/host_status/host_status.json"))["host"])')" ci "so_runner reads the status file"
           out="$(ssh "${hopts[@]}" so_host@127.0.0.1 'cat /etc/passwd' </dev/null)"
           check "${out%%:*}" refused "a command asked by the client is ignored (the receiver runs and refuses empty input)"
-          timeout 15 ssh "${hopts[@]}" -o ExitOnForwardFailure=yes -N -L 127.0.0.1:18025:127.0.0.1:22 so_host@127.0.0.1 2>/dev/null
-          check $? 255 "so_host cannot forward"
+          # A local forward (-L) only binds on the client, so sshd's refusal shows on use: -W asks for the same channel at once
+          # (fix 2 of PR #65: "-N -L" just waited, exit 124 from timeout)
+          timeout 15 ssh "${hopts[@]}" -W 127.0.0.1:22 so_host@127.0.0.1 </dev/null >/dev/null 2>&1
+          check $? 255 "so_host cannot open a forward channel (-W, as -L uses)"
+          timeout 15 ssh "${hopts[@]}" -o ExitOnForwardFailure=yes -N -R 127.0.0.1:18025:127.0.0.1:22 so_host@127.0.0.1 2>/dev/null
+          check $? 255 "so_host cannot forward from the VM (-R)"
           ssh "${hopts[@]}" so_agent@127.0.0.1 true 2>/dev/null; check $? 255 "the status key does not log in as so_agent"
           ssh "${hopts[@]}" nico@127.0.0.1 true 2>/dev/null; check $? 255 "the status key does not log in as nico"
           ssh "${opts[@]}" so_host@127.0.0.1 true </dev/null 2>/dev/null; check $? 255 "so_agent's key does not log in as so_host"
