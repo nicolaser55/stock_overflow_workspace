@@ -457,8 +457,10 @@ for pair_str in "forcecommand $RECEIVER" "disableforwarding yes" "permittty no" 
     got_str="$(sshd_host "${pair_str%% *}")"
     [ "$got_str" = "${pair_str#* }" ] && ok "sshd so_host ${pair_str%% *} $got_str" || fail "sshd so_host ${pair_str%% *}: expected '${pair_str#* }', got '$got_str'"
 done
-[ -z "$(sshd -T -C "user=so_agent,host=check,addr=100.98.9.22" 2>/dev/null | grep -i '^forcecommand ')" ] \
-    && ok "the so_host Match block ends with its file (so_agent has no forced command)" || fail "so_agent has a forced command"
+# sshd -T prints an unset forced command as "none" (servconf.c dump_cfg_string; fix 1 of PR #65)
+agent_force_str="$(sshd_t so_agent forcecommand)"
+[ "$agent_force_str" = "none" ] && ok "the so_host Match block ends with its file (so_agent forcecommand none)" \
+    || fail "so_agent forcecommand is '$agent_force_str', expected none"
 # The receiver itself, as so_host, into a scratch folder (never the real file: a test must not write facts)
 tmp_status="$(mktemp -d /var/tmp/.so_status_check.XXXXXX)"
 chown so_host:so_host "$tmp_status"
