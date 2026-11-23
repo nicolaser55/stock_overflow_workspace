@@ -330,7 +330,11 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   makes an old run reproducible after the view's edge has moved.
 - **Judge identity (design 2026-10-27, `docs/AGENTIC_DESIGN.md`):** `so.runner.judge_identity` hashes every protected
   `.py` file under `so/` and `scripts/`, plus `records/legacy/*.csv` (the tried-designs ledger; part of the verdict's N since 2026-11-10) and the package
-  lock `requirements/venv_main_lock.txt` (R3, 2026-10-29), as paths and LF-normalized contents. The report
+  lock `requirements/venv_main_lock.txt` (R3, 2026-10-29), as paths and LF-normalized contents. Since the judge PR for
+  so-vm (2026-11-23) also the Linux lock `requirements/venv_main_lock_linux.txt` and its hash file
+  `requirements/venv_main_hashes_linux.txt` (the exact package files: two builds of one version can bundle different
+  maths libraries). Each machine checks its own lock (`scripts/check_environment.py`: the Windows lock on Windows, the
+  Linux lock elsewhere); the hash covers all three on every machine. The report
   (`judge_hash_str`), the manifest (`judge_hash`) and the run index (`judge_hash`) record it. Runs with the same judge
   hash were scored by identical rules; a core change changes the hash, so results judged by different rules are never
   mixed silently. **Checked around every queued run (R3):** the queue hashes the fresh worktree before the run process
@@ -338,7 +342,20 @@ Intraday stops driven by daily decisions (exp02) use daily mode with the trailin
   ("judge changed during the run"): design code ran in between. This catches a judge file changed and left changed; a
   change undone before the end is out of reach until design code runs in its own account (roadmap R7, A4). After the judge v1 freeze a hash change that touches no scoring code is accepted when
   `scripts/check_equivalence.py --baseline <run id> --new <run id>` finds every report value (identities aside) and
-  every candidate's decisions and scores identical (design 4.4; 2026-11-05).
+  every candidate's decisions and scores identical (design 4.4; 2026-11-05). For the reruns on so-vm (another
+  operating system and package build) `--tolerance` adds a second, reported result (2026-11-23): when the exact
+  comparison fails, it compares again with two floats of one type equal within relative 1e-9 (absolute 1e-12 near
+  zero), in the report, the scores and the decisions alike; every other value stays exact (integers, booleans,
+  strings, timestamps, lengths, keys, index, dtypes, NaN against a number). Exit 0 exact, 2 within tolerance (a decision
+  under the pre-stated rule, not a pass), 1 otherwise.
+- **Windows Update guard (2026-11-11; Linux 2026-11-23):** `add` refuses a job and the runner starts or resumes none
+  while Windows Update could restart the machine within 3 days (pause ending, no pause, restart pending) or the facts
+  cannot be read. On Windows the facts come from the registry. On so-vm they come from
+  `<SO_DATA_PATH>/control/host_status/host_status.json`, sent by nicodesktop's task "SO VM status" every 5 minutes to
+  the receiver `vm/host_status_receive.py`, which stamps `received_utc` with the VM's clock. The guard checks the file
+  again (the receiver's checks; `tests/test_tools.py` compares the two on shared samples) and fails closed when it is
+  missing, unreadable, not the exact object, from a host other than nicodesktop (any case), lists a host read error,
+  was received more than 15 minutes ago or more than 1 minute in the future. On any other platform it is not safe.
 - **Look-ahead check on every run:** truncation and perturbation at `RUNNER_LOOKAHEAD_CUT_COUNT` (3) random cut dates
   (one from each third of the span, fixed seed), plus, for each candidate, up to `RUNNER_LOOKAHEAD_CHANGE_CUT_MAX` (10)
   sessions where its own decision changed (`RUNNER_LOOKAHEAD_CHANGE_CUT_MAX_MINUTE`, 2, in minute mode), spread

@@ -105,9 +105,19 @@ days ahead, renewable). add refuses a job, and the runner starts or resumes no j
 pause ends within UPDATE_PAUSE_MIN_DAYS (3) days (the earliest of the pause end values under
 HKLM/SOFTWARE/Microsoft/WindowsUpdate/UX/Settings), no pause is set, a restart is pending (the RebootRequired or
 RebootPending key exists), or any of these cannot be read. The job that is running finishes. state.json shows
-"update_guard" (safe and the reason); the watch prints the reason and emails once per reason. The guard reads the
-registry only on Windows; elsewhere (CI, tests on Linux) it reports "not applicable" and is safe. Tests replace
+"update_guard" (safe and the reason); the watch prints the reason and emails once per reason. Tests replace
 UPDATE_GUARD_FUNC.
+
+Where the facts come from (judge PR for so-vm, 2026-11-23; design section 4 of claude/DESIGN_2026-11-18_linux_vm.md):
+on Windows the guard reads the registry. On Linux it reads <SO_DATA_PATH>/control/host_status/host_status.json, which
+the host (nicodesktop's task "SO VM status", infra repository vm_status/) sends every 5 minutes over SSH to the receiver
+vm/host_status_receive.py; the receiver checks the object, adds received_utc by the VM's clock and replaces the file. The
+guard checks the file again (the same checks, HOST_STATUS_* below; tests compare the two) and fails closed: the file
+missing, unreadable, larger than HOST_STATUS_MAX_BYTES, not the exact object, from another host than
+HOST_STATUS_HOST_STR (compared without case: the writer sends the Windows computer name, NICODESKTOP), with an error
+listed by the host, received more than HOST_STATUS_MAX_AGE_SECONDS (15 minutes) ago or more than
+HOST_STATUS_MAX_FUTURE_SECONDS (1 minute) in the future. Otherwise its two restart flags and three pause strings go
+through the same rules as on Windows (HostStatusReader). On any other platform the guard is not safe.
 """
 
 # THE NUMBER OF RECENT RESULTS IN state.json AND OF LOG LINES KEPT FOR A FAILED JOB
@@ -184,6 +194,22 @@ UPDATE_UX_KEY_STR = r"SOFTWARE\Microsoft\WindowsUpdate\UX\Settings"
 UPDATE_PAUSE_VALUE_LIST = ["PauseUpdatesExpiryTime", "PauseFeatureUpdatesEndTime", "PauseQualityUpdatesEndTime"]
 UPDATE_RESTART_KEY_LIST = [r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
                            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"]
+# THE HOST STATUS FILE ON LINUX (so-vm, 2026-11-23): WHERE, WHAT, HOW FRESH. THE OBJECT IS THE RECEIVER'S
+# (vm/host_status_receive.py) PLUS received_utc; tests/test_tools.py RUNS THE SAME SAMPLES THROUGH BOTH CHECKS
+HOST_STATUS_FOLDER_STR = "host_status"
+HOST_STATUS_FILE_STR = "host_status.json"
+HOST_STATUS_SCHEMA_STR = "so-host-status/1"
+HOST_STATUS_HOST_STR = "nicodesktop"
+HOST_STATUS_MAX_BYTES = 16384
+HOST_STATUS_MAX_AGE_SECONDS = 15 * 60
+HOST_STATUS_MAX_FUTURE_SECONDS = 60
+HOST_STATUS_RECEIVED_KEY_STR = "received_utc"
+HOST_STATUS_KEY_SET = {"schema", "host", "written_utc", "restart_pending", "pause", "errors"}
+HOST_STATUS_HOST_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,62}")
+HOST_STATUS_UTC_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+HOST_STATUS_PAUSE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?(Z|[+-]\d{2}:\d{2})")
+HOST_STATUS_MAX_ERROR_COUNT = 10
+HOST_STATUS_MAX_ERROR_CHARS = 200
 
 
 # CLASS: READS HKEY_LOCAL_MACHINE (WINDOWS ONLY)
@@ -207,6 +233,136 @@ class WindowsRegistryReader:
             return False
 
 
+# FUNCTION: THE PROBLEM WITH A HOST STATUS OBJECT, AS THE RECEIVER SENT IT (None WHEN IT IS THE EXACT OBJECT)
+def get_host_status_problem_str(object_in):
+    """
+    The receiver's checks (vm/host_status_receive.py get_checked_dict), field by field, on the object without
+    received_utc. The host name is checked separately (get_host_status_file_dict).
+
+    Args:
+        object_in: The parsed JSON value
+
+    Returns:
+        str | None: Why it is refused, or None
+    """
+    # EXACTLY THE KEYS, THE SCHEMA, A HOST NAME, A UTC TIME
+    if not isinstance(object_in, dict) or set(object_in) != HOST_STATUS_KEY_SET:
+        return f"the keys must be exactly {sorted(HOST_STATUS_KEY_SET)}"
+    if object_in["schema"] != HOST_STATUS_SCHEMA_STR:
+        return f"schema must be {HOST_STATUS_SCHEMA_STR}"
+    if not isinstance(object_in["host"], str) or not HOST_STATUS_HOST_PATTERN.fullmatch(object_in["host"]):
+        return "bad host"
+    if not isinstance(object_in["written_utc"], str) or not HOST_STATUS_UTC_PATTERN.fullmatch(object_in["written_utc"]):
+        return "written_utc must be YYYY-MM-DDTHH:MM:SSZ"
+    # THE TWO RESTART FLAGS AS true / false
+    restart_dict = object_in["restart_pending"]
+    if not isinstance(restart_dict, dict) or set(restart_dict) != set(UPDATE_RESTART_KEY_LIST):
+        return "restart_pending must name exactly the two restart keys"
+    if not all(isinstance(value, bool) for value in restart_dict.values()):
+        return "restart_pending values must be true or false"
+    # THE THREE PAUSE STRINGS OR null
+    pause_dict = object_in["pause"]
+    if not isinstance(pause_dict, dict) or set(pause_dict) != set(UPDATE_PAUSE_VALUE_LIST):
+        return "pause must name exactly the three pause values"
+    for name_str, value in pause_dict.items():
+        if value is not None and not (isinstance(value, str) and HOST_STATUS_PAUSE_PATTERN.fullmatch(value)):
+            return f"pause {name_str} must be null or a time with a zone"
+    # THE HOST'S OWN READ ERRORS
+    error_list = object_in["errors"]
+    if not isinstance(error_list, list) or len(error_list) > HOST_STATUS_MAX_ERROR_COUNT:
+        return f"errors must be a list of at most {HOST_STATUS_MAX_ERROR_COUNT}"
+    for error_str in error_list:
+        if (not isinstance(error_str, str) or not error_str or len(error_str) > HOST_STATUS_MAX_ERROR_CHARS
+                or not error_str.isprintable()):
+            return f"each error must be printable text of 1 to {HOST_STATUS_MAX_ERROR_CHARS} characters"
+    return None
+
+
+# FUNCTION: WHERE THE HOST STATUS FILE IS
+def get_host_status_path_str():
+    """
+    Returns:
+        str: <SO_DATA_PATH>/control/host_status/host_status.json, or "" without a data root (the guard is then not safe)
+    """
+    # NEXT TO THE KILL SWITCH, IN ITS OWN FOLDER (so_host CANNOT TOUCH control/STOP)
+    data_str = os.environ.get("SO_DATA_PATH", "").strip()
+    return os.path.join(data_str, STOP_FLAG_FOLDER_STR, HOST_STATUS_FOLDER_STR, HOST_STATUS_FILE_STR) if data_str else ""
+
+
+# FUNCTION: THE HOST STATUS FILE, CHECKED (RAISES ValueError WITH THE REASON)
+def get_host_status_file_dict(status_path_str_in, now_utc_in):
+    """
+    Args:
+        status_path_str_in (str): The file ("" = no data root)
+        now_utc_in (datetime.datetime): Aware UTC clock of this machine
+
+    Returns:
+        dict: The object (with received_utc), when every check passes; otherwise raises ValueError(reason)
+    """
+    # READ AT MOST THE LIMIT, THEN PARSE AS ASCII JSON
+    if not status_path_str_in:
+        raise ValueError("no data root (SO_DATA_PATH is not set), so no host status file")
+    try:
+        with open(status_path_str_in, "rb") as status_file:
+            raw_bytes = status_file.read(HOST_STATUS_MAX_BYTES + 1)
+    except FileNotFoundError:
+        raise ValueError(f"the host status file is missing ({status_path_str_in})") from None
+    except OSError as error:
+        raise ValueError(f"cannot read the host status file ({type(error).__name__})") from None
+    if len(raw_bytes) > HOST_STATUS_MAX_BYTES:
+        raise ValueError(f"the host status file has more than {HOST_STATUS_MAX_BYTES} bytes")
+    try:
+        status_dict = json.loads(raw_bytes.decode("ascii"))
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("the host status file is not ASCII JSON") from None
+    if not isinstance(status_dict, dict) or HOST_STATUS_RECEIVED_KEY_STR not in status_dict:
+        raise ValueError(f"the host status file has no {HOST_STATUS_RECEIVED_KEY_STR}")
+    received_value = status_dict[HOST_STATUS_RECEIVED_KEY_STR]
+    sent_dict = {key_str: value for key_str, value in status_dict.items() if key_str != HOST_STATUS_RECEIVED_KEY_STR}
+    problem_str = get_host_status_problem_str(sent_dict)
+    if problem_str is not None:
+        raise ValueError(f"the host status file is malformed ({problem_str})")
+    # THE RIGHT HOST (TEST FILES SAY ci OR check), NO READ ERROR ON THE HOST
+    if sent_dict["host"].lower() != HOST_STATUS_HOST_STR:
+        raise ValueError(f"the host status file is from {sent_dict['host']!r}, not {HOST_STATUS_HOST_STR}")
+    if sent_dict["errors"]:
+        raise ValueError(f"the host could not read everything ({len(sent_dict['errors'])} errors; first: "
+                         f"{sent_dict['errors'][0]})")
+    # FRESH BY THIS MACHINE'S CLOCK (received_utc IS THE VM'S OWN CLOCK, SO A WRONG HOST CLOCK CANNOT MAKE OLD FACTS NEW)
+    if not isinstance(received_value, str) or not HOST_STATUS_UTC_PATTERN.fullmatch(received_value):
+        raise ValueError(f"the host status file is malformed ({HOST_STATUS_RECEIVED_KEY_STR} must be YYYY-MM-DDTHH:MM:SSZ)")
+    received_utc = datetime.datetime.strptime(received_value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    age_seconds = (now_utc_in - received_utc).total_seconds()
+    # (THE REASONS NAME NO RUNNING AGE: THE WATCH EMAILS ONCE PER REASON, AND A DEAD FEED KEEPS ONE received_utc)
+    if age_seconds > HOST_STATUS_MAX_AGE_SECONDS:
+        raise ValueError(f"the host status is stale (received {received_value}; older than "
+                         f"{HOST_STATUS_MAX_AGE_SECONDS // 60} minutes by this machine's clock)")
+    if -age_seconds > HOST_STATUS_MAX_FUTURE_SECONDS:
+        raise ValueError(f"the host status is in the future (received {received_value}; more than "
+                         f"{HOST_STATUS_MAX_FUTURE_SECONDS} seconds ahead of this machine's clock)")
+    return status_dict
+
+
+# CLASS: THE HOST'S FACTS FROM THE STATUS FILE, READ LIKE THE REGISTRY (LINUX)
+class HostStatusReader:
+    """get_value raises FileNotFoundError for a pause value that is null (not set) or a key other than the pause key;
+    has_key is the restart flag. The guard then applies the Windows rules unchanged."""
+
+    def __init__(self, status_dict_in):
+        self.restart_dict = dict(status_dict_in["restart_pending"])
+        self.pause_dict = dict(status_dict_in["pause"])
+
+    # FUNCTION: ONE PAUSE VALUE
+    def get_value(self, key_str_in, name_str_in):
+        if key_str_in != UPDATE_UX_KEY_STR or self.pause_dict.get(name_str_in) is None:
+            raise FileNotFoundError(name_str_in)
+        return self.pause_dict[name_str_in]
+
+    # FUNCTION: WHETHER A RESTART KEY EXISTS
+    def has_key(self, key_str_in):
+        return self.restart_dict[key_str_in] is True
+
+
 # FUNCTION: A UTC TIME FROM A WINDOWS UPDATE PAUSE VALUE ("2026-11-30T13:59:06Z")
 def get_update_utc_datetime(value_in):
     """
@@ -227,25 +383,37 @@ def get_update_utc_datetime(value_in):
 
 
 # FUNCTION: WHETHER WINDOWS UPDATE LEAVES ROOM FOR A JOB
-def get_update_guard_dict(reader_in=None, now_utc_in=None, platform_str_in=None, min_days_in=UPDATE_PAUSE_MIN_DAYS):
+def get_update_guard_dict(reader_in=None, now_utc_in=None, platform_str_in=None, min_days_in=UPDATE_PAUSE_MIN_DAYS,
+                          status_path_str_in=None):
     """
     Fails closed: anything that cannot be read is not safe.
 
     Args:
-        reader_in (object | None): get_value(key, name), has_key(key) (None = WindowsRegistryReader on Windows)
+        reader_in (object | None): get_value(key, name), has_key(key) (None = WindowsRegistryReader on Windows, the
+            host status file on Linux, nothing elsewhere)
         now_utc_in (datetime.datetime | None): Aware UTC clock (tests)
         platform_str_in (str | None): sys.platform replacement (tests)
         min_days_in (float): Days of pause a job needs
+        status_path_str_in (str | None): Host status file on Linux (None = get_host_status_path_str(); tests)
 
     Returns:
         dict: safe_bool, reason_str, pause_end_str (or None), days_left (or None)
     """
-    # OFF WINDOWS THERE IS NO WINDOWS UPDATE (CI, LINUX TESTS)
+    # THE FACTS: THE REGISTRY ON WINDOWS, THE HOST STATUS FILE ON LINUX (so-vm), NOTHING ELSEWHERE (NOT SAFE)
     platform_str = sys.platform if platform_str_in is None else str(platform_str_in)
-    if reader_in is None and platform_str != "win32":
-        return {"safe_bool": True, "reason_str": "not applicable (not Windows)", "pause_end_str": None, "days_left": None}
-    reader = reader_in if reader_in is not None else WindowsRegistryReader()
     now_utc = now_utc_in or datetime.datetime.now(datetime.timezone.utc)
+    reader = reader_in
+    if reader is None and platform_str == "win32":
+        reader = WindowsRegistryReader()
+    elif reader is None and platform_str.startswith("linux"):
+        status_path_str = get_host_status_path_str() if status_path_str_in is None else str(status_path_str_in)
+        try:
+            reader = HostStatusReader(get_host_status_file_dict(status_path_str, now_utc))
+        except ValueError as error:
+            return {"safe_bool": False, "reason_str": str(error), "pause_end_str": None, "days_left": None}
+    elif reader is None:
+        return {"safe_bool": False, "reason_str": f"no Windows Update facts on this platform ({platform_str})",
+                "pause_end_str": None, "days_left": None}
     # A PENDING RESTART FIRST: IT CAN HAPPEN WHATEVER THE PAUSE SAYS
     try:
         for key_str in UPDATE_RESTART_KEY_LIST:
@@ -764,7 +932,8 @@ def add_job_dict(path_dict_in, design_str_in, note_str_in="", n_jobs_in=None, no
     guard_dict = get_checked_update_guard_dict()
     if not guard_dict["safe_bool"]:
         raise ValueError(f"not adding the job: {guard_dict['reason_str']}. Renew the pause (Settings > Windows Update > "
-                         f"Pause updates > Pick a date) or restart first, then add again.")
+                         f"Pause updates > Pick a date) or restart first (on so-vm: or restore the host status feed, "
+                         f"task 'SO VM status' on nicodesktop), then add again.")
     now = now_in or datetime.datetime.now()
     # A SHORT RANDOM PART: WINDOWS CLOCKS TICK ABOUT EVERY 15 MS, SO TWO JOBS ADDED TOGETHER SHARE A TIMESTAMP
     job_id_str = f"{now.strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex[:6]}_{Path(design_str).name}"
@@ -2056,7 +2225,8 @@ def watch_queue(path_dict_in, interval_seconds_in=DEFAULT_WATCH_INTERVAL_SECONDS
                         path_dict_in, f"update_guard_{stamp_str}", "Stock Overflow: jobs wait (Windows Update guard)",
                         f"The runner on {socket.gethostname()} starts no job: {guard_dict['reason_str']}.\n"
                         "Renew the pause (Settings > Windows Update > Pause updates > Pick a date), or install the updates "
-                        "and restart with STOP set, then pause again. The jobs start by themselves once the guard is safe.\n")
+                        "and restart with STOP set, then pause again. On so-vm: check that the host status feed runs "
+                        "(task 'SO VM status' on nicodesktop). The jobs start by themselves once the guard is safe.\n")
                     guard_reason_sent_str = reason_key_str
                 make_runner_folder_list(path_dict_in)
                 write_state_dict(path_dict_in, None)
