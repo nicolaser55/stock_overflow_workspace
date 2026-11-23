@@ -17,7 +17,9 @@ and two header lines (format, trees). No host, time or root path, so the same da
 both systems. make prints the counts and the manifest's own SHA-256.
 
 compare PASSes when the trees are the same, no L line exists, every file has the same size and hash, every folder of A
-is in B, and every folder only in B is empty in B (the folders vm/setup_vm.sh makes). Exit 0 PASS, 1 FAIL, 2 usage.
+is in B, and every folder only in B is empty in B (the folders vm/setup_vm.sh makes). Items only in B under a VM-only
+folder (VM_ONLY_FOLDER_LIST: control/host_status, the host status feed, 2026-11-23) are listed as INFO, not compared.
+Exit 0 PASS, 1 FAIL, 2 usage.
 """
 import argparse
 import concurrent.futures
@@ -28,6 +30,9 @@ import sys
 FORMAT_LINE_STR = "# so-data-manifest 1"
 CHUNK_INT = 8 * 1024 * 1024
 LONG_PATH_INT = 240
+# Folders that exist only on the VM and are written there (the host status feed, vm/host_status_receive.py): what B holds
+# under them and A does not is reported, never a FAIL. Anything A holds there is still compared.
+VM_ONLY_FOLDER_LIST = ["data/control/host_status"]
 
 
 def walk_tree(root_str, tree_str):
@@ -169,9 +174,12 @@ def cmd_compare(args):
         elif kind_str == "F" and (other[1] != hash_str or other[2] != size_str):
             add("different size or hash", rel_str)
     b_dir_set = set()
+    vm_only_list = []
     for rel_str, (kind_str, _hash_str, _size_str) in b_dict.items():
         if kind_str == "L":
             add("link or other item in B", rel_str)
+        elif rel_str not in a_dict and any(rel_str == f or rel_str.startswith(f + "/") for f in VM_ONLY_FOLDER_LIST):
+            vm_only_list.append(rel_str)
         elif rel_str not in a_dict:
             if kind_str == "F":
                 add("file only in B (extra in the copy)", rel_str)
@@ -190,6 +198,8 @@ def cmd_compare(args):
           f"B: {sum(1 for v in b_dict.values() if v[0] == 'F')} files, {sum(1 for v in b_dict.values() if v[0] == 'D')} folders")
     print(f"INFO  {len(allowed_list)} empty folders only in B (made by vm/setup_vm.sh): {', '.join(allowed_list[:20])}"
           + (" ..." if len(allowed_list) > 20 else ""))
+    if vm_only_list:
+        print(f"INFO  {len(vm_only_list)} items only in B under VM-only folders (not compared): {', '.join(sorted(vm_only_list)[:20])}")
     for label_str, item_list in sorted(problem_dict.items()):
         print(f"FAIL  {label_str}: {len(item_list)}")
         for rel_str in item_list[:20]:

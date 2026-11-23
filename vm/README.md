@@ -39,8 +39,8 @@ The install and test steps are in the project runbooks `claude/RUNBOOK_2026-11-1
 ## Notes
 
 - **Host status feed.** The writer is nicodesktop's scheduled task "SO VM status" (SYSTEM, every 5 minutes; in the
-  infra repository, `vm_status/`). The file `control/host_status/host_status.json` exists only on the VM: a manifest
-  comparison with Windows must leave `control/host_status` out. The update guard on Linux (judge PR) reads it and fails
+  infra repository, `vm_status/`). The file `control/host_status/host_status.json` exists only on the VM:
+  `data_manifest.py compare` lists what the VM holds there as INFO and does not compare it. The update guard on Linux (judge PR) reads it and fails
   closed when it is missing, malformed or older than 15 minutes by the VM's own clock (`received_utc`).
 - **Postfix warning (accepted, 2026-11-23).** At a start, Postfix copies `/etc/resolv.conf` into its chroot and then
   warns "not owned by root: /var/spool/postfix/etc/resolv.conf" (the copy keeps the owner of systemd-resolved's stub).
