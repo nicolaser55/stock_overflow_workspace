@@ -10,8 +10,9 @@
 #   so_git      only its proxy, 127.0.0.1:3130 (allow-list: github.com, api.github.com)
 #   tinyproxy   DNS through the local stub, and TCP 443 to public addresses
 #   postfix     its own loopback, and TCP 587 to public addresses (relayhost [smtp.gmail.com]:587)
+#   so_host     nothing (it only answers its own SSH login, an established connection; 2026-11-23)
 # Private, link-local, CGNAT (tailnet) and VirtualBox NAT (10.0.2.0/24, which reaches nicodesktop's own loopback)
-# ranges are refused for all six. Other accounts (root, nico, system services) are not restricted here.
+# ranges are refused for all seven. Other accounts (root, nico, system services) are not restricted here.
 
 table inet so_egress
 delete table inet so_egress
@@ -39,6 +40,7 @@ table inet so_egress {
         meta skuid "so_git" jump git
         meta skuid "tinyproxy" jump proxy
         meta skuid "postfix" jump relay
+        meta skuid "so_host" jump host_status
     }
 
     chain runner {
@@ -69,6 +71,10 @@ table inet so_egress {
         ip daddr { 127.0.0.53, 127.0.0.54 } meta l4proto { tcp, udp } th dport 53 accept
         ip daddr != @not_public4 tcp dport 443 accept
         ip6 daddr != @not_public6 tcp dport 443 accept
+        counter reject
+    }
+
+    chain host_status {
         counter reject
     }
 

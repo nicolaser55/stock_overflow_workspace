@@ -2,7 +2,11 @@
 # vm/setup_vm.sh (2026-11-19): set up so-vm for Stock Overflow (step 3 of claude/DESIGN_2026-11-18_linux_vm.md).
 #
 #   sudo bash vm/setup_vm.sh --agent-key <nicosls_sovm_agent.pub> --mail-to <address> --relay-user <mailbot address>
+#        [--status-key <so_vm_status_ed25519.pub>] [--status-from <address>]
 #   sudo bash vm/setup_vm.sh --ci --agent-key <throwaway.pub> --mail-to <address>      (the linux-setup CI job)
+#
+# --status-key installs the key of nicodesktop's task "SO VM status" for so_host (2026-11-23), limited to
+# --status-from (default 100.123.162.2, nicodesktop's tailnet address). Without --status-key an installed key is kept.
 #
 # Run from a clone of the repository (any folder; the script finds the repository from its own path). It can be run
 # again: every step checks what is there and only adds or corrects. It ends with vm/check_vm_access.sh, which tries
@@ -16,9 +20,11 @@
 #    4. Accounts: so_runner, so_agent, so_planner (login shells, no password), so_git (system, no shell); groups
 #       so_data (nico, so_runner), so_grade_readers (so_planner), so_status_readers (so_agent), so_git_readers
 #       (nico, so_runner, so_agent), so_inbox (so_agent, so_git). so_agent is in no grades group (decided 2026-11-19). umask 027 for all of them.
+#       so_host (system, 2026-11-23): receives the host's Windows Update facts; in no project group.
 #    5. Folders, owners, modes and ACLs (design section 3, with the decisions of 2026-11-19); the data folders from
 #       vm/data_acl.conf, applied to everything below them too (vm/data_acl.sh, 2026-11-21).
-#    6. sshd: AllowUsers nico so_agent, the so_agent Match block, so_agent's key.
+#    6. sshd: AllowUsers nico so_agent so_host, the so_agent and so_host Match blocks, so_agent's key, the status
+#       receiver /usr/local/lib/so/so-host-status and so_host's key file (root-owned, outside its home).
 #    7. Python: uv (pinned, hash-checked) installs CPython 3.12.0 into /opt/so/python; the venv /opt/so/venvs/main gets
 #       requirements/venv_main_hashes_linux.txt with --require-hashes --no-deps.
 #    8. The allow-list proxies (so-proxy@planner, so-proxy@git) and the local mail relay (Postfix).
@@ -42,9 +48,11 @@ MAIL_TO=""
 RELAY_USER=""
 SKIP_PYTHON=0
 SKIP_CHECK=0
+STATUS_KEY_FILE=""
+STATUS_FROM="100.123.162.2"
 
 usage() {
-    sed -n '3,6p' "$0"
+    sed -n '3,9p' "$0"
     exit 3
 }
 
@@ -54,6 +62,8 @@ while [ $# -gt 0 ]; do
         --agent-key) AGENT_KEY_FILE="${2:-}"; shift ;;
         --mail-to) MAIL_TO="${2:-}"; shift ;;
         --relay-user) RELAY_USER="${2:-}"; shift ;;
+        --status-key) STATUS_KEY_FILE="${2:-}"; shift ;;
+        --status-from) STATUS_FROM="${2:-}"; shift ;;
         --skip-python) SKIP_PYTHON=1 ;;
         --skip-check) SKIP_CHECK=1 ;;
         -h|--help) usage ;;
@@ -92,6 +102,16 @@ AGENT_KEY_LINE="$(tr -d '\r' < "$AGENT_KEY_FILE" | grep -v '^\s*$' || true)"
 [ "$(printf '%s\n' "$AGENT_KEY_LINE" | wc -l)" -eq 1 ] || die "$AGENT_KEY_FILE must hold exactly one key line"
 case "$AGENT_KEY_LINE" in ssh-ed25519\ AAAA*) ;; *) die "$AGENT_KEY_FILE is not an ssh-ed25519 public key" ;; esac
 case "$AGENT_KEY_LINE" in *PRIVATE*) die "$AGENT_KEY_FILE looks like a private key" ;; esac
+[[ "$STATUS_FROM" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "--status-from must be one IPv4 address (nicodesktop's tailnet address)"
+STATUS_KEY_LINE=""
+if [ -n "$STATUS_KEY_FILE" ]; then
+    [ -r "$STATUS_KEY_FILE" ] || die "cannot read --status-key $STATUS_KEY_FILE"
+    STATUS_KEY_LINE="$(tr -d '\r' < "$STATUS_KEY_FILE" | grep -v '^\s*$' || true)"
+    [ "$(printf '%s\n' "$STATUS_KEY_LINE" | wc -l)" -eq 1 ] || die "$STATUS_KEY_FILE must hold exactly one key line"
+    case "$STATUS_KEY_LINE" in ssh-ed25519\ AAAA*) ;; *) die "$STATUS_KEY_FILE is not an ssh-ed25519 public key" ;; esac
+    case "$STATUS_KEY_LINE" in *PRIVATE*) die "$STATUS_KEY_FILE looks like a private key" ;; esac
+    [ "$STATUS_KEY_LINE" != "$AGENT_KEY_LINE" ] || die "the status key must not be the agent's key"
+fi
 [[ "$MAIL_TO" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "--mail-to <address> is required"
 if [ "$CI_MODE" -eq 0 ] && [ -z "$RELAY_USER" ] && [ ! -s /etc/postfix/sasl_passwd ]; then
     die "--relay-user <mailbot address> is required on the first run (the Gmail account that sends the emails)"
@@ -154,6 +174,12 @@ done
 if ! id so_git >/dev/null 2>&1; then
     useradd --system --user-group --home-dir /var/lib/so_git --create-home --shell /usr/sbin/nologin so_git
 fi
+# so_host: a shell (sshd runs the forced command with it), no password, a root-owned home it cannot write
+if ! id so_host >/dev/null 2>&1; then
+    useradd --system --user-group --home-dir /var/lib/so_host --no-create-home --shell /bin/sh so_host
+fi
+install -d -m 755 -o root -g root /var/lib/so_host
+passwd -l so_host >/dev/null 2>&1 || true
 set_members() {  # group, then the only members it may have
     local group_str="$1"; shift
     gpasswd -M "$(IFS=,; echo "$*")" "$group_str" >/dev/null
@@ -220,12 +246,27 @@ info "folders set; $(find /srv/so -maxdepth 3 -type d | wc -l) folders under /sr
 # -------------------------------------------------------------------------------------------------------------------
 step "6. sshd"
 if [ -f /etc/ssh/sshd_config.d/00-so-hardening.conf ] && ! cmp -s /etc/ssh/sshd_config.d/00-so-hardening.conf "$VM_DIR/ssh/00-so-hardening.conf"; then
-    cp -p /etc/ssh/sshd_config.d/00-so-hardening.conf "/etc/ssh/00-so-hardening.conf.before-step3"
-    info "changes to 00-so-hardening.conf (old copy in /etc/ssh/00-so-hardening.conf.before-step3):"
-    diff /etc/ssh/00-so-hardening.conf.before-step3 "$VM_DIR/ssh/00-so-hardening.conf" | sed 's/^/      /' || true
+    # A dated copy (2026-11-23): a later change must not overwrite the copy kept from step 3
+    old_copy_str="/etc/ssh/00-so-hardening.conf.before-$(date +%Y%m%d%H%M%S)"
+    cp -p /etc/ssh/sshd_config.d/00-so-hardening.conf "$old_copy_str"
+    info "changes to 00-so-hardening.conf (old copy in $old_copy_str):"
+    diff "$old_copy_str" "$VM_DIR/ssh/00-so-hardening.conf" | sed 's/^/      /' || true
 fi
 install -m 644 -o root -g root "$VM_DIR/ssh/00-so-hardening.conf" /etc/ssh/sshd_config.d/00-so-hardening.conf
 install -m 644 -o root -g root "$VM_DIR/ssh/99-so-agent.conf" /etc/ssh/sshd_config.d/99-so-agent.conf
+install -m 644 -o root -g root "$VM_DIR/ssh/98-so-host.conf" /etc/ssh/sshd_config.d/98-so-host.conf
+# The status receiver (so_host's forced command) and so_host's key file: root-owned, so so_host can change neither
+install -d -m 755 -o root -g root /usr/local/lib/so /etc/so/ssh
+install -m 755 -o root -g root "$VM_DIR/host_status_receive.py" /usr/local/lib/so/so-host-status
+if [ -n "$STATUS_KEY_LINE" ]; then
+    printf 'from="%s",restrict %s\n' "$STATUS_FROM" "$STATUS_KEY_LINE" > /etc/so/ssh/so_host_authorized_keys.new
+    chmod 644 /etc/so/ssh/so_host_authorized_keys.new
+    [ "$(ssh-keygen -lf /etc/so/ssh/so_host_authorized_keys.new | wc -l)" -eq 1 ] || die "the staged so_host key file does not hold exactly one key"
+    mv /etc/so/ssh/so_host_authorized_keys.new /etc/so/ssh/so_host_authorized_keys
+elif [ ! -e /etc/so/ssh/so_host_authorized_keys ]; then
+    install -m 644 -o root -g root /dev/null /etc/so/ssh/so_host_authorized_keys
+fi
+chown root:root /etc/so/ssh/so_host_authorized_keys && chmod 644 /etc/so/ssh/so_host_authorized_keys
 [ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ] && sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config.d/50-cloud-init.conf
 install -d -m 700 -o so_agent -g so_agent /home/so_agent/.ssh
 printf '%s\n' "$AGENT_KEY_LINE" > /home/so_agent/.ssh/authorized_keys.new
@@ -236,6 +277,11 @@ mv /home/so_agent/.ssh/authorized_keys.new /home/so_agent/.ssh/authorized_keys
 sshd -t || die "sshd -t failed; nothing was reloaded"
 systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || systemctl restart ssh
 info "sshd reloaded; so_agent key $(ssh-keygen -lf /home/so_agent/.ssh/authorized_keys | awk '{print $2}')"
+if [ -s /etc/so/ssh/so_host_authorized_keys ]; then
+    info "so_host key $(ssh-keygen -lf /etc/so/ssh/so_host_authorized_keys | awk '{print $2}') (from $(grep -o 'from="[^"]*"' /etc/so/ssh/so_host_authorized_keys | cut -d'"' -f2))"
+else
+    info "so_host has no key yet (run again with --status-key once the host's key exists)"
+fi
 
 # -------------------------------------------------------------------------------------------------------------------
 step "7. Python $PYTHON_VERSION and the venv"
@@ -359,7 +405,7 @@ install -m 644 -o root -g root "$VM_DIR/dbus/so-no-resolve.conf" /etc/dbus-1/sys
 systemctl reload dbus.service 2>/dev/null || systemctl reload dbus-broker.service 2>/dev/null || true
 install -d -m 755 /etc/systemd/system/systemd-resolved.service.d
 install -m 644 -o root -g root "$VM_DIR/systemd/dropins/systemd-resolved-so.conf" /etc/systemd/system/systemd-resolved.service.d/so.conf
-deny_str="u:so_runner:---,u:so_agent:---,u:so_planner:---,u:so_git:---"
+deny_str="u:so_runner:---,u:so_agent:---,u:so_planner:---,u:so_git:---,u:so_host:---"
 [ -d /run/systemd/resolve ] && setfacl -m "$deny_str" /run/systemd/resolve
 if systemctl list-unit-files tailscaled.service >/dev/null 2>&1 && [ -d /run/tailscale ]; then
     install -d -m 755 /etc/systemd/system/tailscaled.service.d
@@ -506,7 +552,8 @@ step "13. Access check"
 if [ "$SKIP_CHECK" -eq 1 ]; then
     info "skipped (--skip-check)"
 else
-    check_args=(--mail-to "$MAIL_TO" --agent-key "$AGENT_KEY_FILE")
+    check_args=(--mail-to "$MAIL_TO" --agent-key "$AGENT_KEY_FILE" --status-from "$STATUS_FROM")
+    [ -n "$STATUS_KEY_FILE" ] && check_args+=(--status-key "$STATUS_KEY_FILE")
     [ "$CI_MODE" -eq 1 ] && check_args+=(--ci)
     bash "$VM_DIR/check_vm_access.sh" "${check_args[@]}"
 fi

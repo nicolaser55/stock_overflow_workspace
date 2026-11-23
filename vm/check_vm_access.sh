@@ -4,6 +4,7 @@
 #
 #   sudo bash vm/check_vm_access.sh --mail-to <address> --agent-key <nicosls_sovm_agent.pub>
 #        [--expect-agent-fingerprint SHA256:...] [--ci] [--send-test-mail]
+#        [--status-from <address>] [--status-key <so_vm_status_ed25519.pub>]
 #
 # A refusal counts only when the system says "Permission denied" (or the network refuses): a missing path is a FAIL,
 # as in scripts/check_agent_access.py. It writes small probe files (.so_access_probe) and removes them again; it opens
@@ -15,6 +16,8 @@ MAIL_TO=""
 AGENT_KEY_FILE=""
 EXPECT_FPR=""
 SEND_MAIL=0
+STATUS_FROM="100.123.162.2"
+STATUS_KEY_FILE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --ci) CI_MODE=1 ;;
@@ -22,6 +25,8 @@ while [ $# -gt 0 ]; do
         --agent-key) AGENT_KEY_FILE="${2:-}"; shift ;;
         --expect-agent-fingerprint) EXPECT_FPR="${2:-}"; shift ;;
         --send-test-mail) SEND_MAIL=1 ;;
+        --status-from) STATUS_FROM="${2:-}"; shift ;;
+        --status-key) STATUS_KEY_FILE="${2:-}"; shift ;;
         *) echo "unknown argument: $1" >&2; exit 3 ;;
     esac
     shift
@@ -40,6 +45,9 @@ AGENT_WS=/home/so_agent/agent_workspace
 PLANNER_DIR=/home/so_planner/planner
 VENV=/opt/so/venvs/main
 PROBE=.so_access_probe
+HOST_STATUS_DIR=$DATA/control/host_status
+RECEIVER=/usr/local/lib/so/so-host-status
+STATUS_KEYS=/etc/so/ssh/so_host_authorized_keys
 
 ok_count=0
 fail_count=0
@@ -104,15 +112,17 @@ https() {
 section "Probe files (removed at the end, also when the check is interrupted)"
 # The folders that get a probe; the trap removes probes (and the write-test files) from all of them on any exit
 PROBE_DIR_LIST=($DATA $DATA/store01_rawzone $DATA/store02_workzone $DATA/store03_goldzone $ZONE4 $ZONE4/judge
-    $ZONE4/queue/pending $ZONE4/runs $ZONE4/visible $ZONE4/visible/grades $ZONE4/visible/status $DATA/control
+    $ZONE4/queue/pending $ZONE4/runs $ZONE4/visible $ZONE4/visible/grades $ZONE4/visible/status $DATA/control $HOST_STATUS_DIR
     /srv/so/quarantine /srv/so/holdout $PLANNER_DIR/brief $PLANNER_DIR/plans /home/nico)
 tmp_clone=""
+tmp_status=""
 cleanup_probes() {
     local dir_str
     for dir_str in "${PROBE_DIR_LIST[@]}"; do
         [ -d "$dir_str" ] && find "$dir_str" -maxdepth 1 -type f \( -name "$PROBE" -o -name '.so_access_write.*' \) -delete 2>/dev/null
     done
     case "$tmp_clone" in /home/so_agent/.so_access_clone.*) rm -rf -- "$tmp_clone" ;; esac
+    case "$tmp_status" in /var/tmp/.so_status_check.*) rm -rf -- "$tmp_status" ;; esac
     return 0
 }
 trap cleanup_probes EXIT
@@ -131,6 +141,7 @@ add_probe so_runner $ZONE4/visible
 add_probe so_runner $ZONE4/visible/grades
 add_probe so_runner $ZONE4/visible/status
 add_probe nico $DATA/control
+add_probe so_host $HOST_STATUS_DIR
 add_probe nico /srv/so/quarantine
 add_probe nico /srv/so/holdout
 add_probe nico $PLANNER_DIR/brief
@@ -179,9 +190,23 @@ expect denied  so_planner read:$ZONE4/visible/status/$PROBE "visible/status file
 expect denied  so_git list:$DATA "data root"
 expect allowed nico write:$ZONE4/judge "judge/"
 expect allowed nico write:$DATA/control "control/"
+# control/host_status/ (2026-11-23): only so_host writes; the runner's group reads (the update guard)
+expect allowed so_runner read:$HOST_STATUS_DIR/$PROBE "host_status file"
+expect denied  so_runner write:$HOST_STATUS_DIR "control/host_status/"
+expect allowed nico read:$HOST_STATUS_DIR/$PROBE "host_status file"
+expect denied  nico write:$HOST_STATUS_DIR "control/host_status/"
+expect allowed so_host write:$HOST_STATUS_DIR "control/host_status/"
+expect denied  so_host write:$DATA/control "control/ (STOP)"
+expect denied  so_host read:$DATA/control/$PROBE "control file (STOP)"
+expect denied  so_host list:$DATA "data root"
+expect denied  so_host list:$ZONE4 "store04"
+expect denied  so_host read:$DATA/store01_rawzone/$PROBE "store01 file"
+for user_str in so_agent so_planner so_git; do
+    expect denied $user_str read:$HOST_STATUS_DIR/$PROBE "host_status file"
+done
 
 section "Quarantine, holdout, homes and clones"
-for user_str in so_runner so_agent so_planner so_git; do
+for user_str in so_runner so_agent so_planner so_git so_host; do
     expect denied $user_str read:/srv/so/quarantine/$PROBE "quarantine file"
     expect denied $user_str read:/srv/so/holdout/$PROBE "holdout file"
     expect denied $user_str read:/home/nico/$PROBE "nico's home"
@@ -314,7 +339,11 @@ https refused so_git https://raw.githubusercontent.com/ http://127.0.0.1:3130 "r
 https refused so_git https://pypi.org/ http://127.0.0.1:3130 "pypi.org through its proxy"
 https refused so_git https://github.com/ - "github.com direct"
 tcp refused so_git 127.0.0.1 3129 "planner proxy"
-for user_str in so_runner so_agent so_planner so_git; do
+tcp refused so_host 1.1.1.1 443 "internet"
+tcp refused so_host 127.0.0.1 25 "mail relay"
+tcp refused so_host 127.0.0.1 22 "loopback ssh"
+tcp refused so_host 100.100.100.100 80 "tailnet"
+for user_str in so_runner so_agent so_planner so_git so_host; do
     if as_user "$user_str" timeout 8 getent ahosts example.com >/dev/null 2>&1; then fail "$user_str resolves names (getent)"
     else ok "$user_str has no name lookups (getent)"; fi
     if as_user "$user_str" timeout 8 "$VENV/bin/python" -c 'import socket; socket.getaddrinfo("example.com", 443)' >/dev/null 2>&1; then
@@ -322,14 +351,18 @@ for user_str in so_runner so_agent so_planner so_git; do
 done
 timeout 8 getent ahosts example.com >/dev/null 2>&1 && ok "root still resolves names" || fail "root cannot resolve names"
 if [ -d /run/tailscale ]; then
-    for user_str in so_runner so_agent so_planner so_git; do
+    for user_str in so_runner so_agent so_planner so_git so_host; do
         as_user "$user_str" timeout 8 tailscale status >/dev/null 2>&1 && fail "$user_str can use tailscaled" || ok "$user_str cannot use tailscaled"
     done
 fi
 nft list table inet so_egress >/dev/null 2>&1 && ok "nft table inet so_egress loaded" || fail "nft table inet so_egress missing"
 if [ "$CI_MODE" -eq 0 ]; then
     nft list table inet so_filter >/dev/null 2>&1 && ok "nft table inet so_filter (input) loaded" || fail "nft table inet so_filter missing"
-    nft list tables | grep -qE 'table ip(6)? filter' && ok "Tailscale's tables still loaded" || fail "Tailscale's tables are missing (was nftables restarted?)"
+    # A captured string and bash's own match, no pipe (2026-11-23, step-4 bug 2: grep -q ending early under pipefail gave
+    # exit 141 when the match was the first line, a false FAIL)
+    tables_str="$(nft list tables 2>/dev/null)"
+    tables_re='table ip6? filter'
+    [[ "$tables_str" =~ $tables_re ]] && ok "Tailscale's tables still loaded" || fail "Tailscale's tables are missing (was nftables restarted?)"
     grep -q '^include "/etc/nftables.d/so_egress.nft"' /etc/nftables.conf && ok "so_egress included from /etc/nftables.conf" || fail "/etc/nftables.conf lacks the so_egress include"
 fi
 
@@ -381,7 +414,7 @@ check_sshd so_runner allowtcpforwarding no
 check_sshd nico passwordauthentication no
 check_sshd nico kbdinteractiveauthentication no
 check_sshd nico permitrootlogin no
-check_sshd nico allowusers "nico so_agent"
+check_sshd nico allowusers "nico so_agent so_host"
 key_count_int="$(ssh-keygen -lf /home/so_agent/.ssh/authorized_keys 2>/dev/null | wc -l)"
 [ "$key_count_int" -eq 1 ] && ok "so_agent has exactly one authorized key" || fail "so_agent has $key_count_int authorized keys"
 if [ -n "$AGENT_KEY_FILE" ]; then
@@ -390,10 +423,78 @@ if [ -n "$AGENT_KEY_FILE" ]; then
     got_fpr="$(ssh-keygen -lf /home/so_agent/.ssh/authorized_keys | awk '{print $2}')"
     [ "$got_fpr" = "$want_fpr" ] && ok "so_agent key $got_fpr" || fail "so_agent key $got_fpr, expected $want_fpr"
 fi
-for user_str in so_runner so_agent so_planner so_git; do
+for user_str in so_runner so_agent so_planner so_git so_host; do
     [ "$(getent shadow "$user_str" | cut -d: -f2 | cut -c1)" = "!" ] || [ "$(getent shadow "$user_str" | cut -d: -f2)" = "*" ] \
         && ok "$user_str has no usable password" || fail "$user_str has a password"
 done
+
+section "Host status feed (so_host, 2026-11-23)"
+[ "$(getent passwd so_host | cut -d: -f7)" = "/bin/sh" ] && ok "so_host shell /bin/sh (sshd runs the forced command with it)" || fail "so_host shell is $(getent passwd so_host | cut -d: -f7)"
+[ "$(id -Gn so_host)" = "so_host" ] && ok "so_host is in no other group" || fail "so_host groups: $(id -Gn so_host)"
+[ "$(stat -c '%U:%G %a' /var/lib/so_host 2>/dev/null)" = "root:root 755" ] && ok "so_host's home is root-owned" || fail "so_host's home: $(stat -c '%U:%G %a' /var/lib/so_host 2>&1)"
+[ "$(stat -c '%U:%G %a' $RECEIVER 2>/dev/null)" = "root:root 755" ] && ok "receiver root-owned, 0755" || fail "receiver: $(stat -c '%U:%G %a' $RECEIVER 2>&1)"
+cmp -s $RECEIVER "$REPO_DIR/vm/host_status_receive.py" && ok "receiver equals vm/host_status_receive.py" || fail "receiver differs from the repository"
+[ "$(stat -c '%U:%G %a' $STATUS_KEYS 2>/dev/null)" = "root:root 644" ] && ok "so_host key file root-owned, 0644" || fail "so_host key file: $(stat -c '%U:%G %a' $STATUS_KEYS 2>&1)"
+[ "$(stat -c '%U:%G %a' /etc/so/ssh 2>/dev/null)" = "root:root 755" ] && ok "/etc/so/ssh root-owned, 0755" || fail "/etc/so/ssh: $(stat -c '%U:%G %a' /etc/so/ssh 2>&1)"
+if [ -s $STATUS_KEYS ]; then
+    status_line_str="$(grep -v '^\s*$' $STATUS_KEYS)"
+    [ "$(ssh-keygen -lf $STATUS_KEYS 2>/dev/null | wc -l)" -eq 1 ] && ok "so_host has exactly one key" || fail "so_host key file holds $(ssh-keygen -lf $STATUS_KEYS 2>/dev/null | wc -l) keys"
+    case "$status_line_str" in
+        "from=\"$STATUS_FROM\",restrict ssh-ed25519 "*) ok "so_host key limited: from=\"$STATUS_FROM\",restrict" ;;
+        *) fail "so_host key line does not start with from=\"$STATUS_FROM\",restrict ssh-ed25519" ;;
+    esac
+    if [ -n "$STATUS_KEY_FILE" ]; then
+        want_fpr="$(ssh-keygen -lf "$STATUS_KEY_FILE" | awk '{print $2}')"
+        got_fpr="$(ssh-keygen -lf $STATUS_KEYS | awk '{print $2}')"
+        [ "$got_fpr" = "$want_fpr" ] && ok "so_host key $got_fpr" || fail "so_host key $got_fpr, expected $want_fpr"
+    fi
+else
+    ok "so_host has no key yet (the host cannot send; the update guard on Linux then fails closed)"
+fi
+sshd_host() { sshd -T -C "user=so_host,host=check,addr=$STATUS_FROM" 2>/dev/null | grep -i "^$1 " | cut -d' ' -f2- | paste -sd' ' -; }
+for pair_str in "forcecommand $RECEIVER" "disableforwarding yes" "permittty no" "permituserrc no" \
+                "authorizedkeysfile $STATUS_KEYS" "maxsessions 1" "authenticationmethods publickey"; do
+    got_str="$(sshd_host "${pair_str%% *}")"
+    [ "$got_str" = "${pair_str#* }" ] && ok "sshd so_host ${pair_str%% *} $got_str" || fail "sshd so_host ${pair_str%% *}: expected '${pair_str#* }', got '$got_str'"
+done
+# sshd -T prints an unset forced command as "none" (servconf.c dump_cfg_string; fix 1 of PR #65)
+agent_force_str="$(sshd_t so_agent forcecommand)"
+[ "$agent_force_str" = "none" ] && ok "the so_host Match block ends with its file (so_agent forcecommand none)" \
+    || fail "so_agent forcecommand is '$agent_force_str', expected none"
+# The receiver itself, as so_host, into a scratch folder (never the real file: a test must not write facts)
+tmp_status="$(mktemp -d /var/tmp/.so_status_check.XXXXXX)"
+chown so_host:so_host "$tmp_status"
+receive() { as_user so_host "$RECEIVER" --target-dir "$tmp_status"; }
+k1='SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired'
+k2='SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending'
+# A restart pending in the sample: even if it were read as real facts, it says "not safe"
+good_str='{"schema":"so-host-status/1","host":"check","written_utc":"2026-01-01T00:00:00Z","restart_pending":{"'"$k1"'":true,"'"$k2"'":false},"pause":{"PauseUpdatesExpiryTime":"2026-01-30T13:59:06Z","PauseFeatureUpdatesEndTime":"2026-01-30T13:59:06Z","PauseQualityUpdatesEndTime":null},"errors":[]}'
+out_str="$(printf '%s' "$good_str" | receive 2>&1)"; rc_int=$?
+if [ "$rc_int" -eq 0 ] && [ "${out_str%% *}" = "ok" ] && [ -f "$tmp_status/host_status.json" ] \
+   && python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("received_utc") and d["restart_pending"] else 1)' "$tmp_status/host_status.json"; then
+    ok "receiver takes a valid object and adds received_utc"
+else fail "receiver on a valid object: exit $rc_int, $out_str"; fi
+[ "$(stat -c '%U %a' "$tmp_status/host_status.json" 2>/dev/null)" = "so_host 640" ] && ok "receiver writes mode 0640" || fail "receiver wrote $(stat -c '%U %a' "$tmp_status/host_status.json" 2>&1)"
+before_str="$(sha256sum "$tmp_status/host_status.json" 2>/dev/null)"
+bad_check() {  # <label> <input>
+    local out_str rc_int
+    out_str="$(printf '%s' "$2" | receive 2>&1)"; rc_int=$?
+    if [ "$rc_int" -eq 1 ] && [ "${out_str%%:*}" = "refused" ]; then ok "receiver refuses $1"
+    else fail "receiver on $1: exit $rc_int, $out_str"; fi
+}
+bad_check "an extra key" "${good_str%\}},\"x\":1}"
+bad_check "a missing key" '{"schema":"so-host-status/1"}'
+bad_check "a wrong schema" "${good_str/so-host-status\/1/so-host-status\/2}"
+bad_check "a pause time without a zone" "${good_str/2026-01-30T13:59:06Z/2026-01-30T13:59:06}"
+bad_check "a restart flag that is not true/false" "${good_str/\":true,/\":1,}"
+bad_check "non-ASCII text" "${good_str/check/ch$'\xc3\xa9'ck}"
+bad_check "more than 4096 bytes" "$(printf '%s' "$good_str"; head -c 5000 /dev/zero | tr '\0' ' ')x"
+bad_check "not JSON" "hello"
+out_str="$(printf '%s' "$good_str" | as_user so_host "$RECEIVER" --other 2>&1)"
+[ "${out_str%%:*}" = "refused" ] && ok "receiver refuses other arguments" || fail "receiver with --other: $out_str"
+[ "$(sha256sum "$tmp_status/host_status.json" 2>/dev/null)" = "$before_str" ] && ok "a refused object leaves the file unchanged" || fail "a refused object changed the file"
+[ -z "$(find "$tmp_status" -name '.host_status.json.*' 2>/dev/null)" ] && ok "no temporary file left" || fail "temporary files left in $tmp_status"
+rm -rf -- "$tmp_status"; tmp_status=""
 
 section "Python and packages"
 expect allowed so_runner exec:$VENV/bin/python "project python"
